@@ -27,9 +27,11 @@ type Element struct {
 	State string `json:"state"`
 }
 
+
 func main() {
 	element := flag.String("element", "", "element_id to query")
 	timeout := flag.Duration("timeout", 15*time.Second, "HTTP timeout")
+	cmd := flag.String("cmd", "", "run a command and exit, returning the command")
 	verbose := flag.Bool("v", false, "print request details")
 	flag.Parse()
 
@@ -92,6 +94,16 @@ func main() {
 	}
 	defer conn.CloseNow()
 
+	if *cmd != "" {
+		out, err := runOnce(ctx, conn, el.Name+"#", *cmd)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "command failed:", err)
+			os.Exit(1)
+		}
+		fmt.Println(clean(out, el.Name+"#"))
+		return
+	}
+
 	fd := int(os.Stdin.Fd())
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
@@ -128,7 +140,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "\r\nreadfailed:", err)
 			break
 		}
-		os.Stdout.Write(data)
+		if *verbose {
+			fmt.Printf("%q\r\n", data)
+		} else {
+			os.Stdout.Write(data)
+		}
 	}
 
 }
