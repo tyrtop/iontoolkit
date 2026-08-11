@@ -1,32 +1,31 @@
 package main
 
 import (
-	"fmt"
-	"net/http"
-	"os"
-	"io"
-	"flag"
-	"time"
-	"encoding/json"
-	"context"
 	"bytes"
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
 	"github.com/coder/websocket"
 	"golang.org/x/term"
+	"io"
+	"net/http"
+	"os"
+	"time"
 )
 
 const browserUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
 
 type Element struct {
-	ID string `json:"id"`
-	Name string `json:"name"`
-	HWID string `json:"hw_id"`
-	Model string `json:"model_name"`
-	Software string `json:"software_version"`
-	SiteID string `json:"site_id"`
-	Connected bool `json:"connected"`
-	State string `json:"state"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	HWID      string `json:"hw_id"`
+	Model     string `json:"model_name"`
+	Software  string `json:"software_version"`
+	SiteID    string `json:"site_id"`
+	Connected bool   `json:"connected"`
+	State     string `json:"state"`
 }
-
 
 func main() {
 	element := flag.String("element", "", "element_id to query")
@@ -56,7 +55,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "bad request:", err)
 		os.Exit(1)
 	}
-	
+
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", browserUA)
@@ -68,13 +67,13 @@ func main() {
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
-		
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		fmt.Fprintf(os.Stderr, "status %s: %s\n", resp.Status, body)
 		os.Exit(1)
 	}
-	
+
 	var el Element
 	if err := json.NewDecoder(resp.Body).Decode(&el); err != nil {
 		fmt.Fprintln(os.Stderr, "decode failed:", err)
@@ -148,4 +147,3 @@ func main() {
 	}
 
 }
-
