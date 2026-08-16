@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 
 	"github.com/coder/websocket"
@@ -12,9 +11,12 @@ import (
 )
 
 
-func interactiveCLI(ctx context.Context, client *http.Client, cfg Config, eid string) error {
-	// TODO: lookup — same as runElement, through the decode.
-	// You need el.Name only for the verbose banner here.
+func interactiveCLI(ctx context.Context, scm *SCM, cfg Config, eid string) error {
+	el, err := scm.lookupElement(ctx, eid)
+	if err != nil {
+		return fmt.Errorf("element %s: lookupElement: %w", eid, err)
+	}
+	fmt.Fprintf(os.Stderr, "%s, %s %s %s connected=%v\n", el.Name, el.HWID, el.Model, el.Software, el.Connected)	
 
 	conn, err := dialToolkit(ctx, cfg.Token, eid)
 	if err != nil {

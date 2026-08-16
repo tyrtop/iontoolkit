@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"io"
+	"golang.org/x/time/rate"
 )
 
 const scmBase = "https://api.sase.paloaltonetworks.com/sdwan/v3.2/api"
@@ -22,10 +23,30 @@ type Element struct {
 	State     string `json:"state"`
 }
 
-func lookupElement(ctx context.Context, client *http.Client, cfg Config, eid string) (Element, error) {
+type SCM struct {
+	client *http.Client
+	limiter *rate.Limiter
+	token string
+	verbose bool
+}
+
+func NewSCM(client *http.Client, token string, verbose bool, rps float64, burst int) *SCM {
+	return &SCM{
+		client: client, 
+		limiter: rate.NewLimiter(rate.Limit(rps), burst),
+		token: token,
+		verbose: verbose,
+	}
+}
+
+func (s *SCM) lookupElement(ctx context.Context, eid string) (Element, error) {
+	if err := s.limiter.Wait(ctx); err != nil {
+		return Element{}, fmt.Errorf("element %s: rate limit wait: %w", eid, err)
+	}
+
 	url := scmBase + "/elements/" + eid
 
-	if cfg.Verbose {
+	if s.verbose {
 		fmt.Fprintln(os.Stderr, "GET", url)
 	}
 	
@@ -34,11 +55,11 @@ func lookupElement(ctx context.Context, client *http.Client, cfg Config, eid str
 		return Element{}, fmt.Errorf("element %s: build request: %w", eid, err)
 	}
 	
-	req.Header.Set("Authorization", "Bearer "+ cfg.Token)
+	req.Header.Set("Authorization", "Bearer "+ s.token)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", browserUA)
 
-	resp, err := client.Do(req)
+	resp, err := s.client.Do(req)
 	if err != nil{
 		return Element{}, fmt.Errorf("element %s: response: %w", eid, err)
 	}

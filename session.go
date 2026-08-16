@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
@@ -16,11 +15,26 @@ func strip(s string) string {
 	return ansi.ReplaceAllString(s, "")
 }
 
-func clean(out, prompt string) string {
+func clean(out, prompt string, cmd string) string {
 	s := strip(out)
-	s = strings.TrimRight(s, " \b\r\n")
+
+	marker := prompt + " " + cmd
+	if i := strings.LastIndex(s, marker); i >= 0 {
+		s = s[i+len(marker):]
+	}
+	
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t")
+	}
+	s = strings.Join(lines, "\n")
+
+	s = strings.Trim(s, " \b\r\n")
 	s = strings.TrimSuffix(s, prompt)
-	return strings.TrimRight(s, " \r\n")
+	return strings.Trim(s, " \b\r\n")
 }
 
 func readUntil(ctx context.Context, conn *websocket.Conn, pattern string) (string, error) {
@@ -52,13 +66,7 @@ func readUntilPrompt(ctx context.Context, conn *websocket.Conn, prompt string) (
 	}
 }
 
-func runOnce(ctx context.Context, conn *websocket.Conn, prompt, cmd string) (string, error) {
-	user := os.Getenv("ION_USER")
-	pass := os.Getenv("ION_PASS")
-	if user == "" || pass == "" {
-		return "", fmt.Errorf("ION_USER and ION_PASS must be set")
-	}
-
+func runOnce(ctx context.Context, conn *websocket.Conn, prompt, user, pass, cmd string) (string, error) {
 	if _, err := readUntil(ctx, conn, "login: "); err != nil {
 		return "", fmt.Errorf("waiting for login prompt: %w", err)
 	}
@@ -79,11 +87,6 @@ func runOnce(ctx context.Context, conn *websocket.Conn, prompt, cmd string) (str
 
 	if err := conn.Write(ctx, websocket.MessageText, []byte(cmd+"\r")); err != nil {
 		return "", err
-	}
-
-	// swallow the per-character echo until the full command is drawn
-	if _, err := readUntil(ctx, conn, prompt+" "+cmd); err != nil {
-		return "", fmt.Errorf("waiting for command echo: %w", err)
 	}
 
 	return readUntilPrompt(ctx, conn, prompt)
