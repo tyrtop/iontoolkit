@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/time/rate"
+	"io"
 	"net/http"
 	"os"
-	"io"
-	"golang.org/x/time/rate"
+	"strings"
 )
 
 const scmBase = "https://api.sase.paloaltonetworks.com/sdwan/v3.2/api"
@@ -24,17 +25,17 @@ type Element struct {
 }
 
 type SCM struct {
-	client *http.Client
+	client  *http.Client
 	limiter *rate.Limiter
-	token string
+	token   string
 	verbose bool
 }
 
 func NewSCM(client *http.Client, token string, verbose bool, rps float64, burst int) *SCM {
 	return &SCM{
-		client: client, 
+		client:  client,
 		limiter: rate.NewLimiter(rate.Limit(rps), burst),
-		token: token,
+		token:   token,
 		verbose: verbose,
 	}
 }
@@ -49,21 +50,29 @@ func (s *SCM) lookupElement(ctx context.Context, eid string) (Element, error) {
 	if s.verbose {
 		fmt.Fprintln(os.Stderr, "GET", url)
 	}
-	
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return Element{}, fmt.Errorf("element %s: build request: %w", eid, err)
 	}
-	
-	req.Header.Set("Authorization", "Bearer "+ s.token)
+
+	req.Header.Set("Authorization", "Bearer "+s.token)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", browserUA)
 
 	resp, err := s.client.Do(req)
-	if err != nil{
+	if err != nil {
 		return Element{}, fmt.Errorf("element %s: response: %w", eid, err)
 	}
-	
+
+	if s.verbose {
+		for k, v := range resp.Header {
+			if strings.HasPrefix(strings.ToLower(k), "x-ratelimit") || strings.EqualFold(k, "retry-after") {
+				fmt.Fprintln(os.Stderr, k+":", v)
+			}
+		}
+	}
+
 	defer func() {
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
@@ -78,6 +87,6 @@ func (s *SCM) lookupElement(ctx context.Context, eid string) (Element, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&el); err != nil {
 		return Element{}, fmt.Errorf("element %s: json decode: %w", eid, err)
 	}
-	
+
 	return el, nil
 }

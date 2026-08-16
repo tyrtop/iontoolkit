@@ -22,7 +22,7 @@ func clean(out, prompt string, cmd string) string {
 	if i := strings.LastIndex(s, marker); i >= 0 {
 		s = s[i+len(marker):]
 	}
-	
+
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
 
@@ -66,28 +66,38 @@ func readUntilPrompt(ctx context.Context, conn *websocket.Conn, prompt string) (
 	}
 }
 
-func runOnce(ctx context.Context, conn *websocket.Conn, prompt, user, pass, cmd string) (string, error) {
+func runOnce(ctx context.Context, conn *websocket.Conn, prompt, user, pass string, cmds []string) ([]CommandOutput, error) {
 	if _, err := readUntil(ctx, conn, "login: "); err != nil {
-		return "", fmt.Errorf("waiting for login prompt: %w", err)
+		return nil, fmt.Errorf("waiting for login prompt: %w", err)
 	}
 	if err := conn.Write(ctx, websocket.MessageText, []byte(user+"\r")); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if _, err := readUntil(ctx, conn, "Password: "); err != nil {
-		return "", fmt.Errorf("waiting for password prompt: %w", err)
+		return nil, fmt.Errorf("waiting for password prompt: %w", err)
 	}
 	if err := conn.Write(ctx, websocket.MessageText, []byte(pass+"\r")); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if _, err := readUntilPrompt(ctx, conn, prompt); err != nil {
-		return "", fmt.Errorf("waiting for shell: %w", err)
+		return nil, fmt.Errorf("waiting for shell: %w", err)
 	}
 
-	if err := conn.Write(ctx, websocket.MessageText, []byte(cmd+"\r")); err != nil {
-		return "", err
+	outs := make([]CommandOutput, 0, len(cmds))
+	for _, cmd := range cmds {
+		if err := conn.Write(ctx, websocket.MessageText, []byte(cmd+"\r")); err != nil {
+			return outs, fmt.Errorf("write %q: %w", cmd, err)
+		}
+		raw, err := readUntilPrompt(ctx, conn, prompt)
+		if err != nil {
+			return outs, fmt.Errorf("read after %q: %w", cmd, err)
+		}
+		outs = append(outs, CommandOutput{
+			Command: cmd,
+			Output:  clean(raw, prompt, cmd),
+		})
 	}
-
-	return readUntilPrompt(ctx, conn, prompt)
+	return outs, nil
 }

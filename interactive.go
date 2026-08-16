@@ -10,13 +10,12 @@ import (
 	"golang.org/x/term"
 )
 
-
 func interactiveCLI(ctx context.Context, scm *SCM, cfg Config, eid string) error {
 	el, err := scm.lookupElement(ctx, eid)
 	if err != nil {
 		return fmt.Errorf("element %s: lookupElement: %w", eid, err)
 	}
-	fmt.Fprintf(os.Stderr, "%s, %s %s %s connected=%v\n", el.Name, el.HWID, el.Model, el.Software, el.Connected)	
+	fmt.Fprintf(os.Stderr, "%s, %s %s %s connected=%v\n", el.Name, el.HWID, el.Model, el.Software, el.Connected)
 
 	conn, err := dialToolkit(ctx, cfg.Token, eid)
 	if err != nil {
@@ -65,4 +64,3 @@ func interactiveCLI(ctx context.Context, scm *SCM, cfg Config, eid string) error
 		}
 	}
 }
-

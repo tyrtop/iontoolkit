@@ -2,3 +2,4 @@ iontk
 *.exe
 .env
 *.txt
+*.json
