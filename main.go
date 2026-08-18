@@ -79,7 +79,7 @@ func main() {
 	}
 
 	wsClient := &http.Client {Transport: &http.Transport {
-		MaxConnsPerHost: 50,
+		MaxConnsPerHost: cfg.Concurancy,
 		MaxIdleConnsPerHost: 50,
 		TLSHandshakeTimeout: 10 * time.Second,
 	}}
