@@ -25,20 +25,20 @@ type Element struct {
 }
 
 type SCM struct {
-	client  *http.Client
+	client   *http.Client
 	wsClient *http.Client
-	limiter *rate.Limiter
-	token   string
-	verbose bool
+	limiter  *rate.Limiter
+	token    string
+	verbose  bool
 }
 
 func NewSCM(client *http.Client, wsClient *http.Client, token string, verbose bool, rps float64, burst int) *SCM {
 	return &SCM{
-		client:  client,
+		client:   client,
 		wsClient: wsClient,
-		limiter: rate.NewLimiter(rate.Limit(rps), burst),
-		token:   token,
-		verbose: verbose,
+		limiter:  rate.NewLimiter(rate.Limit(rps), burst),
+		token:    token,
+		verbose:  verbose,
 	}
 }
 
