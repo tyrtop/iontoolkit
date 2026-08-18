@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 )
 
@@ -38,7 +39,7 @@ func runElement(ctx context.Context, scm *SCM, cfg Config, eid string) (Result, 
 	var lastErr error
 
 	for attempt := 1; attempt <= cfg.Attempts; attempt++ {
-		outs, lastErr = trySession(ctx, cfg, eid, prompt)
+		outs, lastErr = trySession(ctx,scm.wsClient ,cfg, eid, prompt)
 		if lastErr == nil {
 			break
 		}
@@ -60,10 +61,10 @@ func runElement(ctx context.Context, scm *SCM, cfg Config, eid string) (Result, 
 	}, nil
 }
 
-func trySession(ctx context.Context, cfg Config, eid, prompt string) ([]CommandOutput, error) {
+func trySession(ctx context.Context, hc *http.Client, cfg Config, eid, prompt string) ([]CommandOutput, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.SessionTimeout)
 	defer cancel()
-	conn, err := dialToolkit(ctx, cfg.Token, eid)
+	conn, err := dialToolkit(ctx,hc ,cfg.Token, eid)
 	if err != nil {
 		return nil, fmt.Errorf("dial: %w", err)
 	}
