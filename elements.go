@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
+
+	"github.com/coder/websocket"
 )
 
 type CommandOutput struct {
@@ -38,7 +41,7 @@ func runElement(ctx context.Context, scm *SCM, cfg Config, eid string) (Result, 
 	var lastErr error
 
 	for attempt := 1; attempt <= cfg.Attempts; attempt++ {
-		outs, lastErr = trySession(ctx, cfg, eid, prompt)
+		outs, lastErr = trySession(ctx, scm.wsClient, cfg, eid, prompt)
 		if lastErr == nil {
 			break
 		}
@@ -60,14 +63,18 @@ func runElement(ctx context.Context, scm *SCM, cfg Config, eid string) (Result, 
 	}, nil
 }
 
-func trySession(ctx context.Context, cfg Config, eid, prompt string) ([]CommandOutput, error) {
+func trySession(ctx context.Context, hc *http.Client, cfg Config, eid, prompt string) ([]CommandOutput, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.SessionTimeout)
 	defer cancel()
-	conn, err := dialToolkit(ctx, cfg.Token, eid)
+	conn, err := dialToolkit(ctx, hc, cfg.Token, eid)
 	if err != nil {
 		return nil, fmt.Errorf("dial: %w", err)
 	}
-	defer conn.CloseNow()
+	// line lets you do more than ~150 devices at once. If you don't "gracefully close your websocket connection"
+	// the ION hijacks it, and it seems like PA keeps track of the # of sessions you have open.
+	// Sacrificing a frame lets you utilize more socket connections overall.
+	// if you just use CloseNow() you will start getting limited at ~500 connections opened.
+	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	return runOnce(ctx, conn, prompt, cfg.IONUsername, cfg.IONPassword, cfg.Commands)
 }

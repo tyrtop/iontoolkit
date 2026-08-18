@@ -78,13 +78,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	wsClient := &http.Client{Transport: &http.Transport{
+		MaxConnsPerHost:     cfg.Concurancy,
+		MaxIdleConnsPerHost: 50,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}}
+
 	client := &http.Client{Timeout: cfg.HTTPTimeout}
-	scm := NewSCM(client, cfg.Token, cfg.Verbose, cfg.RPS, cfg.Burst)
+	scm := NewSCM(client, wsClient, cfg.Token, cfg.Verbose, cfg.RPS, cfg.Burst)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	if len(cfg.Commands) == 0 {
-		if err := interactiveCLI(ctx, scm, cfg, cfg.Elements[0]); err != nil {
+		if err := interactiveCLI(ctx, wsClient, scm, cfg, cfg.Elements[0]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
