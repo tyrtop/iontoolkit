@@ -14,7 +14,7 @@ type Config struct {
 	HTTPTimeout    time.Duration
 	Verbose        bool
 	ElementTimeout time.Duration
-	Concurancy     int
+	Concurrency     int
 	RPS            float64
 	Burst          int
 	SessionTimeout time.Duration
@@ -36,8 +36,8 @@ func (c Config) Validate() error {
 	if len(c.Elements) > 1 && len(c.Commands) == 0 {
 		return fmt.Errorf("interactive mode requires exactly one element; use -cmd to run across multiple")
 	}
-	if c.Concurancy < 1 {
-		return fmt.Errorf("concurrancy must be at least 1")
+	if c.Concurrency < 1 {
+		return fmt.Errorf("concurrency must be at least 1")
 	}
 	if c.RPS <= 0 {
 		return fmt.Errorf("rps must be greater than 0")

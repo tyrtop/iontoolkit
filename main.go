@@ -26,7 +26,7 @@ func main() {
 	cmd := flag.String("cmd", "", "run a command and exit")
 	verbose := flag.Bool("v", false, "print request details")
 	elementTimeout := flag.Duration("element-timeout", 60*time.Second, "per-element deadline including the CLI session")
-	concurancy := flag.Int("concurancy", 10, "sets the number of conncurant http sesssions to the Strata API")
+	concurrency := flag.Int("concurrency", 10, "sets the number of concurrent http sesssions to the Strata API")
 	elementsFile := flag.String("elements-path", "", "sets the path to the elements file")
 	rps := flag.Float64("rps", 5, "sets amount amount of requests per second")
 	burst := flag.Int("burst", 10, "sets api burst")
@@ -67,7 +67,7 @@ func main() {
 		HTTPTimeout:    *httpTimeout,
 		Verbose:        *verbose,
 		ElementTimeout: *elementTimeout,
-		Concurancy:     *concurancy,
+		Concurrency:     *concurrency,
 		RPS:            *rps,
 		Burst:          *burst,
 		SessionTimeout: *sessionTimeout,
@@ -79,7 +79,7 @@ func main() {
 	}
 
 	wsClient := &http.Client{Transport: &http.Transport{
-		MaxConnsPerHost:     cfg.Concurancy,
+		MaxConnsPerHost:     cfg.Concurrency,
 		MaxIdleConnsPerHost: 50,
 		TLSHandshakeTimeout: 10 * time.Second,
 	}}
@@ -98,7 +98,7 @@ func main() {
 	}
 
 	results := make([]Result, len(cfg.Elements))
-	sem := make(chan struct{}, cfg.Concurancy)
+	sem := make(chan struct{}, cfg.Concurrency)
 	var wg sync.WaitGroup
 
 	for i, eid := range cfg.Elements {
