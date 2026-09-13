@@ -13,6 +13,16 @@ There is no officially supported path to perform scripted command execution on t
 
 ## Installation
 
+### Download a binary
+
+Navigate to the releases page and download your binary. Run it from the command line. 
+
+### Go Install 
+
+go install github.com/tyrtop/iontoolkit/cmd/iontk@latest
+
+### Build from Source
+
 1. `git clone https://github.com/tyrtop/iontoolkit.git`
 2. `cd iontoolkit`
 3. `go build -o iontk .`
