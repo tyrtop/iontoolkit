@@ -25,7 +25,7 @@ go install github.com/tyrtop/iontoolkit/cmd/iontk@latest
 
 1. `git clone https://github.com/tyrtop/iontoolkit.git`
 2. `cd iontoolkit`
-3. `go build -o iontk .`
+3. `go build -o iontk ./cmd/iontk`
 
 ## Environment Variables
 
