@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"time"
+
+	"tyrtop.com/iontk/internal/iontk"
 )
 
-type Config struct {
+type flags struct {
 	Token          string
 	Commands       []string
 	IONUsername    string
@@ -21,39 +23,34 @@ type Config struct {
 	Attempts       int
 }
 
-func (c Config) Validate() error {
-	if c.Token == "" {
+func (f flags) Validate() error {
+	if f.Token == "" {
 		return fmt.Errorf("SCM_TOKEN not set")
 	}
-	if len(c.Commands) > 0 {
-		if c.IONUsername == "" || c.IONPassword == "" {
-			return fmt.Errorf("ION_USER and ION_PASS must be set when using -cmd")
-		}
-	}
-	if len(c.Elements) == 0 {
+	if len(f.Elements) == 0 {
 		return fmt.Errorf("an element is required")
 	}
-	if len(c.Elements) > 1 && len(c.Commands) == 0 {
+	if len(f.Elements) > 1 && len(f.Commands) == 0 {
 		return fmt.Errorf("interactive mode requires exactly one element; use -cmd to run across multiple")
 	}
-	if c.Concurrency < 1 {
-		return fmt.Errorf("concurrency must be at least 1")
-	}
-	if c.RPS <= 0 {
+	if f.RPS <= 0 {
 		return fmt.Errorf("rps must be greater than 0")
 	}
-	if c.Burst < 1 {
+	if f.Burst < 1 {
 		return fmt.Errorf("burst must be at least 1")
 	}
-	if c.SessionTimeout > c.ElementTimeout {
-		return fmt.Errorf("session timeout cannot be longer than element timeout")
-	}
-	if c.Attempts <= 0 {
-		return fmt.Errorf("attempts must be greater than 0")
-	}
-	if c.Attempts*int(c.SessionTimeout) > int(c.ElementTimeout) {
-		return fmt.Errorf("attempts * session timeout must be less than element timeout")
-	}
-
 	return nil
+}
+
+func (f flags) options() iontk.Options {
+	return iontk.Options{
+		Commands:       f.Commands,
+		Username:       f.IONUsername,
+		Password:       f.IONPassword,
+		Concurrency:    f.Concurrency,
+		ElementTimeout: f.ElementTimeout,
+		SessionTimeout: f.SessionTimeout,
+		Attempts:       f.Attempts,
+		Verbose:        f.Verbose,
+	}
 }

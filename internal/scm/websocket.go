@@ -3,7 +3,9 @@ package scm
 import (
 	"context"
 	"fmt"
+
 	"github.com/coder/websocket"
+	"tyrtop.com/iontk/internal/scm/ioncli"
 )
 
 func (s *Client) DialToolkit(ctx context.Context, eid string) (*websocket.Conn, error) {
@@ -19,4 +21,18 @@ func (s *Client) DialToolkit(ctx context.Context, eid string) (*websocket.Conn, 
 		return nil, err
 	}
 	return c, nil
+}
+
+func (s *Client) ToolkitSession(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
+	conn, err := s.DialToolkit(ctx, eid)
+	if err != nil {
+		return nil, fmt.Errorf("dial: %w", err)
+	}
+	// this line lets you do more than ~150 devices at once. If you don't "gracefully close your websocket connection"
+	// the ION hijacks it, and it seems like PA keeps track of the # of sessions you have open.
+	// Sacrificing a frame lets you utilize more socket connections overall.
+	// if you just use CloseNow() you will start getting limited at ~500 connections opened.
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	return ioncli.Run(ctx, conn, prompt, user, pass, cmds)
 }

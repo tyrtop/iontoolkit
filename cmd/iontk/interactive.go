@@ -11,7 +11,7 @@ import (
 	"tyrtop.com/iontk/internal/scm"
 )
 
-func interactiveCLI(ctx context.Context, client *scm.Client, cfg Config, eid string) error {
+func interactiveCLI(ctx context.Context, client *scm.Client, verbose bool, eid string) error {
 	el, err := client.LookupElement(ctx, eid)
 	if err != nil {
 		return fmt.Errorf("element %s: lookupElement: %w", eid, err)
@@ -58,7 +58,7 @@ func interactiveCLI(ctx context.Context, client *scm.Client, cfg Config, eid str
 		if err != nil {
 			return nil
 		}
-		if cfg.Verbose {
+		if verbose {
 			fmt.Printf("%q\r\n", data)
 		} else {
 			os.Stdout.Write(data)
