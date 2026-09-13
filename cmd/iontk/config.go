@@ -14,7 +14,7 @@ type Config struct {
 	HTTPTimeout    time.Duration
 	Verbose        bool
 	ElementTimeout time.Duration
-	Concurrency     int
+	Concurrency    int
 	RPS            float64
 	Burst          int
 	SessionTimeout time.Duration

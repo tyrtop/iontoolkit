@@ -13,10 +13,8 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"tyrtop.com/iontk/internal/scm"
 )
-
-// strata expects a browser UA in the header.
-const browserUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
 
 func main() {
 	_ = godotenv.Load()
@@ -67,7 +65,7 @@ func main() {
 		HTTPTimeout:    *httpTimeout,
 		Verbose:        *verbose,
 		ElementTimeout: *elementTimeout,
-		Concurrency:     *concurrency,
+		Concurrency:    *concurrency,
 		RPS:            *rps,
 		Burst:          *burst,
 		SessionTimeout: *sessionTimeout,
@@ -84,13 +82,22 @@ func main() {
 		TLSHandshakeTimeout: 10 * time.Second,
 	}}
 
-	client := &http.Client{Timeout: cfg.HTTPTimeout}
-	scm := NewSCM(client, wsClient, cfg.Token, cfg.Verbose, cfg.RPS, cfg.Burst)
+	httpClient := &http.Client{Timeout: cfg.HTTPTimeout}
+
+	scmClient := scm.NewClient(
+		httpClient,
+		wsClient,
+		cfg.Token,
+		cfg.Verbose,
+		cfg.RPS,
+		cfg.Burst,
+	)
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	if len(cfg.Commands) == 0 {
-		if err := interactiveCLI(ctx, wsClient, scm, cfg, cfg.Elements[0]); err != nil {
+		if err := interactiveCLI(ctx, scmClient, cfg, cfg.Elements[0]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -109,7 +116,7 @@ func main() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			res, err := runElement(ctx, scm, cfg, eid)
+			res, err := runElement(ctx, scmClient, cfg, eid)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				results[i] = Result{ElementID: eid, Error: err.Error()}

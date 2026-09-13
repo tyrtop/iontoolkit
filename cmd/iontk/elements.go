@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 
 	"github.com/coder/websocket"
+	"tyrtop.com/iontk/internal/scm"
 )
 
 type CommandOutput struct {
@@ -26,11 +26,11 @@ type Result struct {
 	Commands  []CommandOutput `json:"commands,omitempty"`
 }
 
-func runElement(ctx context.Context, scm *SCM, cfg Config, eid string) (Result, error) {
+func runElement(ctx context.Context, client *scm.Client, cfg Config, eid string) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.ElementTimeout)
 	defer cancel()
 
-	el, err := scm.lookupElement(ctx, eid)
+	el, err := client.LookupElement(ctx, eid)
 	if err != nil {
 		return Result{}, err
 	}
@@ -41,7 +41,7 @@ func runElement(ctx context.Context, scm *SCM, cfg Config, eid string) (Result, 
 	var lastErr error
 
 	for attempt := 1; attempt <= cfg.Attempts; attempt++ {
-		outs, lastErr = trySession(ctx, scm.wsClient, cfg, eid, prompt)
+		outs, lastErr = trySession(ctx, client, cfg, eid, prompt)
 		if lastErr == nil {
 			break
 		}
@@ -63,10 +63,10 @@ func runElement(ctx context.Context, scm *SCM, cfg Config, eid string) (Result, 
 	}, nil
 }
 
-func trySession(ctx context.Context, hc *http.Client, cfg Config, eid, prompt string) ([]CommandOutput, error) {
+func trySession(ctx context.Context, client *scm.Client, cfg Config, eid, prompt string) ([]CommandOutput, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.SessionTimeout)
 	defer cancel()
-	conn, err := dialToolkit(ctx, hc, cfg.Token, eid)
+	conn, err := client.DialToolkit(ctx, eid)
 	if err != nil {
 		return nil, fmt.Errorf("dial: %w", err)
 	}

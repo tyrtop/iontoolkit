@@ -1,4 +1,4 @@
-package main
+package scm
 
 import (
 	"context"
@@ -13,18 +13,10 @@ import (
 
 const scmBase = "https://api.sase.paloaltonetworks.com/sdwan/v3.2/api"
 
-type Element struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	HWID      string `json:"hw_id"`
-	Model     string `json:"model_name"`
-	Software  string `json:"software_version"`
-	SiteID    string `json:"site_id"`
-	Connected bool   `json:"connected"`
-	State     string `json:"state"`
-}
+// strata expects a browser UA in the header.
+const browserUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
 
-type SCM struct {
+type Client struct {
 	client   *http.Client
 	wsClient *http.Client
 	limiter  *rate.Limiter
@@ -32,8 +24,8 @@ type SCM struct {
 	verbose  bool
 }
 
-func NewSCM(client *http.Client, wsClient *http.Client, token string, verbose bool, rps float64, burst int) *SCM {
-	return &SCM{
+func NewClient(client *http.Client, wsClient *http.Client, token string, verbose bool, rps float64, burst int) *Client {
+	return &Client{
 		client:   client,
 		wsClient: wsClient,
 		limiter:  rate.NewLimiter(rate.Limit(rps), burst),
@@ -42,7 +34,7 @@ func NewSCM(client *http.Client, wsClient *http.Client, token string, verbose bo
 	}
 }
 
-func (s *SCM) lookupElement(ctx context.Context, eid string) (Element, error) {
+func (s *Client) LookupElement(ctx context.Context, eid string) (Element, error) {
 	if err := s.limiter.Wait(ctx); err != nil {
 		return Element{}, fmt.Errorf("element %s: rate limit wait: %w", eid, err)
 	}
