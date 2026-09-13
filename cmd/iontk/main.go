@@ -32,7 +32,13 @@ func main() {
 	//this is set to 1 to prevent executing config changes unintentially. Multiple attempts and a write to the device can cause undersirable behavior.
 	attempts := flag.Int("attempts", 1, "sets the number of attempts to connect to the CLI before dropping the session")
 	refreshMargin := flag.Duration("refresh-margin", 75*time.Second, "re-mint the service account token this long before it expires")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(buildVersion())
+		return
+	}
 
 	var elements []string
 	if *element != "" {

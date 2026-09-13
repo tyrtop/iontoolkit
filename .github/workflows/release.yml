@@ -11,6 +11,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.ref_name }}
 
     steps:
       - name: Checkout
@@ -28,17 +30,21 @@ jobs:
         run: |
           mkdir -p dist
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -o dist/iontk-linux-amd64 ./cmd/iontk
+            go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+              -o dist/iontk-linux-amd64 ./cmd/iontk
 
       - name: Build Windows
         run: |
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
-            go build -o dist/iontk-windows-amd64.exe ./cmd/iontk
+            go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+              -o dist/iontk-windows-amd64.exe ./cmd/iontk
+
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
-          files: |
-            dist/iontk-linux-amd64
-            dist/iontk-windows-amd64.exe
+          files: dist/*
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
