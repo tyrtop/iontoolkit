@@ -1,4 +1,4 @@
-package iontk
+package sase
 
 import (
 	"context"
@@ -6,10 +6,10 @@ import (
 	"os"
 	"sync"
 
-	"tyrtop.com/iontk/internal/scm"
+	"tyrtop.com/iontk/internal/sase/api"
 )
 
-func Run(ctx context.Context, client *scm.Client, o Options, elements []string) []Result {
+func Run(ctx context.Context, client *api.Client, o Options, elements []string) []Result {
 	results := make([]Result, len(elements))
 	sem := make(chan struct{}, o.Concurrency)
 	var wg sync.WaitGroup

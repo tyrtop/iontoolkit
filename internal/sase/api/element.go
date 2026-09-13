@@ -1,4 +1,4 @@
-package scm
+package api
 
 type Element struct {
 	ID        string `json:"id"`

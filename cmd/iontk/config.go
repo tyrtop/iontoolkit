@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"tyrtop.com/iontk/internal/iontk"
+	"tyrtop.com/iontk/internal/sase"
 )
 
 type flags struct {
@@ -42,8 +42,8 @@ func (f flags) Validate() error {
 	return nil
 }
 
-func (f flags) options() iontk.Options {
-	return iontk.Options{
+func (f flags) options() sase.Options {
+	return sase.Options{
 		Commands:       f.Commands,
 		Username:       f.IONUsername,
 		Password:       f.IONPassword,

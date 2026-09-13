@@ -1,11 +1,11 @@
-package scm
+package api
 
 import (
 	"context"
 	"fmt"
 
 	"github.com/coder/websocket"
-	"tyrtop.com/iontk/internal/scm/ioncli"
+	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
 func (s *Client) DialToolkit(ctx context.Context, eid string) (*websocket.Conn, error) {

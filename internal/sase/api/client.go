@@ -1,4 +1,5 @@
-package scm
+// Package api is a client for the Prisma SD-WAN endpoints of the SASE API.
+package api
 
 import (
 	"context"

@@ -8,10 +8,10 @@ import (
 
 	"github.com/coder/websocket"
 	"golang.org/x/term"
-	"tyrtop.com/iontk/internal/scm"
+	"tyrtop.com/iontk/internal/sase/api"
 )
 
-func interactiveCLI(ctx context.Context, client *scm.Client, verbose bool, eid string) error {
+func interactiveCLI(ctx context.Context, client *api.Client, verbose bool, eid string) error {
 	el, err := client.LookupElement(ctx, eid)
 	if err != nil {
 		return fmt.Errorf("element %s: lookupElement: %w", eid, err)

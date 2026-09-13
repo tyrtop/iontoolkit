@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"tyrtop.com/iontk/internal/iontk"
-	"tyrtop.com/iontk/internal/scm"
+	"tyrtop.com/iontk/internal/sase"
+	"tyrtop.com/iontk/internal/sase/api"
 )
 
 func main() {
@@ -90,7 +90,7 @@ func main() {
 
 	httpClient := &http.Client{Timeout: f.HTTPTimeout}
 
-	scmClient := scm.NewClient(
+	scmClient := api.NewClient(
 		httpClient,
 		wsClient,
 		f.Token,
@@ -110,7 +110,7 @@ func main() {
 		return
 	}
 
-	results := iontk.Run(ctx, scmClient, opts, f.Elements)
+	results := sase.Run(ctx, scmClient, opts, f.Elements)
 
 	failed := 0
 	for _, r := range results {
