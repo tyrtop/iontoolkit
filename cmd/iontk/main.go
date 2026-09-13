@@ -9,14 +9,12 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
+	"tyrtop.com/iontk/internal/sase"
+	"tyrtop.com/iontk/internal/sase/api"
 )
-
-// strata expects a browser UA in the header.
-const browserUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
 
 func main() {
 	_ = godotenv.Load()
@@ -58,7 +56,7 @@ func main() {
 		}
 	}
 
-	cfg := Config{
+	f := flags{
 		Token:          os.Getenv("SCM_TOKEN"),
 		IONUsername:    os.Getenv("ION_USER"),
 		IONPassword:    os.Getenv("ION_PASS"),
@@ -67,58 +65,52 @@ func main() {
 		HTTPTimeout:    *httpTimeout,
 		Verbose:        *verbose,
 		ElementTimeout: *elementTimeout,
-		Concurrency:     *concurrency,
+		Concurrency:    *concurrency,
 		RPS:            *rps,
 		Burst:          *burst,
 		SessionTimeout: *sessionTimeout,
 		Attempts:       *attempts,
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := f.Validate(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	opts := f.options()
+	if err := opts.Validate(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
 	wsClient := &http.Client{Transport: &http.Transport{
-		MaxConnsPerHost:     cfg.Concurrency,
+		MaxConnsPerHost:     f.Concurrency,
 		MaxIdleConnsPerHost: 50,
 		TLSHandshakeTimeout: 10 * time.Second,
 	}}
 
-	client := &http.Client{Timeout: cfg.HTTPTimeout}
-	scm := NewSCM(client, wsClient, cfg.Token, cfg.Verbose, cfg.RPS, cfg.Burst)
+	httpClient := &http.Client{Timeout: f.HTTPTimeout}
+
+	scmClient := api.NewClient(
+		httpClient,
+		wsClient,
+		f.Token,
+		f.Verbose,
+		f.RPS,
+		f.Burst,
+	)
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if len(cfg.Commands) == 0 {
-		if err := interactiveCLI(ctx, wsClient, scm, cfg, cfg.Elements[0]); err != nil {
+	if len(f.Commands) == 0 {
+		if err := interactiveCLI(ctx, scmClient, f.Verbose, f.Elements[0]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	results := make([]Result, len(cfg.Elements))
-	sem := make(chan struct{}, cfg.Concurrency)
-	var wg sync.WaitGroup
-
-	for i, eid := range cfg.Elements {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			res, err := runElement(ctx, scm, cfg, eid)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				results[i] = Result{ElementID: eid, Error: err.Error()}
-				return
-			}
-			results[i] = res
-		}()
-	}
-	wg.Wait()
+	results := sase.Run(ctx, scmClient, opts, f.Elements)
 
 	failed := 0
 	for _, r := range results {

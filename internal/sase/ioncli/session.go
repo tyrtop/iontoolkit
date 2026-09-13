@@ -1,4 +1,4 @@
-package main
+package ioncli
 
 import (
 	"context"
@@ -66,7 +66,7 @@ func readUntilPrompt(ctx context.Context, conn *websocket.Conn, prompt string) (
 	}
 }
 
-func runOnce(ctx context.Context, conn *websocket.Conn, prompt, user, pass string, cmds []string) ([]CommandOutput, error) {
+func Run(ctx context.Context, conn *websocket.Conn, prompt, user, pass string, cmds []string) ([]CommandOutput, error) {
 	if _, err := readUntil(ctx, conn, "login: "); err != nil {
 		return nil, fmt.Errorf("waiting for login prompt: %w", err)
 	}
