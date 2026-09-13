@@ -31,6 +31,7 @@ func main() {
 	sessionTimeout := flag.Duration("session-timeout", 20*time.Second, "sets the session timeout, referring to retries for a hung ION login")
 	//this is set to 1 to prevent executing config changes unintentially. Multiple attempts and a write to the device can cause undersirable behavior.
 	attempts := flag.Int("attempts", 1, "sets the number of attempts to connect to the CLI before dropping the session")
+	refreshMargin := flag.Duration("refresh-margin", 75*time.Second, "re-mint the service account token this long before it expires")
 	flag.Parse()
 
 	var elements []string
@@ -70,6 +71,10 @@ func main() {
 		Burst:          *burst,
 		SessionTimeout: *sessionTimeout,
 		Attempts:       *attempts,
+		ClientID:       os.Getenv("SCM_CLIENT_ID"),
+		ClientSecret:   os.Getenv("SCM_CLIENT_SECRET"),
+		TSGID:          os.Getenv("SCM_TSG_ID"),
+		RefreshMargin:  *refreshMargin,
 	}
 	if err := f.Validate(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -90,27 +95,32 @@ func main() {
 
 	httpClient := &http.Client{Timeout: f.HTTPTimeout}
 
-	scmClient := api.NewClient(
-		httpClient,
-		wsClient,
-		f.Token,
-		f.Verbose,
-		f.RPS,
-		f.Burst,
-	)
-
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	var client *api.Client
+	if f.Token != "" {
+		fmt.Fprintln(os.Stderr, "using SCM_TOKEN")
+		client = api.NewClient(httpClient, wsClient, f.Token, f.Verbose, f.RPS, f.Burst)
+	} else {
+		fmt.Fprintln(os.Stderr, "minting from service account")
+		c, err := api.NewServiceAccountClient(ctx, httpClient, wsClient, f.ClientID, f.ClientSecret, f.TSGID, f.RefreshMargin, f.Verbose, f.RPS, f.Burst)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		client = c
+	}
+
 	if len(f.Commands) == 0 {
-		if err := interactiveCLI(ctx, scmClient, f.Verbose, f.Elements[0]); err != nil {
+		if err := interactiveCLI(ctx, client, f.Verbose, f.Elements[0]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	results := sase.Run(ctx, scmClient, opts, f.Elements)
+	results := sase.Run(ctx, client, opts, f.Elements)
 
 	failed := 0
 	for _, r := range results {

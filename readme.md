@@ -9,6 +9,7 @@ There is no officially supported path to perform scripted command execution on t
 1. Go 1.26 or newer
 2. Network access to `api.sase.paloaltonetworks.com` on 443 for both HTTPS and WSS 
 3. A Prisma SD-WAN bearer token
+4. CLI credentials
 
 ## Installation
 
@@ -16,17 +17,22 @@ There is no officially supported path to perform scripted command execution on t
 2. `cd iontoolkit`
 3. `go build -o iontk .`
 
-## Credentials
+## Environment Variables
 
-Credentials are read from the environment via `export SCM_TOKEN=...`, or from a `.env` in the working directory. See `.env.example`.
+Environment Variables are read from the environment via `export SCM_TOKEN=...`, or from a `.env` in the working directory. See `.env.example`.
 
 ```
-SCM_TOKEN   Bearer token for the Prisma SD-WAN API. Required.
 ION_USER    CLI login. Required for -cmd.
 ION_PASS    CLI password. Required for -cmd.
+SCM_CLIENT_ID      Service account client ID
+SCM_CLIENT_SECRET  Service account client secret.
+SCM_TSG_ID         Tenant Service Group ID.
+SCM_TOKEN   Bearer token for the Prisma SD-WAN API.
 ```
 
-Currently, the token comes from an SCM browser session and expires after about 15 minutes. [Issue #10](https://github.com/tyrtop/iontoolkit/issues/10) is created to address the design and implementation of the service account flow. 
+When you use a SASE service account, iontk will mint its own token and re-mint it before expiry. 
+
+SCM_TOKEN should be used only when a service account is not available. 
 
 ## Flags
 
@@ -39,7 +45,7 @@ Currently, the token comes from an SCM browser session and expires after about 1
 -session-timeout   Deadline for a single login attempt. Default 20s.
 -attempts          Login attempts before the element is dropped. Default 1.
 -concurrency       Elements worked in parallel. Default 10.
--rps               Request rate ceiling against the Prisma SD-WAN API. Default 5.
+-rps               API requests per second. Default 5.
 -burst             Burst allowance on top of -rps. Default 10.
 -v                 Verbose. Request details, rate limit headers, attempt errors.
 ```
