@@ -1,4 +1,5 @@
 *.exe
+iontk
 .env
 *.txt
 *.json

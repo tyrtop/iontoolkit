@@ -21,11 +21,20 @@ type flags struct {
 	Burst          int
 	SessionTimeout time.Duration
 	Attempts       int
+	ClientID       string
+	ClientSecret   string
+	TSGID          string
+	RefreshMargin  time.Duration
 }
 
 func (f flags) Validate() error {
 	if f.Token == "" {
-		return fmt.Errorf("SCM_TOKEN not set")
+		if f.ClientID == "" || f.ClientSecret == "" || f.TSGID == "" {
+			return fmt.Errorf("set SCM_CLIENT_ID, SCM_CLIENT_SECRET, and SCM_TSG_ID, or SCM_TOKEN to override")
+		}
+	}
+	if f.RefreshMargin <= 0 {
+		return fmt.Errorf("refresh margin must be greater than 0")
 	}
 	if len(f.Elements) == 0 {
 		return fmt.Errorf("an element is required")
