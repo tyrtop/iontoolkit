@@ -1,6 +1,6 @@
 # iontk
 
-API-driven ION CLI management tooling built for command execution and retrieval and tested at [230 CLI sessions a minute](https://github.com/tyrtop/iontoolkit/pull/8). 
+API-driven ION CLI management tooling built for command execution and retrieval and tested at [230 sessions a minute](https://github.com/tyrtop/iontoolkit/pull/8). 
 
 There is no officially supported path to perform scripted command execution on the Prisma SD-WAN IONs. ION appliances do not support programmatic management protocols, and are only meant to be managed by the Prisma SD-WAN controller, which has tenant-side limitations. This tool uses an existing API path in order to work within the architecture that is provided by Palo Alto while giving operators extended capabilities to perform programmatic command execution.
 
