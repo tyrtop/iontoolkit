@@ -35,6 +35,34 @@ type DialAttempt struct {
 	Err       error
 }
 
+// SetPagerOff sets the command sent once after login to stop the device paging.
+// Empty sends nothing, which is the behaviour this had before.
+func (s *Client) SetPagerOff(cmd string) {
+	s.dialMu.Lock()
+	s.pager = cmd
+	s.dialMu.Unlock()
+}
+
+func (s *Client) pagerOff() string {
+	s.dialMu.RLock()
+	defer s.dialMu.RUnlock()
+	return s.pager
+}
+
+// SetPagerPrompts sets the lines a session answers with a space. Nil keeps the
+// built-in list; empty turns the scraper off.
+func (s *Client) SetPagerPrompts(p []string) {
+	s.dialMu.Lock()
+	s.pagers = p
+	s.dialMu.Unlock()
+}
+
+func (s *Client) pagerPrompts() []string {
+	s.dialMu.RLock()
+	defer s.dialMu.RUnlock()
+	return s.pagers
+}
+
 // SetDialReporter watches the dial without disturbing the policy. It is how a
 // UI shows a retry as it happens; dialling is otherwise silent until it either
 // works or runs out.
@@ -173,5 +201,12 @@ func (s *Client) ToolkitSession(ctx context.Context, eid, prompt, user, pass str
 	// if you just use CloseNow() you will start getting limited at ~500 connections opened.
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	return ioncli.Run(ctx, conn, prompt, user, pass, cmds)
+	return ioncli.Run(ctx, conn, ioncli.RunOptions{
+		Prompt:   prompt,
+		User:     user,
+		Pass:     pass,
+		Commands: cmds,
+		PagerOff: s.pagerOff(),
+		Pagers:   s.pagerPrompts(),
+	})
 }

@@ -43,6 +43,8 @@ type Client struct {
 	dialMu sync.RWMutex
 	dial   DialPolicy
 	onDial func(DialAttempt)
+	pager  string
+	pagers []string
 
 	src       TokenSource
 	tokenErrs chan error

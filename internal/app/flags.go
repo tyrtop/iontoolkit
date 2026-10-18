@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"tyrtop.com/iontk/internal/sase"
+	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
 // RootFlags are the knobs the root command binds its command-line flags to.
@@ -24,6 +25,8 @@ type RootFlags struct {
 	Verbose        bool
 	AllowWrites    bool
 	TSGID          string
+	PagerOff       string
+	PagerPrompts   []string
 }
 
 // Defaults doubles as the flag defaults the root command declares, so the
@@ -38,6 +41,11 @@ var Defaults = RootFlags{
 	DialAttempts:   3,
 	DialTimeout:    10 * time.Second,
 	RPS:            5,
+	PagerPrompts:   ioncli.DefaultPagers,
+	// Works on an ion 1200-s running 6.3.4. "terminal length 0", "no paging"
+	// and "set cli pager off" all get rejected there. If a device rejects this
+	// one too, the pager scraper handles the run.
+	PagerOff: "set paging off",
 }
 
 type Flags struct {
@@ -55,6 +63,8 @@ type Flags struct {
 	SessionTimeout time.Duration
 	DialAttempts   int
 	DialTimeout    time.Duration
+	PagerOff       string
+	PagerPrompts   []string
 	ClientID       string
 	ClientSecret   string
 	TSGID          string
@@ -80,6 +90,8 @@ func BaseFlags() Flags {
 		SessionTimeout: Defaults.SessionTimeout,
 		DialAttempts:   Defaults.DialAttempts,
 		DialTimeout:    Defaults.DialTimeout,
+		PagerOff:       Defaults.PagerOff,
+		PagerPrompts:   Defaults.PagerPrompts,
 	}
 	if Defaults.TSGID != "" {
 		f.TSGID = Defaults.TSGID

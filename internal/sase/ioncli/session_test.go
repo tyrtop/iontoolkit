@@ -97,7 +97,7 @@ func TestClean(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			got := clean(tc.raw, tc.prompt, tc.cmd)
+			got := clean(tc.raw, tc.prompt, tc.cmd, DefaultPagers)
 			if got != tc.want {
 				t.Errorf("clean()\n got %q\nwant %q", got, tc.want)
 			}

@@ -19,12 +19,16 @@ func NewClient(ctx context.Context, f Flags, logw io.Writer) (*api.Client, error
 	httpClient := &http.Client{Timeout: f.HTTPTimeout}
 
 	dial := api.DialPolicy{Attempts: f.DialAttempts, Timeout: f.DialTimeout}
+	setup := func(c *api.Client) *api.Client {
+		c.SetDialPolicy(dial)
+		c.SetPagerOff(f.PagerOff)
+		c.SetPagerPrompts(f.PagerPrompts)
+		return c
+	}
 
 	if f.Token != "" {
 		fmt.Fprintln(logw, "using SCM_TOKEN")
-		c := api.NewClient(httpClient, wsClient, f.Token, f.Verbose, f.RPS, f.Burst)
-		c.SetDialPolicy(dial)
-		return c, nil
+		return setup(api.NewClient(httpClient, wsClient, f.Token, f.Verbose, f.RPS, f.Burst)), nil
 	}
 	if f.BrowserAuth {
 		fmt.Fprintln(logw, "using the browser sign-in for this tenant")
@@ -33,8 +37,7 @@ func NewClient(ctx context.Context, f Flags, logw io.Writer) (*api.Client, error
 		if err != nil {
 			return nil, err
 		}
-		c.SetDialPolicy(dial)
-		return c, nil
+		return setup(c), nil
 	}
 	fmt.Fprintln(logw, "minting from service account")
 	c, err := api.NewServiceAccountClient(ctx, httpClient, wsClient,
@@ -42,6 +45,5 @@ func NewClient(ctx context.Context, f Flags, logw io.Writer) (*api.Client, error
 	if err != nil {
 		return nil, err
 	}
-	c.SetDialPolicy(dial)
-	return c, nil
+	return setup(c), nil
 }

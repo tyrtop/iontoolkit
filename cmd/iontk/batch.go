@@ -25,7 +25,10 @@ func runBatch(ctx context.Context) error {
 		return err
 	}
 
-	f := app.BaseFlags()
+	f, err := resolveFlags(os.Stderr)
+	if err != nil {
+		return err
+	}
 	f.Elements = elements
 	f.Commands = app.SplitCommands(flagCommands)
 

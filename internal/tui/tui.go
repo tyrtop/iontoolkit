@@ -283,6 +283,10 @@ type tuiModel struct {
 // because the release build sets it through main.
 var Version = "dev"
 
+// Tenant is --tenant. The command checks the name before Run, so empty here
+// just means the user didn't ask for one.
+var Tenant string
+
 func Run(ctx context.Context) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return fmt.Errorf("iontk needs a terminal; use --cmd for batch mode")
@@ -295,6 +299,13 @@ func Run(ctx context.Context) error {
 	cfg, err := store.Config()
 	if err != nil {
 		return err
+	}
+	// Fail instead of opening with no tenant at all. A typo would otherwise
+	// look the same as a first run.
+	if Tenant != "" {
+		if _, ok := app.ResolveTenant(cfg, Tenant); !ok {
+			return fmt.Errorf("no saved tenant named %q; %s", Tenant, app.TenantChoices(cfg))
+		}
 	}
 
 	model := newTUIModel(ctx, store, cfg)
@@ -353,12 +364,12 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 	}
 	if am, ok := parseAuthMode(cfg.AuthMode); ok {
 		m.authMode = am
-	} else if t, ok := app.ResolveTenant(cfg, ""); ok && !t.UsesBrowser() {
+	} else if t, ok := app.ResolveTenant(cfg, Tenant); ok && !t.UsesBrowser() {
 		// Nothing saved: follow whatever the tenant already uses, so an existing
 		// service account setup does not open on a browser prompt.
 		m.authMode = authTenant
 	}
-	m.tenant, m.hasTenant = app.ResolveTenant(cfg, "")
+	m.tenant, m.hasTenant = app.ResolveTenant(cfg, Tenant)
 	if m.hasTenant {
 		m.ionUser = m.tenant.DefaultUser()
 		// Elements are refreshed on every launch so the list keeps up with the
