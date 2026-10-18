@@ -1157,3 +1157,139 @@ func TestInsertedCommandEndsWithASpace(t *testing.T) {
 	}
 	t.Fatalf("nothing reached the wire; sent=%q", conn.sent())
 }
+
+// exitConn is a device that has hung up, which is what the toolkit socket does
+// when the user types "exit" at the ION prompt.
+type exitConn struct{}
+
+func (exitConn) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
+	return 0, nil, websocket.CloseError{Code: websocket.StatusNormalClosure}
+}
+func (exitConn) Write(ctx context.Context, typ websocket.MessageType, p []byte) error { return nil }
+func (exitConn) Close(code websocket.StatusCode, reason string) error                 { return nil }
+
+type exitDialer struct{}
+
+func (exitDialer) DialToolkit(ctx context.Context, eid string, cols, rows int) (ionterm.Conn, error) {
+	return exitConn{}, nil
+}
+
+func waitForSessionEnd(t *testing.T, m tuiModel, eid string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s := m.sessions.Find(eid); s != nil && s.Ended() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("session %q never reported that it ended", eid)
+}
+
+func TestExitingAShellClosesItsTab(t *testing.T) {
+	m := pickModel(t)
+	setTestClient(&m, &api.Client{})
+	m.phase = phaseSession
+	m.status = "something stale"
+
+	if _, err := m.sessions.Open(context.Background(), exitDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+		t.Fatal(err)
+	}
+	waitForSessionEnd(t, m, "1")
+
+	mm, _ := m.Update(sessionDirtyMsg("1"))
+	got := mm.(tuiModel)
+
+	if n := got.sessions.Count(); n != 0 {
+		t.Errorf("Count() = %d, want the exited shell's tab closed", n)
+	}
+	// With no tabs left there is nothing to look at, so the element list is
+	// where the user should land rather than an empty pane.
+	if got.phase != phasePicking {
+		t.Errorf("phase = %v, want phasePicking once the last tab closed", got.phase)
+	}
+	if got.status != "" {
+		t.Errorf("status = %q, want nothing reported for an exit the user asked for", got.status)
+	}
+}
+
+func TestExitingOneOfSeveralShellsLeavesTheOthers(t *testing.T) {
+	m := pickModel(t)
+	setTestClient(&m, &api.Client{})
+	m.phase = phaseSession
+
+	if _, err := m.sessions.Open(context.Background(), stubDialer{}, "2", "e2", 200, 50, ionterm.Credentials{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.sessions.Open(context.Background(), exitDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+		t.Fatal(err)
+	}
+	waitForSessionEnd(t, m, "1")
+
+	mm, _ := m.Update(sessionDirtyMsg("1"))
+	got := mm.(tuiModel)
+
+	if n := got.sessions.Count(); n != 1 {
+		t.Fatalf("Count() = %d, want the other shell left open", n)
+	}
+	if got.sessions.Active() == nil {
+		t.Error("Active() = nil, want the surviving tab in front")
+	}
+	if got.phase != phaseSession {
+		t.Errorf("phase = %v, want to stay on the session page", got.phase)
+	}
+}
+
+func TestReattachingAfterAnExitOpensAFreshSession(t *testing.T) {
+	m := pickModel(t)
+	setTestClient(&m, &api.Client{})
+	m.phase = phaseSession
+
+	if _, err := m.sessions.Open(context.Background(), exitDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+		t.Fatal(err)
+	}
+	waitForSessionEnd(t, m, "1")
+	mm, _ := m.Update(sessionDirtyMsg("1"))
+	m = mm.(tuiModel)
+
+	// There is nothing to reattach to, so alt+t has to dial the element again
+	// rather than report that it has nothing to do.
+	mm, cmd := m.reopenLastTab()
+	got := mm.(tuiModel)
+	if got.status == "nothing to reattach" {
+		t.Error(`status = "nothing to reattach", want alt+t to open a fresh session`)
+	}
+	if cmd == nil {
+		t.Error("reopenLastTab() cmd = nil, want it to dial the element again")
+	}
+	if got.phase != phaseSession {
+		t.Errorf("phase = %v, want phaseSession while the new session connects", got.phase)
+	}
+}
+
+func TestReattachingToAFailedDetachedSessionOpensAFreshOne(t *testing.T) {
+	m := pickModel(t)
+	setTestClient(&m, &api.Client{})
+
+	s, err := m.sessions.Open(context.Background(), stubDialer{}, "1", "e1", 200, 50, ionterm.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.sessions.Detach(); !ok {
+		t.Fatal("Detach() ok = false")
+	}
+	// It dies while detached: the socket drops rather than the user leaving.
+	s.Close()
+
+	mm, cmd := m.reopenLastTab()
+	got := mm.(tuiModel)
+	if got.status == "nothing to reattach" {
+		t.Error(`status = "nothing to reattach", want a fresh session instead of a dead tab`)
+	}
+	if cmd == nil {
+		t.Error("reopenLastTab() cmd = nil, want it to dial the element again")
+	}
+	if n := got.sessions.DetachedCount(); n != 0 {
+		t.Errorf("DetachedCount() = %d, want the unusable session dropped", n)
+	}
+}

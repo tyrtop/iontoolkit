@@ -313,6 +313,11 @@ func (m *tuiModel) tenantErr(tsg, tenant string, err error) {
 func shortTenantErr(err error) string {
 	text := err.Error()
 	switch {
+	// A sign-in that ran out of time proves nothing about access, and it
+	// arrives wrapped in ErrInteractiveRequired like a refusal does, so it has
+	// to be read before the access wording below claims it.
+	case strings.Contains(text, "did not complete within"):
+		return "sign-in timed out"
 	case errors.Is(err, saseauth.ErrInteractiveRequired),
 		strings.Contains(text, "interaction_required"),
 		strings.Contains(text, "login_required"):

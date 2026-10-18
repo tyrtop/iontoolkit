@@ -85,6 +85,16 @@ func (s *Source) Token(ctx context.Context) (string, time.Duration, error) {
 		if ctx.Err() != nil {
 			return "", 0, err
 		}
+	} else if tok, tried, err := s.opt.Seed.redeem(ctx, s.opt.httpClient(), s.opt.token(), s.tsg); tried {
+		// The seed is only ever reached by a tenant with nothing of its own,
+		// and only one tenant at a time; accept turns what comes back into this
+		// tenant's own credential.
+		if err == nil {
+			return s.accept(tok)
+		}
+		if ctx.Err() != nil {
+			return "", 0, err
+		}
 	}
 
 	tok, err := LoginSilent(ctx, s.tsg, s.opt)
@@ -115,3 +125,7 @@ func (s *Source) SignIn(ctx context.Context) error {
 	_, _, err = s.accept(tok)
 	return err
 }
+
+// Seed is the shared account credential this source falls back on, which is nil
+// once the tenant has one of its own. Exposed so the wiring can be checked.
+func (s *Source) Seed() *Seed { return s.opt.Seed }

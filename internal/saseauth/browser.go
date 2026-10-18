@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
@@ -33,6 +34,10 @@ type Options struct {
 	AuthorizeURL string
 	TokenURL     string
 	Client       *http.Client
+
+	// Seed is the account-wide refresh token every tenant without one of its
+	// own starts from. It is shared deliberately: see Seed.
+	Seed *Seed
 }
 
 func (o Options) authorize() string {
@@ -129,11 +134,46 @@ func stopWaiting(cancel func()) {
 	}
 }
 
+// profileLocks serialises sign-ins that share a browser profile, one channel
+// per data directory.
+//
+// Chrome takes an exclusive lock on a user-data-dir. A second launch against
+// the same one hands its URL to the instance already running and exits, so
+// chromedp is left waiting on a browser that never answers it until the attempt
+// times out. Tenants are loaded in parallel and all share one profile, which
+// made the first tenant win and every other one spend 45 seconds failing to
+// find a session that was sitting right there — then report it as a tenant it
+// could not access.
+var profileLocks sync.Map
+
+// lockProfile waits for exclusive use of a browser profile. The wait happens
+// before the attempt's own deadline starts, so a queued tenant still gets a
+// full budget once its turn comes.
+func lockProfile(ctx context.Context, dir string) (func(), error) {
+	if dir == "" {
+		return func() {}, nil
+	}
+	v, _ := profileLocks.LoadOrStore(dir, make(chan struct{}, 1))
+	ch := v.(chan struct{})
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // codeFromBrowser drives the browser through the authorization page and watches
 // the network for the redirect back to RedirectURI. That redirect is never
 // fetched for its content: it only carries the code in its query string, so
 // watching requests is enough and no local listener is needed.
 func codeFromBrowser(ctx context.Context, authorizeURL, state string, opt Options, silent bool) (string, error) {
+	unlock, err := lockProfile(ctx, opt.DataDir)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+
 	timeout := opt.timeout()
 	if silent {
 		timeout = 45 * time.Second

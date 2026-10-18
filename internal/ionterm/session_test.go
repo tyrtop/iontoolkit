@@ -707,3 +707,48 @@ func TestLoginRefusesWithoutCredentials(t *testing.T) {
 		t.Error("Login accepted empty credentials")
 	}
 }
+
+func TestExitClosesTheSessionWithoutAnError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"device closed normally", websocket.CloseError{Code: websocket.StatusNormalClosure}},
+		{"device going away", websocket.CloseError{Code: websocket.StatusGoingAway}},
+		{"closed with no status", websocket.CloseError{Code: websocket.StatusNoStatusRcvd}},
+		{"stream ended", io.EOF},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := newFakeConn(nil)
+			conn.readErr = tt.err
+			s, err := Open(context.Background(), &fakeDialer{conn: conn}, "e1", "ion", 80, 24, Credentials{}, nil)
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			defer s.Close()
+
+			eventually(t, "session to report it ended", s.Ended)
+			// Typing "exit" is not a failure, and showing one leaves a tab the
+			// user has to close by hand after asking for it to go.
+			if err := s.Err(); err != nil {
+				t.Errorf("Err() = %v, want nil for a clean hang-up", err)
+			}
+		})
+	}
+}
+
+func TestATornConnectionIsStillAnError(t *testing.T) {
+	conn := newFakeConn(nil)
+	conn.readErr = websocket.CloseError{Code: websocket.StatusAbnormalClosure}
+	s, err := Open(context.Background(), &fakeDialer{conn: conn}, "e1", "ion", 80, 24, Credentials{}, nil)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer s.Close()
+
+	eventually(t, "session to report the failure", func() bool { return s.Err() != nil })
+	if s.Ended() {
+		t.Error("Ended() = true for a dropped connection, want it reported rather than closed quietly")
+	}
+}
