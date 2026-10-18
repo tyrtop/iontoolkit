@@ -24,7 +24,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Test
-        run: go test ./...
+        run: go test -timeout 5m ./...
 
       - name: Build Linux
         run: |
