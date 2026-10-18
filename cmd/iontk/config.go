@@ -27,11 +27,18 @@ type flags struct {
 	RefreshMargin  time.Duration
 }
 
-func (f flags) Validate() error {
+func (f flags) validateCreds() error {
 	if f.Token == "" {
 		if f.ClientID == "" || f.ClientSecret == "" || f.TSGID == "" {
 			return fmt.Errorf("set SCM_CLIENT_ID, SCM_CLIENT_SECRET, and SCM_TSG_ID, or SCM_TOKEN to override")
 		}
+	}
+	return nil
+}
+
+func (f flags) Validate() error {
+	if err := f.validateCreds(); err != nil {
+		return err
 	}
 	if f.RefreshMargin <= 0 {
 		return fmt.Errorf("refresh margin must be greater than 0")
@@ -40,7 +47,7 @@ func (f flags) Validate() error {
 		return fmt.Errorf("an element is required")
 	}
 	if len(f.Elements) > 1 && len(f.Commands) == 0 {
-		return fmt.Errorf("interactive mode requires exactly one element; use -cmd to run across multiple")
+		return fmt.Errorf("shell requires exactly one element; use \"iontk run\" for multiple")
 	}
 	if f.RPS <= 0 {
 		return fmt.Errorf("rps must be greater than 0")
