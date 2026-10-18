@@ -795,3 +795,102 @@ func TestHintOffersUndoAfterAClear(t *testing.T) {
 		t.Errorf("the hint does not offer the undo:\n%s", out)
 	}
 }
+
+// typeIntoFilter opens the search and sends each rune as a key press, the way
+// the terminal delivers it.
+func typeIntoFilter(t *testing.T, m tuiModel, query string) tuiModel {
+	t.Helper()
+	next, cmd := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}), "/")
+	m = next.(tuiModel)
+	if cmd != nil {
+		cmd()
+	}
+	if !m.filterOn {
+		t.Fatal("filterOn = false after /, want the search open")
+	}
+	for _, r := range query {
+		msg := tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)})
+		next, _ := m.onPickKey(msg, string(r))
+		m = next.(tuiModel)
+	}
+	return m
+}
+
+func TestSearchAcceptsJAndK(t *testing.T) {
+	m := filterModel(t)
+	// j and k moved the table instead of reaching the input, so any ION with a
+	// j or a k in its name could not be searched for at all.
+	m.mergeTenantElements("333", "Kroger", []api.Element{
+		{ID: "e9", Name: "jfk-gw-01", SiteID: "s1", Model: "ion1200"},
+	})
+
+	m = typeIntoFilter(t, m, "jfk")
+	if got := m.filter.Value(); got != "jfk" {
+		t.Fatalf("filter.Value() = %q, want %q", got, "jfk")
+	}
+	if got := matchedNames(m); len(got) != 1 || got[0] != "jfk-gw-01" {
+		t.Errorf("matches = %q, want just %q", got, "jfk-gw-01")
+	}
+}
+
+func TestSearchAcceptsHomeAndEndAsText(t *testing.T) {
+	m := filterModel(t)
+	m = typeIntoFilter(t, m, "100")
+
+	// home and end belong to the text cursor while the query has focus; the
+	// table must not swallow them.
+	cursor := 0
+	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyHome}), "home")
+	m = next.(tuiModel)
+	if got := m.filter.Position(); got != cursor {
+		t.Errorf("filter.Position() = %d after home, want %d", got, cursor)
+	}
+	next, _ = m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnd}), "end")
+	m = next.(tuiModel)
+	if got := m.filter.Position(); got != len("100") {
+		t.Errorf("filter.Position() = %d after end, want %d", got, len("100"))
+	}
+}
+
+func TestJAndKStillMoveTheListWhenNotSearching(t *testing.T) {
+	m := filterModel(t)
+	m.applyFilter()
+	if m.filterOn {
+		t.Fatal("filterOn = true before any search, want it closed")
+	}
+
+	m.table.SetCursor(1)
+	start := m.table.Cursor()
+	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}), "j")
+	m = next.(tuiModel)
+	if got := m.table.Cursor(); got == start {
+		t.Errorf("table cursor = %d after j, want it to have moved from %d", got, start)
+	}
+	next, _ = m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}), "k")
+	m = next.(tuiModel)
+	if got := m.table.Cursor(); got != start {
+		t.Errorf("table cursor = %d after k, want it back at %d", got, start)
+	}
+	// Typing j must not have leaked into a query that was never opened.
+	if got := m.filter.Value(); got != "" {
+		t.Errorf("filter.Value() = %q, want it untouched", got)
+	}
+}
+
+func TestArrowsStillMoveTheListWhileSearching(t *testing.T) {
+	m := filterModel(t)
+	m = typeIntoFilter(t, m, "1200")
+
+	// The arrows are not text, so they stay with the table: a narrowed list is
+	// navigable without having to apply the query first.
+	m.table.SetCursor(0)
+	start := m.table.Cursor()
+	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}), "down")
+	m = next.(tuiModel)
+	if got := m.table.Cursor(); got == start {
+		t.Errorf("table cursor = %d after down, want it to have moved from %d", got, start)
+	}
+	if got := m.filter.Value(); got != "1200" {
+		t.Errorf("filter.Value() = %q, want the query intact", got)
+	}
+}

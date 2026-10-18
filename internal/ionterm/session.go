@@ -2,6 +2,7 @@ package ionterm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -40,6 +41,7 @@ type Session struct {
 	mu      sync.Mutex
 	err     error
 	closed  bool
+	ended   bool
 	gotData bool
 	line    []rune
 
@@ -83,7 +85,11 @@ func (s *Session) pumpOutput(ctx context.Context) {
 	for {
 		_, data, err := s.conn.Read(ctx)
 		if err != nil {
-			s.fail(err)
+			if cleanHangUp(err) {
+				s.end()
+			} else {
+				s.fail(err)
+			}
 			return
 		}
 		if len(data) == 0 {
@@ -166,6 +172,36 @@ func (s *Session) markDirty() {
 	if s.notify != nil {
 		s.notify(s.ElementID)
 	}
+}
+
+// cleanHangUp reports whether a read ended because the far end hung up in an
+// orderly way, which is what typing "exit" at the ION prompt looks like from
+// here: the device closes the toolkit socket. Anything else -- a torn
+// connection, a protocol error -- is a failure the user needs to see.
+func cleanHangUp(err error) bool {
+	switch websocket.CloseStatus(err) {
+	case websocket.StatusNormalClosure, websocket.StatusGoingAway, websocket.StatusNoStatusRcvd:
+		return true
+	}
+	return errors.Is(err, io.EOF)
+}
+
+// end marks the session finished without an error, so the tab can simply close
+// instead of showing the user a failure they caused on purpose.
+func (s *Session) end() {
+	s.mu.Lock()
+	if s.err == nil && !s.closed {
+		s.ended = true
+	}
+	s.mu.Unlock()
+	s.markDirty()
+}
+
+// Ended reports that the device closed the session of its own accord.
+func (s *Session) Ended() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ended
 }
 
 func (s *Session) fail(err error) {

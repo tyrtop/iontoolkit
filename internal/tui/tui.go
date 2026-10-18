@@ -739,9 +739,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.signInThenSessions(m.lastTargets)
 		}
 		m.status = string(msg)
+		// With no tab to show the failure against, the session page would be an
+		// empty pane; the element list carries the message better.
+		if m.sessions.Count() == 0 && m.phase == phaseSession {
+			m.phase = phasePicking
+		}
 		return m, nil
 
 	case sessionDirtyMsg:
+		// A shell the user left with "exit" closes its own tab rather than
+		// sitting there showing an error for something they asked for.
+		if n := m.sessions.Reap(); n > 0 && m.phase == phaseSession && m.sessions.Count() == 0 {
+			m.status = ""
+			m.phase = phasePicking
+		}
 		return m, waitForSession(m.sessions.Dirty())
 
 	case eventMsg:
@@ -1047,10 +1058,21 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		m.phase = phaseMenu
 		return m, nil
 
-	case "up", "down", "k", "j", "pgup", "pgdown", "home", "end":
+	case "up", "down", "pgup", "pgdown":
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
 		return m, cmd
+
+	case "k", "j", "home", "end":
+		// These move the cursor only when the query is not being typed. A
+		// search for a "j" in a hostname has to reach the input, and home/end
+		// belong to the text while it has focus; the arrows above stay with
+		// the table either way, so a narrowed list is still navigable mid-query.
+		if !m.filterOn {
+			var cmd tea.Cmd
+			m.table, cmd = m.table.Update(msg)
+			return m, cmd
+		}
 
 	case "alt+c":
 		if len(m.selected) == 0 {

@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 	"strings"
+	"sync"
 
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/sase/api"
@@ -41,12 +42,30 @@ func BrowserSource(f Flags, httpClient *http.Client, st *config.Store) *saseauth
 		// A tenant with no credential of its own starts from the account's.
 		// Narrowing that token's scope to this tenant is what makes a new
 		// tenant usable without another trip through the browser.
-		stored, _ = st.Secrets.Get(config.AccountRefreshTokenKey())
+		//
+		// It goes in as a shared seed rather than as this tenant's own token:
+		// every tenant that needs it is holding the same string, and redeeming
+		// one refresh token from several tenants at once loses all but one.
+		if acct, _ := st.Secrets.Get(config.AccountRefreshTokenKey()); acct != "" {
+			opt.Seed = accountSeed(acct)
+		}
 	}
 	save := func(rt string) error {
 		return st.Secrets.Set(config.RefreshTokenKey(f.TSGID), rt)
 	}
 	return saseauth.NewSource(f.TSGID, stored, opt, save)
+}
+
+// seeds keeps one Seed per account token for the life of the process. A client
+// is built per tenant, each opening its own store, so there is nowhere else for
+// tenants to meet: without this they would each hold a private copy of the one
+// credential and race each other for it. Keying by the token means a fresh
+// sign-in gets a fresh seed.
+var seeds sync.Map
+
+func accountSeed(token string) *saseauth.Seed {
+	v, _ := seeds.LoadOrStore(token, saseauth.NewSeed(token))
+	return v.(*saseauth.Seed)
 }
 
 // OpenStore returns the config store, or nil when it cannot be opened.

@@ -240,6 +240,10 @@ func (m tuiModel) onSessionKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 	return m, nil
 }
 
+// reopenLastTab brings back the most recent tab: the detached session itself
+// when it is still alive, otherwise a fresh session to the same element. A
+// shell that was left with "exit", or that died while detached, has nothing to
+// reattach to, so dialling again is the only thing that can honour alt+t.
 func (m tuiModel) reopenLastTab() (tea.Model, tea.Cmd) {
 	if _, ok := m.sessions.Reattach(); ok {
 		m.status = ""

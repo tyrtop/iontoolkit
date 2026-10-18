@@ -167,3 +167,45 @@ func TestIsAuthFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestAccountSeedIsSharedBetweenTenants(t *testing.T) {
+	st := testStore(t)
+	if err := st.Secrets.Set(config.AccountRefreshTokenKey(), "account-rt"); err != nil {
+		t.Fatalf("seed account token: %v", err)
+	}
+
+	// Two tenants, neither with a credential of its own, must end up holding
+	// the same Seed: a private copy each is the race that left every tenant but
+	// one unable to list its elements.
+	a := BrowserSource(Flags{TSGID: "1", BrowserAuth: true}, nil, st)
+	b := BrowserSource(Flags{TSGID: "2", BrowserAuth: true}, nil, st)
+	if a.Seed() == nil {
+		t.Fatal("Seed() = nil, want the account token to be offered as a seed")
+	}
+	if a.Seed() != b.Seed() {
+		t.Error("each tenant got its own Seed, want one shared across the account")
+	}
+	// The account token must not become the tenant's own, or saving a rotation
+	// would overwrite one tenant's credential with another's.
+	if got := a.RefreshToken(); got != "" {
+		t.Errorf("RefreshToken() = %q, want the account token held only as a seed", got)
+	}
+}
+
+func TestTenantWithItsOwnTokenGetsNoSeed(t *testing.T) {
+	st := testStore(t)
+	if err := st.Secrets.Set(config.AccountRefreshTokenKey(), "account-rt"); err != nil {
+		t.Fatalf("seed account token: %v", err)
+	}
+	if err := st.Secrets.Set(config.RefreshTokenKey("1"), "tenant-rt"); err != nil {
+		t.Fatalf("seed tenant token: %v", err)
+	}
+
+	src := BrowserSource(Flags{TSGID: "1", BrowserAuth: true}, nil, st)
+	if got := src.RefreshToken(); got != "tenant-rt" {
+		t.Errorf("RefreshToken() = %q, want the tenant's own %q", got, "tenant-rt")
+	}
+	if src.Seed() != nil {
+		t.Error("Seed() is set for a tenant with its own credential, want it left alone for tenants that need it")
+	}
+}
