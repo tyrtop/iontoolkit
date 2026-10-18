@@ -31,7 +31,7 @@ func (o Options) Validate() error {
 	if o.Attempts <= 0 {
 		return fmt.Errorf("attempts must be greater than 0")
 	}
-	if o.Attempts*int(o.SessionTimeout) > int(o.ElementTimeout) {
+	if o.SessionTimeout > o.ElementTimeout/time.Duration(o.Attempts) {
 		return fmt.Errorf("attempts * session timeout must be less than element timeout")
 	}
 	return nil
