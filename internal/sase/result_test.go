@@ -25,7 +25,7 @@ func TestRunElementSuccess(t *testing.T) {
 		},
 	}
 
-	got, err := runElement(context.Background(), f, testOpts(), "123")
+	got, err := runElement(context.Background(), f, testOpts(), Target{ElementID: "123"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestRunElementLookupError(t *testing.T) {
 		// session deliberately nil: it must not be reached
 	}
 
-	_, err := runElement(context.Background(), f, testOpts(), "123")
+	_, err := runElement(context.Background(), f, testOpts(), Target{ElementID: "123"})
 	// result.go:29 returns the error unwrapped, unlike the session path below.
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want %v", err, want)
@@ -77,7 +77,7 @@ func TestRunElementRetriesThenSucceeds(t *testing.T) {
 		},
 	}
 
-	if _, err := runElement(context.Background(), f, o, "123"); err != nil {
+	if _, err := runElement(context.Background(), f, o, Target{ElementID: "123"}); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 3 {
@@ -99,7 +99,7 @@ func TestRunElementAllAttemptsFail(t *testing.T) {
 		},
 	}
 
-	_, err := runElement(context.Background(), f, o, "123")
+	_, err := runElement(context.Background(), f, o, Target{ElementID: "123"})
 	if !errors.Is(err, sessionErr) {
 		t.Fatalf("err = %v, want it to wrap %v", err, sessionErr)
 	}

@@ -19,7 +19,7 @@ func (s *Client) ListSites(ctx context.Context) ([]Site, error) {
 		return nil, fmt.Errorf("sites: rate limit wait: %w", err)
 	}
 
-	url := scmBase + "/sites"
+	url := sitesBase + "/sites"
 
 	if s.verbose {
 		fmt.Fprintln(os.Stderr, "GET", url)

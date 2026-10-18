@@ -17,6 +17,11 @@ import (
 
 const scmBase = "https://api.sase.paloaltonetworks.com/sdwan/v3.2/api"
 
+// Sites are on their own version. The portal's own traffic asks v4.13 for them
+// while using v3.2 for elements, and v3.2/sites does not answer, which left
+// every site name unresolved and showing a raw id instead.
+const sitesBase = "https://api.sase.paloaltonetworks.com/sdwan/v4.13/api"
+
 // strata expects a browser UA in the header.
 const browserUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
 
@@ -29,7 +34,8 @@ type Client struct {
 	tokenMu sync.RWMutex
 	token   string
 
-	auth *auth
+	src       TokenSource
+	tokenErrs chan error
 }
 
 func NewClient(client, wsClient *http.Client, token string, verbose bool, rps float64, burst int) *Client {
@@ -107,11 +113,34 @@ func (s *Client) setToken(t string) {
 
 func NewServiceAccountClient(ctx context.Context, client, wsClient *http.Client, id, secret, tsg string, margin time.Duration, verbose bool, rps float64, burst int) (*Client, error) {
 	s := &Client{
-		client:   client,
-		wsClient: wsClient,
-		limiter:  rate.NewLimiter(rate.Limit(rps), burst),
-		verbose:  verbose,
-		auth:     &auth{client: client, id: id, secret: secret, tsg: tsg},
+		client:    client,
+		wsClient:  wsClient,
+		limiter:   rate.NewLimiter(rate.Limit(rps), burst),
+		verbose:   verbose,
+		src:       serviceAccount{client: client, id: id, secret: secret, tsg: tsg},
+		tokenErrs: make(chan error, 1),
+	}
+	ttl, err := s.mint(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if margin >= ttl {
+		return nil, fmt.Errorf("refresh margin %s is not shorter than token lifetime %s", margin, ttl)
+	}
+	go s.refreshLoop(ctx, ttl, margin)
+	return s, nil
+}
+
+// NewTokenSourceClient builds a client around any TokenSource, priming a token
+// before it returns and keeping it fresh afterwards.
+func NewTokenSourceClient(ctx context.Context, client, wsClient *http.Client, src TokenSource, margin time.Duration, verbose bool, rps float64, burst int) (*Client, error) {
+	s := &Client{
+		client:    client,
+		wsClient:  wsClient,
+		limiter:   rate.NewLimiter(rate.Limit(rps), burst),
+		verbose:   verbose,
+		src:       src,
+		tokenErrs: make(chan error, 1),
 	}
 	ttl, err := s.mint(ctx)
 	if err != nil {

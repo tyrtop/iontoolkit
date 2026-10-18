@@ -19,7 +19,7 @@ type Options struct {
 func (o Options) Validate() error {
 	if len(o.Commands) > 0 {
 		if o.Username == "" || o.Password == "" {
-			return fmt.Errorf("ION_USER and ION_PASS must be set when using -cmd")
+			return fmt.Errorf("ION_USER and ION_PASS must be set when using --cmd")
 		}
 	}
 	if o.Concurrency < 1 {

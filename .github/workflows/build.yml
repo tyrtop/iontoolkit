@@ -36,7 +36,9 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -race -cover ./...
+        # Discover's first sign-in opens a real window, which chromedp will not
+        # do without a display. Xvfb comes with the runner image.
+        run: xvfb-run -a go test -race -cover -timeout 5m ./...
 
       - name: Build Linux
         run: |
