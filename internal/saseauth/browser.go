@@ -94,6 +94,10 @@ func LoginSilent(ctx context.Context, tsg string, opt Options) (*Token, error) {
 }
 
 func login(ctx context.Context, tsg string, opt Options, silent bool) (*Token, error) {
+	return loginToken(ctx, tsg, opt, silent)
+}
+
+func loginToken(ctx context.Context, tsg string, opt Options, silent bool) (*Token, error) {
 	p, err := newPKCE()
 	if err != nil {
 		return nil, err

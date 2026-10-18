@@ -13,58 +13,60 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
+var testANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// plain strips styling so assertions compare text rather than escape codes.
+func plain(s string) string { return testANSI.ReplaceAllString(s, "") }
+
 func TestMenuEntries(t *testing.T) {
+	// The menu is now the same four entries whatever is configured: the element
+	// list (mode in its label), the way in to a browser account, settings, quit.
+	want := []string{"elements (shell)", "sign in with browser", "Settings", "Quit"}
+
 	cases := map[string]struct {
 		cfg       *config.Config
 		hasTenant bool
-		want      []string
 	}{
-		"no tenant": {
-			cfg:  &config.Config{},
-			want: []string{"Add Tenant", "Settings", "Quit"},
-		},
-		"one tenant": {
-			cfg:       &config.Config{Tenants: []config.Tenant{{Name: "Acme Co"}}},
-			hasTenant: true,
-			want: []string{
-				"start ION shell for Acme Co",
-				"send batch commands for Acme Co",
-				"Add Tenant", "Settings", "Quit",
-			},
-		},
-		"two tenants": {
-			cfg:       &config.Config{Tenants: []config.Tenant{{Name: "Acme Co"}, {Name: "Lab"}}},
-			hasTenant: true,
-			want: []string{
-				"start ION shell for Acme Co",
-				"send batch commands for Acme Co",
-				"switch tenant", "Add Tenant", "Settings", "Quit",
-			},
-		},
+		"no tenant":   {cfg: &config.Config{}},
+		"one tenant":  {cfg: &config.Config{Tenants: []config.Tenant{{Name: "Acme Co"}}}, hasTenant: true},
+		"two tenants": {cfg: &config.Config{Tenants: []config.Tenant{{Name: "Acme Co"}, {Name: "Lab"}}}, hasTenant: true},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			m := tuiModel{cfg: tc.cfg, hasTenant: tc.hasTenant}
+			root := t.TempDir()
+			m := tuiModel{
+				cfg:       tc.cfg,
+				store:     config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json")),
+				hasTenant: tc.hasTenant,
+			}
 			if tc.hasTenant {
 				m.tenant = tc.cfg.Tenants[0]
 			}
 			got := m.menuEntries()
-			if len(got) != len(tc.want) {
-				t.Fatalf("got %d entries, want %d: %+v", len(got), len(tc.want), got)
+			if len(got) != len(want) {
+				t.Fatalf("got %d entries, want %d: %+v", len(got), len(want), got)
 			}
-			for i := range tc.want {
-				if got[i].label != tc.want[i] {
-					t.Errorf("[%d] = %q, want %q", i, got[i].label, tc.want[i])
+			for i, w := range want {
+				if got[i].label != w {
+					t.Errorf("[%d] = %q, want %q", i, got[i].label, w)
 				}
 			}
 		})
 	}
 }
 
-var testANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-func plain(s string) string { return testANSI.ReplaceAllString(s, "") }
+func TestMenuLabelFollowsTheMode(t *testing.T) {
+	root := t.TempDir()
+	m := tuiModel{
+		cfg:   &config.Config{},
+		store: config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json")),
+		mode:  modeBatch,
+	}
+	if got := m.menuEntries()[0].label; got != "elements (batch)" {
+		t.Errorf("first entry = %q, want the mode in the label", got)
+	}
+}
 
 func TestCacheLine(t *testing.T) {
 	cases := map[string]struct {
@@ -119,7 +121,7 @@ func TestFilterSuggestions(t *testing.T) {
 	m.filter.ShowSuggestions = true
 	m.table = newElementTable()
 
-	m.setElements([]api.Element{
+	setTestElements(&m, []api.Element{
 		{ID: "1", Name: "S0100-RTR-01", SiteID: "s1"},
 		{ID: "2", Name: "S0100-RTR-02", SiteID: "s1"},
 		{ID: "3", Name: "S0100-RTR-03", SiteID: "s1"},
@@ -151,9 +153,9 @@ func TestFilterMatchesSubstringAndSite(t *testing.T) {
 	m := tuiModel{selected: map[string]bool{}, width: 80, height: 24}
 	m.filter = newField("", "", false).input
 	m.table = newElementTable()
-	m.sites = map[string]string{"s1": "Nashville Hub", "s2": "Dallas"}
+	m.sites = map[string]string{"1/s1": "Nashville Hub", "1/s2": "Dallas"}
 
-	m.setElements([]api.Element{
+	setTestElements(&m, []api.Element{
 		{ID: "1", Name: "S0100-RTR-01", SiteID: "s1"},
 		{ID: "2", Name: "S0100-RTR-02", SiteID: "s1"},
 		{ID: "3", Name: "S9999-RTR-01", SiteID: "s2"},
@@ -179,14 +181,21 @@ func TestFilterMatchesSubstringAndSite(t *testing.T) {
 }
 
 func TestSiteNameFallsBackToID(t *testing.T) {
-	m := tuiModel{sites: map[string]string{"s1": "Nashville Hub"}}
-	if got := m.siteName(api.Element{SiteID: "s1"}); got != "Nashville Hub" {
+	// Sites are keyed by tenant, since two tenants can reuse a site identifier.
+	m := tuiModel{sites: map[string]string{"1/s1": "Nashville Hub", "2/s1": "Dallas Hub"}}
+	row := func(tsg, site string) elementRow {
+		return elementRow{Element: api.Element{SiteID: site}, TSG: tsg}
+	}
+	if got := m.siteName(row("1", "s1")); got != "Nashville Hub" {
 		t.Errorf("siteName = %q, want the resolved name", got)
 	}
-	if got := m.siteName(api.Element{SiteID: "unknown"}); got != "unknown" {
+	if got := m.siteName(row("2", "s1")); got != "Dallas Hub" {
+		t.Errorf("siteName = %q, want the other tenant's site of the same id", got)
+	}
+	if got := m.siteName(row("1", "unknown")); got != "unknown" {
 		t.Errorf("siteName = %q, want the raw id", got)
 	}
-	if got := m.siteName(api.Element{}); got != "-" {
+	if got := m.siteName(row("1", "")); got != "-" {
 		t.Errorf("siteName = %q, want -", got)
 	}
 }
@@ -343,7 +352,7 @@ func TestPasteReachesFocusedInput(t *testing.T) {
 	t.Run("filter only when focused", func(t *testing.T) {
 		m := base
 		m.phase = phasePicking
-		m.all = []api.Element{{ID: "1", Name: "S0103-RTR-01"}}
+		m.all = []elementRow{{Element: api.Element{ID: "1", Name: "S0103-RTR-01"}, TSG: "1"}}
 
 		mm, _ := m.Update(tea.PasteMsg{Content: "103"})
 		if got := mm.(tuiModel).filter.Value(); got != "" {
@@ -476,7 +485,7 @@ func pickModel(t *testing.T) tuiModel {
 		t.Fatal(err)
 	}
 	m.phase = phasePicking
-	m.setElements([]api.Element{
+	setTestElements(&m, []api.Element{
 		{ID: "1", Name: "S0100-RTR-01", Connected: true},
 		{ID: "2", Name: "S0100-RTR-02", Connected: true},
 		{ID: "3", Name: "S9999-RTR-01"},
@@ -521,7 +530,9 @@ func TestArrowsMoveTableWhileFiltering(t *testing.T) {
 	}
 }
 
-func TestSpaceSelectsWhileFiltering(t *testing.T) {
+func TestFilteringAndSelectingAreSeparateModes(t *testing.T) {
+	// A query is several terms, so every space while typing belongs to it.
+	// Selection resumes once the filter is applied.
 	m := pickModel(t)
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
 	m = mm.(tuiModel)
@@ -529,12 +540,79 @@ func TestSpaceSelectsWhileFiltering(t *testing.T) {
 
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
 	m = mm.(tuiModel)
-
-	if len(m.selected) != 1 || !m.selected["1"] {
-		t.Errorf("selected = %v, want element 1", m.selected)
+	if got := m.filter.Value(); got != "s0100 " {
+		t.Errorf("filter = %q, want the space typed into it", got)
 	}
-	if got := m.filter.Value(); got != "s0100" {
-		t.Errorf("space typed into the filter: %q", got)
+	if len(m.selected) != 0 {
+		t.Errorf("selected = %v, want no selection while filtering", m.selected)
+	}
+
+	// Enter applies the query and leaves filter mode, keeping what was typed.
+	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	m = mm.(tuiModel)
+	if m.filterOn {
+		t.Error("enter did not leave filter mode")
+	}
+	if got := m.filter.Value(); got != "s0100 " {
+		t.Errorf("filter = %q, want the query kept after applying", got)
+	}
+	if m.phase != phasePicking {
+		t.Errorf("phase = %v, want to stay on the list rather than act on it", m.phase)
+	}
+
+	// Now space selects again.
+	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	m = mm.(tuiModel)
+	if len(m.selected) != 1 {
+		t.Errorf("selected = %v, want space to select once the filter is applied", m.selected)
+	}
+	if got := m.filter.Value(); got != "s0100 " {
+		t.Errorf("filter = %q, want selecting to leave the query alone", got)
+	}
+}
+
+func TestEscClearsTheQueryRatherThanApplyingIt(t *testing.T) {
+	m := pickModel(t)
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
+	m = mm.(tuiModel)
+	m = typeString(t, m, "s0100")
+
+	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	got := mm.(tuiModel)
+	if got.filterOn {
+		t.Error("esc did not leave filter mode")
+	}
+	if got.filter.Value() != "" {
+		t.Errorf("filter = %q, want esc to clear it", got.filter.Value())
+	}
+	if got.phase != phasePicking {
+		t.Errorf("phase = %v, want to stay on the list", got.phase)
+	}
+}
+
+func TestFilterHintNamesOnlyTheKeysThatEndIt(t *testing.T) {
+	m := pickModel(t)
+	m.width, m.height = 200, 40
+	m.spinner = newSpinner("")
+	m.filterOn = true
+
+	out := plain(m.viewPicking())
+	for _, want := range []string{"enter apply", "esc clear", "tab complete"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the filter hint is missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "space select") {
+		t.Errorf("the filter hint still offers space as select:\n%s", out)
+	}
+}
+
+func TestSpaceStillSelectsWithTheFilterClosed(t *testing.T) {
+	m := pickModel(t)
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	got := mm.(tuiModel)
+	if len(got.selected) != 1 {
+		t.Errorf("selected = %v, want space to select when not filtering", got.selected)
 	}
 }
 

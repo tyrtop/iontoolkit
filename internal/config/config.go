@@ -21,11 +21,42 @@ const (
 )
 
 type Tenant struct {
-	Name     string    `json:"name"`
-	TSGID    string    `json:"tsg_id"`
-	ClientID string    `json:"client_id"`
-	Auth     string    `json:"auth,omitempty"`
-	Users    []IONUser `json:"users,omitempty"`
+	Name     string `json:"name"`
+	TSGID    string `json:"tsg_id"`
+	ClientID string `json:"client_id"`
+	Auth     string `json:"auth,omitempty"`
+	// Added means this tenant is part of the working set: its elements are in
+	// the list and searchable across tenants. The set is chosen from the
+	// discovered tenants when signing in, and changed in settings.
+	Added bool      `json:"added,omitempty"`
+	Users []IONUser `json:"users,omitempty"`
+}
+
+// AddedTenants are the tenants in the working set.
+func (c *Config) AddedTenants() []Tenant {
+	if c == nil {
+		return nil
+	}
+	var out []Tenant
+	for _, t := range c.Tenants {
+		if t.Added {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// IsAdded reports whether a tenant ID is in the working set.
+func (c *Config) IsAdded(tsg string) bool {
+	if c == nil {
+		return false
+	}
+	for _, t := range c.Tenants {
+		if t.TSGID == tsg {
+			return t.Added
+		}
+	}
+	return false
 }
 
 func (t Tenant) UsesBrowser() bool { return t.Auth == AuthBrowser }
@@ -41,6 +72,8 @@ func (t Tenant) AuthLabel() string {
 type Config struct {
 	LastTenant  string   `json:"last_tenant,omitempty"`
 	Spinner     string   `json:"spinner,omitempty"`
+	DefaultMode string   `json:"default_mode,omitempty"`
+	AuthMode    string   `json:"auth_mode,omitempty"`
 	AllowWrites bool     `json:"allow_writes,omitempty"`
 	SessionCols int      `json:"session_cols,omitempty"`
 	SessionRows int      `json:"session_rows,omitempty"`
@@ -234,3 +267,7 @@ func ClientSecretKey(tsg string) string { return "tsg/" + tsg + "/client_secret"
 func IONPassKey(tsg, user string) string { return "tsg/" + tsg + "/ion_user/" + user }
 
 func RefreshTokenKey(tsg string) string { return "tsg/" + tsg + "/refresh_token" }
+
+// AccountRefreshTokenKey holds the tenant-less credential a browser sign-in
+// produces. It seeds every tenant that has no credential of its own.
+func AccountRefreshTokenKey() string { return "account/refresh_token" }

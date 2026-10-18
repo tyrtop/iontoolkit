@@ -94,8 +94,16 @@ func (s *Source) Token(ctx context.Context) (string, time.Duration, error) {
 	if ctx.Err() != nil {
 		return "", 0, err
 	}
-	return "", 0, fmt.Errorf("%w: %v", ErrInteractiveRequired, err)
+	return "", 0, permanentError{fmt.Errorf("%w: %v", ErrInteractiveRequired, err)}
 }
+
+// permanentError marks a failure that will not resolve without a human, so a
+// refresh loop can stop rather than retry forever.
+type permanentError struct{ err error }
+
+func (e permanentError) Error() string   { return e.err.Error() }
+func (e permanentError) Unwrap() error   { return e.err }
+func (e permanentError) Temporary() bool { return false }
 
 // SignIn runs the interactive flow, opening a browser window when no kept
 // session can be reused, and stores the resulting refresh token.

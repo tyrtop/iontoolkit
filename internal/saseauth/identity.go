@@ -67,6 +67,17 @@ func (i Identity) ScopedTo(tsg string) bool {
 	return false
 }
 
+// SessionExpiry reads when a stored refresh token stops working, so a session's
+// remaining life can be shown before any token has been minted this run.
+func SessionExpiry(refreshToken string) (time.Time, bool) {
+	c := jwtClaims(refreshToken)
+	if c == nil {
+		return time.Time{}, false
+	}
+	exp := claimTime(c, "exp")
+	return exp, !exp.IsZero()
+}
+
 // jwtClaims reads a JWT payload without verifying its signature. These tokens
 // arrive over TLS from the issuer and are only used to label the session and to
 // check the tenant scope, never to make an access decision, so there is nothing

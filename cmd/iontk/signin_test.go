@@ -40,86 +40,24 @@ func menuLabels(m tuiModel) []string {
 	return out
 }
 
-func TestSignInEntryOnlyForBrowserTenants(t *testing.T) {
-	tests := []struct {
-		name   string
-		tenant config.Tenant
-		want   bool
-	}{
-		{"browser tenant", config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser}, true},
-		{"service account tenant", config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthServiceAccount}, false},
-		{"tenant saved before auth modes existed", config.Tenant{Name: "Acme Co", TSGID: "1"}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := signInModel(t, tt.tenant)
-			var found bool
-			for _, e := range m.menuEntries() {
-				if e.action == actSignIn {
-					found = true
-				}
+func TestSignInEntryIsAlwaysOffered(t *testing.T) {
+	// It is the way in to the tenant list, not a per-tenant re-auth, so it does
+	// not depend on which tenant happens to be active.
+	for _, tenant := range []config.Tenant{
+		{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser},
+		{Name: "Acme Co", TSGID: "1", Auth: config.AuthServiceAccount},
+		{},
+	} {
+		m := signInModel(t, tenant)
+		var found bool
+		for _, e := range m.menuEntries() {
+			if e.action == actSignIn {
+				found = true
 			}
-			if found != tt.want {
-				t.Errorf("sign-in entry present = %v, want %v (menu: %v)", found, tt.want, menuLabels(m))
-			}
-		})
-	}
-}
-
-func TestAddTenantAsksForTheMethodFirst(t *testing.T) {
-	m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1"})
-	m.phase = phaseMenu
-
-	// Walk the menu to "Add Tenant" rather than assuming its index.
-	idx := -1
-	for i, e := range m.menuEntries() {
-		if e.action == actAddTenant {
-			idx = i
 		}
-	}
-	if idx < 0 {
-		t.Fatalf("no Add Tenant entry in %v", menuLabels(m))
-	}
-	m.menuCursor = idx
-
-	mm, _ := m.onMenuKey("enter")
-	got := mm.(tuiModel)
-	if got.phase != phaseAuthPick {
-		t.Fatalf("phase = %v, want phaseAuthPick", got.phase)
-	}
-	if len(got.form) != 0 {
-		t.Errorf("a form was opened before the method was chosen: %d fields", len(got.form))
-	}
-}
-
-func TestAuthPickShapesTheTenantForm(t *testing.T) {
-	tests := []struct {
-		name       string
-		cursor     int
-		wantFields int
-		wantAuth   string
-	}{
-		{"service account keeps the client id and secret", 0, 4, config.AuthServiceAccount},
-		{"browser needs only name and tenant", 1, 2, config.AuthBrowser},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1"})
-			m.phase = phaseAuthPick
-			m.authCursor = tt.cursor
-
-			mm, _ := m.onAuthPickKey("enter")
-			got := mm.(tuiModel)
-			if got.phase != phaseAddTenant {
-				t.Fatalf("phase = %v, want phaseAddTenant", got.phase)
-			}
-			if len(got.form) != tt.wantFields {
-				t.Errorf("form has %d fields, want %d", len(got.form), tt.wantFields)
-			}
-			if got.formAuth != tt.wantAuth {
-				t.Errorf("formAuth = %q, want %q", got.formAuth, tt.wantAuth)
-			}
-		})
+		if !found {
+			t.Errorf("no sign-in entry for tenant %+v (menu: %v)", tenant, menuLabels(m))
+		}
 	}
 }
 
@@ -215,9 +153,9 @@ func TestSignInWaitingScreenSaysWhatItIsWaitingFor(t *testing.T) {
 func TestSignedInLandsOnAConfirmation(t *testing.T) {
 	m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
 	m.phase = phaseSignIn
-	m.signInResume = true
 	m.spinner = newSpinner("")
 
+	// An explicit sign-in has nothing to replay, so the result is shown.
 	mm, cmd := m.Update(signedInMsg{
 		client: &api.Client{},
 		ident:  saseauth.Identity{Name: "Ben Hall", Email: "ben@example.test", TSG: "1"},
@@ -230,15 +168,59 @@ func TestSignedInLandsOnAConfirmation(t *testing.T) {
 	if got.client == nil {
 		t.Error("the verified client was discarded, so the next step would authenticate again")
 	}
+	if got.ident.Name != "Ben Hall" {
+		t.Errorf("ident.Name = %q, want it kept for the confirmation", got.ident.Name)
+	}
 	if got.cacheState != cacheUpdating {
 		t.Errorf("cacheState = %v, want elements fetched behind the confirmation", got.cacheState)
 	}
 	if cmd == nil {
 		t.Error("no command returned, want the element fetch started")
 	}
-	if !got.signInResume {
-		t.Error("signInResume was cleared too early; dismissing the confirmation should resume")
-	}
+}
+
+func TestSignInInTheMiddleOfAnActionSkipsTheConfirmation(t *testing.T) {
+	t.Run("an interrupted element list resumes straight away", func(t *testing.T) {
+		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
+		m.phase = phaseSignIn
+		m.signInResume = true
+		m.spinner = newSpinner("")
+		m.selected = map[string]bool{}
+
+		mm, _ := m.Update(signedInMsg{client: &api.Client{}})
+		got := mm.(tuiModel)
+		if got.phase == phaseSignedIn {
+			t.Error("a mid-action sign-in stopped to show a confirmation")
+		}
+		if got.signInResume {
+			t.Error("signInResume stayed set after resuming")
+		}
+	})
+
+	t.Run("interrupted sessions are reopened", func(t *testing.T) {
+		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
+		m.phase = phaseSignIn
+		m.spinner = newSpinner("")
+		m.selected = map[string]bool{}
+		m.sessions = ionterm.NewManager()
+		m.resumeSessions = []sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}}
+		setTestClient(&m, &api.Client{})
+
+		mm, cmd := m.Update(signedInMsg{client: &api.Client{}})
+		got := mm.(tuiModel)
+		if got.phase == phaseSignedIn {
+			t.Error("a mid-action sign-in stopped to show a confirmation")
+		}
+		if len(got.resumeSessions) != 0 {
+			t.Error("resumeSessions was not consumed, so it would replay again")
+		}
+		if got.connecting != "s0100-rtr-01" {
+			t.Errorf("connecting = %q, want the interrupted session reopened", got.connecting)
+		}
+		if cmd == nil {
+			t.Error("no command returned, want the session dial started")
+		}
+	})
 }
 
 func TestDismissingTheConfirmation(t *testing.T) {
@@ -464,6 +446,9 @@ func TestMenuKeybinds(t *testing.T) {
 		m.filter = newField("", "", false).input
 		m.width, m.height = 100, 30
 
+		m.cfg = &config.Config{Tenants: []config.Tenant{
+			{Name: "Acme Co", TSGID: "1", Added: true},
+		}}
 		els := []api.Element{{ID: "e1", Name: "s0100-rtr-01"}, {ID: "e2", Name: "s0100-rtr-02"}}
 		if err := m.store.SaveCache(&config.ElementCache{TSGID: "1", FetchedAt: time.Now(), Elements: els}); err != nil {
 			t.Fatalf("SaveCache() error = %v", err)
@@ -475,6 +460,141 @@ func TestMenuKeybinds(t *testing.T) {
 		// still have been restored, or a reattach would land on an empty list.
 		if len(got.all) != len(els) {
 			t.Errorf("loaded %d elements, want %d restored from cache", len(got.all), len(els))
+		}
+	})
+}
+
+func TestIsAuthFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{
+			name: "rejected websocket handshake",
+			msg:  "dial: failed to WebSocket dial: expected handshake response status code 101 but got 401",
+			want: true,
+		},
+		{
+			name: "forbidden handshake",
+			msg:  "expected handshake response status code 101 but got 403",
+			want: true,
+		},
+		{"rest unauthorized", `element 123: status 401 Unauthorized: {"message":"nope"}`, true},
+		{"rest forbidden", "profile: status 403 Forbidden: ", true},
+		{"refresh grant rejected", `token: status 400: {"error":"invalid_grant"}`, true},
+		// Things that are not the credential must not trigger a browser.
+		{"element genuinely missing", "element 123: status 404 Not Found: ", false},
+		{"device unreachable", "expected handshake response status code 101 but got 502", false},
+		{"rate limited", "element 123: status 429 Too Many Requests: ", false},
+		{"network down", "dial tcp: lookup api.sase.paloaltonetworks.com: no such host", false},
+		{"ion login failed", "element 123: run: login failed after 1 attempt", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isAuthFailure(tt.msg); got != tt.want {
+				t.Errorf("isAuthFailure(%q) = %v, want %v", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
+	t.Run("a rejected dial re-auths and replays the same elements", func(t *testing.T) {
+		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
+		m.phase = phaseSession
+		m.spinner = newSpinner("")
+		m.selected = map[string]bool{}
+		m.sessions = ionterm.NewManager()
+		m.lastTargets = []sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}, {eid: "e2", name: "s0100-rtr-02", tsg: "1"}}
+
+		mm, cmd := m.Update(sessionErrMsg("dial: failed to WebSocket dial: expected handshake response status code 101 but got 401"))
+		got := mm.(tuiModel)
+		if got.phase != phaseSignIn {
+			t.Fatalf("phase = %v, want phaseSignIn so the browser opens", got.phase)
+		}
+		if len(got.resumeSessions) != 2 {
+			t.Errorf("resumeSessions = %v, want both interrupted elements queued", got.resumeSessions)
+		}
+		if cmd == nil {
+			t.Error("no command returned, want the browser opened")
+		}
+	})
+
+	t.Run("an ordinary dial failure is left alone", func(t *testing.T) {
+		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
+		m.phase = phaseSession
+		m.sessions = ionterm.NewManager()
+		m.lastTargets = []sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}}
+
+		mm, _ := m.Update(sessionErrMsg("element e1: run: login failed after 1 attempt"))
+		got := mm.(tuiModel)
+		if got.phase == phaseSignIn {
+			t.Error("a device-side failure opened a browser")
+		}
+		if len(got.resumeSessions) != 0 {
+			t.Error("a device-side failure queued a replay")
+		}
+	})
+
+	t.Run("a rejected element fetch re-auths and resumes", func(t *testing.T) {
+		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
+		m.phase = phaseLoading
+		m.spinner = newSpinner("")
+		m.selected = map[string]bool{}
+
+		mm, cmd := m.Update(elementsErrMsg("status 401 Unauthorized: "))
+		got := mm.(tuiModel)
+		if got.phase != phaseSignIn {
+			t.Fatalf("phase = %v, want phaseSignIn", got.phase)
+		}
+		if !got.signInResume {
+			t.Error("signInResume = false, want the list reload queued")
+		}
+		if cmd == nil {
+			t.Error("no command returned, want the browser opened")
+		}
+	})
+
+	t.Run("a known-dead credential re-auths before dialling at all", func(t *testing.T) {
+		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
+		m.phase = phasePicking
+		m.spinner = newSpinner("")
+		m.selected = map[string]bool{}
+		m.sessions = ionterm.NewManager()
+		setTestClient(&m, &api.Client{})
+		m.tokenDead = "sign-in expired"
+
+		mm, cmd := m.openSessions([]sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}})
+		got := mm.(tuiModel)
+		if got.phase != phaseSignIn {
+			t.Fatalf("phase = %v, want the browser opened instead of a doomed dial", got.phase)
+		}
+		if got.connecting != "" {
+			t.Errorf("connecting = %q, want no dial attempted", got.connecting)
+		}
+		if len(got.resumeSessions) != 1 {
+			t.Errorf("resumeSessions = %v, want the request queued", got.resumeSessions)
+		}
+		if cmd == nil {
+			t.Error("no command returned")
+		}
+	})
+
+	t.Run("a service account tenant never gets a browser", func(t *testing.T) {
+		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthServiceAccount})
+		m.phase = phasePicking
+		m.spinner = newSpinner("")
+		m.selected = map[string]bool{}
+		m.sessions = ionterm.NewManager()
+		setTestClient(&m, &api.Client{})
+		m.tokenDead = "sign-in expired"
+
+		mm, _ := m.openSessions([]sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}})
+		got := mm.(tuiModel)
+		if got.phase == phaseSignIn {
+			t.Error("a service account tenant was sent to a browser sign-in")
 		}
 	})
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -81,5 +82,88 @@ func TestRunRespectsConcurrency(t *testing.T) {
 
 	if got := maxInFlight.Load(); got > 3 {
 		t.Errorf("max concurrent elements = %d, want <= 3", got)
+	}
+}
+
+func TestTargetCredsPreferTheirOwn(t *testing.T) {
+	o := Options{Username: "fallback-user", Password: "fallback-pass"}
+
+	tests := []struct {
+		name             string
+		target           Target
+		wantUser, wantPw string
+	}{
+		{
+			name:     "a target with its own login uses it",
+			target:   Target{ElementID: "1", User: "tenant-user", Pass: "tenant-pass"},
+			wantUser: "tenant-user", wantPw: "tenant-pass",
+		},
+		{
+			name:     "a target with none falls back to the options",
+			target:   Target{ElementID: "1"},
+			wantUser: "fallback-user", wantPw: "fallback-pass",
+		},
+		{
+			name:     "a half-filled target fills the rest from the options",
+			target:   Target{ElementID: "1", User: "tenant-user"},
+			wantUser: "tenant-user", wantPw: "fallback-pass",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			user, pass := tt.target.creds(o)
+			if user != tt.wantUser || pass != tt.wantPw {
+				t.Errorf("creds() = %q/%q, want %q/%q", user, pass, tt.wantUser, tt.wantPw)
+			}
+		})
+	}
+}
+
+// credRecorder notes which login each element was dialled with.
+type credRecorder struct {
+	mu   sync.Mutex
+	seen map[string][2]string
+}
+
+func (c *credRecorder) LookupElement(ctx context.Context, eid string) (api.Element, error) {
+	return api.Element{ID: eid, Name: "e" + eid}, nil
+}
+
+func (c *credRecorder) ToolkitSession(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.seen == nil {
+		c.seen = map[string][2]string{}
+	}
+	c.seen[eid] = [2]string{user, pass}
+	return []ioncli.CommandOutput{{Command: cmds[0], Output: "ok"}}, nil
+}
+
+func TestRunStreamDialsEachElementWithItsOwnLogin(t *testing.T) {
+	// A run spanning tenants must not send one tenant's device login to
+	// another's routers.
+	rec := &credRecorder{}
+	o := testOpts()
+	o.Commands = []string{"dump device status"}
+	o.Username, o.Password = "should-not-be-used", "should-not-be-used"
+
+	targets := []Target{
+		{ElementID: "1", Client: rec, User: "tsc-ops", Pass: "pw-tsc"},
+		{ElementID: "2", Client: rec, User: "nb-ops", Pass: "pw-nb"},
+	}
+
+	for ev := range RunStream(context.Background(), o, targets) {
+		if ev.Done && ev.Result.Error != "" {
+			t.Fatalf("element %s failed: %s", ev.Element, ev.Result.Error)
+		}
+	}
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if got := rec.seen["1"]; got != [2]string{"tsc-ops", "pw-tsc"} {
+		t.Errorf("element 1 dialled with %v, want its own tenant's login", got)
+	}
+	if got := rec.seen["2"]; got != [2]string{"nb-ops", "pw-nb"} {
+		t.Errorf("element 2 dialled with %v, want its own tenant's login", got)
 	}
 }

@@ -147,7 +147,7 @@ func (m tuiModel) activateSlash() (tea.Model, tea.Cmd) {
 			if s == nil {
 				return m.closeSlash(), nil
 			}
-			creds := m.sessionCreds()
+			creds := m.activeSessionCreds()
 			if !s.Login(creds) {
 				m = m.closeSlash()
 				m.status = "no stored credentials for this tenant"
