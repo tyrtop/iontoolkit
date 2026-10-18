@@ -52,6 +52,10 @@ func OpenAt(root string, s Secrets) *Store {
 
 func (s *Store) configPath() string { return filepath.Join(s.Root, "config.json") }
 
+// BrowserDir is the browser profile kept for sign-in. Holding the identity
+// provider's session cookie here is what lets a later sign-in skip the window.
+func (s *Store) BrowserDir() string { return filepath.Join(s.Root, "browser") }
+
 func (s *Store) Config() (*Config, error) {
 	b, err := os.ReadFile(s.configPath())
 	if os.IsNotExist(err) {
@@ -197,3 +201,5 @@ func (t *Tenant) RemoveUser(name string) bool {
 func ClientSecretKey(tsg string) string { return "tsg/" + tsg + "/client_secret" }
 
 func IONPassKey(tsg, user string) string { return "tsg/" + tsg + "/ion_user/" + user }
+
+func RefreshTokenKey(tsg string) string { return "tsg/" + tsg + "/refresh_token" }

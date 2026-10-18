@@ -29,7 +29,7 @@ type Client struct {
 	tokenMu sync.RWMutex
 	token   string
 
-	auth *auth
+	src TokenSource
 }
 
 func NewClient(client, wsClient *http.Client, token string, verbose bool, rps float64, burst int) *Client {
@@ -111,7 +111,28 @@ func NewServiceAccountClient(ctx context.Context, client, wsClient *http.Client,
 		wsClient: wsClient,
 		limiter:  rate.NewLimiter(rate.Limit(rps), burst),
 		verbose:  verbose,
-		auth:     &auth{client: client, id: id, secret: secret, tsg: tsg},
+		src:      serviceAccount{client: client, id: id, secret: secret, tsg: tsg},
+	}
+	ttl, err := s.mint(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if margin >= ttl {
+		return nil, fmt.Errorf("refresh margin %s is not shorter than token lifetime %s", margin, ttl)
+	}
+	go s.refreshLoop(ctx, ttl, margin)
+	return s, nil
+}
+
+// NewTokenSourceClient builds a client around any TokenSource, priming a token
+// before it returns and keeping it fresh afterwards.
+func NewTokenSourceClient(ctx context.Context, client, wsClient *http.Client, src TokenSource, margin time.Duration, verbose bool, rps float64, burst int) (*Client, error) {
+	s := &Client{
+		client:   client,
+		wsClient: wsClient,
+		limiter:  rate.NewLimiter(rate.Limit(rps), burst),
+		verbose:  verbose,
+		src:      src,
 	}
 	ttl, err := s.mint(ctx)
 	if err != nil {
