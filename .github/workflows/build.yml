@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - master
+      - dev
+  pull_request:
+    branches:
+      - master
 
 jobs:
   build:
@@ -19,8 +23,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt -w:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
       - name: Test
-        run: go test ./...
+        run: go test -race -cover ./...
 
       - name: Build Linux
         run: |
@@ -38,3 +54,4 @@ jobs:
         with:
           name: iontk-builds
           path: dist/
+

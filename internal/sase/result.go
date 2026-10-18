@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
@@ -20,7 +19,7 @@ type Result struct {
 	Commands  []ioncli.CommandOutput `json:"commands,omitempty"`
 }
 
-func runElement(ctx context.Context, client *api.Client, o Options, eid string) (Result, error) {
+func runElement(ctx context.Context, client Client, o Options, eid string) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, o.ElementTimeout)
 	defer cancel()
 
@@ -57,7 +56,7 @@ func runElement(ctx context.Context, client *api.Client, o Options, eid string) 
 	}, nil
 }
 
-func attemptSession(ctx context.Context, client *api.Client, o Options, eid, prompt string) ([]ioncli.CommandOutput, error) {
+func attemptSession(ctx context.Context, client Client, o Options, eid, prompt string) ([]ioncli.CommandOutput, error) {
 	ctx, cancel := context.WithTimeout(ctx, o.SessionTimeout)
 	defer cancel()
 	return client.ToolkitSession(ctx, eid, prompt, o.Username, o.Password, o.Commands)
