@@ -1,36 +1,21 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
-	"tyrtop.com/iontk/internal/sase/api"
+	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/tui"
 )
 
 var (
-	flagElement       string
-	flagElementsPath  string
-	flagCommands      []string
-	flagConcurrency   int
-	flagElementTO     time.Duration
-	flagSessionTO     time.Duration
-	flagAttempts      int
-	flagHTTPTimeout   time.Duration
-	flagRPS           float64
-	flagBurst         int
-	flagRefreshMargin time.Duration
-	flagVerbose       bool
-	flagNoProgress    bool
-	flagAllowWrites   bool
-	flagTSG           string
-	flagFormat        string
-	flagOut           string
+	flagElement      string
+	flagElementsPath string
+	flagCommands     []string
+	flagNoProgress   bool
+	flagFormat       string
+	flagOut          string
 )
 
 var rootCmd = &cobra.Command{
@@ -71,7 +56,8 @@ Credentials come from the environment or a .env in the working directory:
 		case flagElementsPath != "":
 			return fmt.Errorf("--elements-path needs --cmd; use --element for a single interactive session")
 		default:
-			return runTUI(cmd.Context())
+			tui.Version = buildVersion()
+			return tui.Run(cmd.Context())
 		}
 	},
 }
@@ -81,68 +67,22 @@ func init() {
 	pf.StringVarP(&flagElement, "element", "e", "", "element ID of the target ION")
 	pf.StringVarP(&flagElementsPath, "elements-path", "f", "", `file of element IDs, one per line ("-" reads stdin)`)
 	pf.StringArrayVarP(&flagCommands, "cmd", "c", nil, "command to run; repeatable, or comma separated")
-	pf.IntVarP(&flagConcurrency, "concurrency", "n", 10, "elements worked in parallel")
-	pf.DurationVar(&flagElementTO, "element-timeout", 60*time.Second, "per-element deadline including the CLI session")
-	pf.DurationVar(&flagSessionTO, "session-timeout", 20*time.Second, "deadline for a single login attempt")
+	pf.IntVarP(&app.Defaults.Concurrency, "concurrency", "n", app.Defaults.Concurrency, "elements worked in parallel")
+	pf.DurationVar(&app.Defaults.ElementTimeout, "element-timeout", app.Defaults.ElementTimeout, "per-element deadline including the CLI session")
+	pf.DurationVar(&app.Defaults.SessionTimeout, "session-timeout", app.Defaults.SessionTimeout, "deadline for a single login attempt")
 	// Defaults to 1 to prevent executing config changes unintentionally.
 	// Multiple attempts plus a write to the device can cause undesirable behavior.
-	pf.IntVar(&flagAttempts, "attempts", 1, "login attempts before the element is dropped")
-	pf.DurationVar(&flagHTTPTimeout, "http-timeout", 15*time.Second, "timeout for the element lookup")
-	pf.Float64Var(&flagRPS, "rps", 5, "API requests per second")
-	pf.IntVar(&flagBurst, "burst", 10, "burst allowance on top of --rps")
-	pf.DurationVar(&flagRefreshMargin, "refresh-margin", 75*time.Second, "re-mint the service account token this long before it expires")
-	pf.BoolVarP(&flagVerbose, "verbose", "v", false, "print request details, rate limit headers, attempt errors")
+	pf.IntVar(&app.Defaults.Attempts, "attempts", app.Defaults.Attempts, "login attempts before the element is dropped")
+	pf.DurationVar(&app.Defaults.HTTPTimeout, "http-timeout", app.Defaults.HTTPTimeout, "timeout for the element lookup")
+	pf.Float64Var(&app.Defaults.RPS, "rps", app.Defaults.RPS, "API requests per second")
+	pf.IntVar(&app.Defaults.Burst, "burst", app.Defaults.Burst, "burst allowance on top of --rps")
+	pf.DurationVar(&app.Defaults.RefreshMargin, "refresh-margin", app.Defaults.RefreshMargin, "re-mint the service account token this long before it expires")
+	pf.BoolVarP(&app.Defaults.Verbose, "verbose", "v", app.Defaults.Verbose, "print request details, rate limit headers, attempt errors")
 	pf.BoolVar(&flagNoProgress, "no-progress", false, "never draw the batch progress bar")
-	pf.BoolVar(&flagAllowWrites, "allow-writes", false, "permit commands that are not read-only")
-	pf.StringVar(&flagTSG, "tsg", "", "tenant service group ID (overrides SCM_TSG_ID)")
+	pf.BoolVar(&app.Defaults.AllowWrites, "allow-writes", app.Defaults.AllowWrites, "permit commands that are not read-only")
+	pf.StringVar(&app.Defaults.TSGID, "tsg", "", "tenant service group ID (overrides SCM_TSG_ID)")
 	pf.StringVar(&flagFormat, "format", "", `batch output format: "json", "jsonl", or "text" (default from settings, else json)`)
 	pf.StringVar(&flagOut, "out", "", `write batch output to this file ("-" is stdout; default from settings)`)
 
 	rootCmd.AddCommand(runCmd, shellCmd, versionCmd)
-}
-
-func baseFlags() flags {
-	f := flags{
-		Token:          os.Getenv("SCM_TOKEN"),
-		ClientID:       os.Getenv("SCM_CLIENT_ID"),
-		ClientSecret:   os.Getenv("SCM_CLIENT_SECRET"),
-		TSGID:          os.Getenv("SCM_TSG_ID"),
-		IONUsername:    os.Getenv("ION_USER"),
-		IONPassword:    os.Getenv("ION_PASS"),
-		HTTPTimeout:    flagHTTPTimeout,
-		Verbose:        flagVerbose,
-		RPS:            flagRPS,
-		Burst:          flagBurst,
-		RefreshMargin:  flagRefreshMargin,
-		Concurrency:    flagConcurrency,
-		ElementTimeout: flagElementTO,
-		SessionTimeout: flagSessionTO,
-		Attempts:       flagAttempts,
-	}
-	if flagTSG != "" {
-		f.TSGID = flagTSG
-	}
-	return f
-}
-
-func newClient(ctx context.Context, f flags, logw io.Writer) (*api.Client, error) {
-	wsClient := &http.Client{Transport: &http.Transport{
-		MaxConnsPerHost:     f.Concurrency,
-		MaxIdleConnsPerHost: 50,
-		TLSHandshakeTimeout: 10 * time.Second,
-	}}
-	httpClient := &http.Client{Timeout: f.HTTPTimeout}
-
-	if f.Token != "" {
-		fmt.Fprintln(logw, "using SCM_TOKEN")
-		return api.NewClient(httpClient, wsClient, f.Token, f.Verbose, f.RPS, f.Burst), nil
-	}
-	if f.BrowserAuth {
-		fmt.Fprintln(logw, "using the browser sign-in for this tenant")
-		src := browserSource(f, httpClient, openStore())
-		return api.NewTokenSourceClient(ctx, httpClient, wsClient, src, f.RefreshMargin, f.Verbose, f.RPS, f.Burst)
-	}
-	fmt.Fprintln(logw, "minting from service account")
-	return api.NewServiceAccountClient(ctx, httpClient, wsClient,
-		f.ClientID, f.ClientSecret, f.TSGID, f.RefreshMargin, f.Verbose, f.RPS, f.Burst)
 }
