@@ -34,6 +34,21 @@ func settingsModel(t *testing.T) tuiModel {
 	return m
 }
 
+// navTo walks the nav pane down to section want, so these tests do not depend
+// on which sections happen to sit next to each other.
+func navTo(t *testing.T, m tuiModel, want int) tuiModel {
+	t.Helper()
+	for i := 0; i < len(setSections); i++ {
+		if m.setSection == want {
+			return m
+		}
+		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+		m = mm.(tuiModel)
+	}
+	t.Fatalf("never reached section %d; stopped at %d", want, m.setSection)
+	return m
+}
+
 func TestSettingsNavAndContentFocus(t *testing.T) {
 	m := settingsModel(t)
 
@@ -41,13 +56,9 @@ func TestSettingsNavAndContentFocus(t *testing.T) {
 		t.Fatal("settings should start on the nav pane")
 	}
 
-	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
-	m = mm.(tuiModel)
-	if m.setSection != secTenants {
-		t.Errorf("section = %d, want secTenants", m.setSection)
-	}
+	m = navTo(t, m, secTenants)
 
-	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	m = mm.(tuiModel)
 	if m.setFocus != focusContent {
 		t.Fatal("tab should move into the content pane")
@@ -424,13 +435,9 @@ func TestEnterOpensSectionFromNav(t *testing.T) {
 		t.Fatal("expected nav focus")
 	}
 
-	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
-	m = mm.(tuiModel)
-	if m.setSection != secTenants {
-		t.Fatalf("section = %d, want secTenants", m.setSection)
-	}
+	m = navTo(t, m, secTenants)
 
-	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = mm.(tuiModel)
 	if m.setFocus != focusContent {
 		t.Fatal("enter from the nav pane should open the section")

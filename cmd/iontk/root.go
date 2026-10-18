@@ -29,6 +29,8 @@ var (
 	flagNoProgress    bool
 	flagAllowWrites   bool
 	flagTSG           string
+	flagFormat        string
+	flagOut           string
 )
 
 var rootCmd = &cobra.Command{
@@ -93,6 +95,8 @@ func init() {
 	pf.BoolVar(&flagNoProgress, "no-progress", false, "never draw the batch progress bar")
 	pf.BoolVar(&flagAllowWrites, "allow-writes", false, "permit commands that are not read-only")
 	pf.StringVar(&flagTSG, "tsg", "", "tenant service group ID (overrides SCM_TSG_ID)")
+	pf.StringVar(&flagFormat, "format", "", `batch output format: "json", "jsonl", or "text" (default from settings, else json)`)
+	pf.StringVar(&flagOut, "out", "", `write batch output to this file ("-" is stdout; default from settings)`)
 
 	rootCmd.AddCommand(runCmd, shellCmd, versionCmd)
 }

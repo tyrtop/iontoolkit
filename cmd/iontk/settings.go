@@ -15,12 +15,13 @@ const (
 	focusContent
 )
 
-var setSections = []string{"General", "Tenants", "Users", "Session", "Debug"}
+var setSections = []string{"General", "Batch", "Tenants", "Users", "Session", "Debug"}
 
 func label(s string) string { return styleDim.Render(fmt.Sprintf("%-13s", s)) }
 
 const (
 	secGeneral = iota
+	secBatch
 	secTenants
 	secUsers
 	secSession
@@ -31,6 +32,8 @@ func (m tuiModel) sectionRows() int {
 	switch m.setSection {
 	case secGeneral:
 		return 2
+	case secBatch:
+		return 3
 	case secTenants:
 		return len(m.cfg.Tenants)
 	case secUsers:
@@ -99,6 +102,8 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 	switch m.setSection {
 	case secGeneral:
 		return m.onGeneralKey(key)
+	case secBatch:
+		return m.onBatchKey(key)
 	case secTenants:
 		return m.onTenantsKey(key)
 	case secUsers:
@@ -253,6 +258,25 @@ func (m tuiModel) sectionContent() []string {
 	var out []string
 
 	switch m.setSection {
+	case secBatch:
+		dest := styleDim.Render("stdout")
+		if m.cfg.BatchToFile {
+			dest = styleElement.Render("file")
+		}
+		folder := styleWarn.Render("not set")
+		if m.cfg.BatchDir != "" {
+			folder = styleDim.Render(truncate(m.cfg.BatchDir, 44))
+		}
+		out = append(out,
+			label("format")+styleElement.Render(m.batchFormat())+
+				styleDim.Render("  "+formatHelp(m.batchFormat())),
+			label("output")+dest,
+			label("folder")+folder,
+		)
+		if m.cfg.BatchToFile && m.cfg.BatchDir == "" {
+			out = append(out, "", styleWarn.Render("set a folder, or output falls back to stdout"))
+		}
+
 	case secGeneral:
 		guard := styleOK.Render("read-only enforced")
 		if m.cfg.AllowWrites {
@@ -338,6 +362,8 @@ func (m tuiModel) sectionHint() string {
 	switch m.setSection {
 	case secGeneral:
 		return "↑↓ row · enter change · tab back · esc back"
+	case secBatch:
+		return "↑↓ row · enter change · tab back · esc back"
 	case secTenants:
 		return "↑↓ row · enter edit · s switch · u add user · x forget · tab back"
 	case secUsers:
@@ -396,4 +422,47 @@ func (m tuiModel) viewSettings() string {
 	}
 
 	return body + "\n" + footer(m.status, m.sectionHint())
+}
+
+// batchFormat is the saved format, normalized so an unset or stale value still
+// displays as something real.
+func (m tuiModel) batchFormat() string {
+	f, err := normalizeFormat(m.cfg.BatchFormat)
+	if err != nil {
+		return formatJSON
+	}
+	return f
+}
+
+func (m tuiModel) onBatchKey(key string) (tea.Model, tea.Cmd) {
+	switch m.setCursor {
+	case 0:
+		if key != "enter" && key != " " && key != "space" {
+			return m, nil
+		}
+		m.cfg.BatchFormat = nextFormat(m.batchFormat())
+	case 1:
+		if key != "enter" && key != " " && key != "space" {
+			return m, nil
+		}
+		m.cfg.BatchToFile = !m.cfg.BatchToFile
+	case 2:
+		if key != "enter" {
+			return m, nil
+		}
+		return m.openBatchDirForm()
+	default:
+		return m, nil
+	}
+
+	if err := m.store.SaveConfig(m.cfg); err != nil {
+		m.status = err.Error()
+	}
+	return m, nil
+}
+
+func (m tuiModel) openBatchDirForm() (tea.Model, tea.Cmd) {
+	dir := newField("folder", "~/ion-reports", false)
+	dir.input.SetValue(m.cfg.BatchDir)
+	return m.openForm(formBatchDir, "Folder for batch output", phaseAddTenant, []formField{dir})
 }

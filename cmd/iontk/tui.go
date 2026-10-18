@@ -78,6 +78,7 @@ const (
 	formUser
 	formPassword
 	formEditPass
+	formBatchDir
 	formEditTenant
 	formEditUser
 	formGeometry
@@ -416,6 +417,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resOpen, m.resScroll = false, 0
 		m.resTable.SetCursor(0)
 		m.applyResultFilter()
+		if note := m.saveBatchResults(); note != "" {
+			m.status = note
+		}
 		return m, nil
 
 	case tea.KeyPressMsg:
