@@ -36,7 +36,7 @@ const (
 func (m tuiModel) sectionRows() int {
 	switch m.setSection {
 	case secGeneral:
-		return 3
+		return 4
 	case secBatch:
 		return 3
 	case secTenants:
@@ -123,10 +123,12 @@ func (m tuiModel) onGeneralKey(key string) (tea.Model, tea.Cmd) {
 	if key != "enter" && key != " " && key != "space" {
 		return m, nil
 	}
-	if m.setCursor == 2 {
+	if m.setCursor == 3 {
 		return m.refreshNow()
 	}
 	switch m.setCursor {
+	case 2:
+		return m.cycleDefaultMode()
 	case 0:
 		next := nextSpinnerName(m.spinnerName)
 		m.cfg.Spinner = next
@@ -151,6 +153,31 @@ func (m tuiModel) onTenantsKey(key string) (tea.Model, tea.Cmd) {
 	t := m.cfg.Tenants[m.setCursor]
 
 	switch key {
+	case " ", "space":
+		added := !t.Added
+		t.Added = added
+		m.cfg.Upsert(t)
+		if err := m.store.SaveConfig(m.cfg); err != nil {
+			m.status = err.Error()
+			return m, nil
+		}
+		if m.tenant.Name == t.Name {
+			m.tenant.Added = added
+		}
+		// Dropping a tenant from the set has to drop its elements too.
+		if !added {
+			kept := make([]elementRow, 0, len(m.all))
+			for _, r := range m.all {
+				if r.TSG != t.TSGID {
+					kept = append(kept, r)
+				}
+			}
+			m.setElements(kept)
+			m.cacheCount = len(m.all)
+		}
+		return m, nil
+	case "a":
+		return m.openTenantForm(config.AuthServiceAccount)
 	case "enter":
 		return m.openEditTenantForm(t)
 	case "s":
@@ -165,7 +192,7 @@ func (m tuiModel) onTenantsKey(key string) (tea.Model, tea.Cmd) {
 		m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
 		m.status = "switched to " + t.Name
 	case "u":
-		return m.openUserFormFor(t.Name)
+		return m.openUserFormFor(t)
 	case "x":
 		if err := forgetTenant(m.store, m.cfg, t); err != nil {
 			m.status = err.Error()
@@ -186,7 +213,7 @@ func (m tuiModel) onUsersSectionKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "a":
 		if m.tenantIndex() >= 0 {
-			return m.openUserFormFor(m.tenant.Name)
+			return m.openUserFormFor(m.tenant)
 		}
 		m.status = "no tenant selected"
 		return m, nil
@@ -293,6 +320,8 @@ func (m tuiModel) sectionContent() []string {
 		out = append(out,
 			label("spinner")+m.spinner.View()+" "+styleElement.Render(m.spinnerName),
 			label("commands")+guard,
+			label("mode")+styleElement.Render(m.defaultMode().String())+
+				styleDim.Render("  what the element list opens in"),
 			label("elements")+m.cacheLine(),
 			"",
 			label("secrets")+m.secretsLine(),
@@ -311,9 +340,21 @@ func (m tuiModel) sectionContent() []string {
 		for _, t := range m.cfg.Tenants {
 			tag := ""
 			if t.Name == m.tenant.Name {
-				tag = styleOK.Render("  (active)")
+				tag = styleOK.Render("  (current)")
 			}
-			out = append(out, fmt.Sprintf("%-24s", truncate(t.Name, 24))+
+			if t.Auth != config.AuthBrowser {
+				tag += styleDim.Render("  (service account)")
+			}
+			box := "[ ] "
+			if t.Added {
+				box = styleOK.Render("[x] ")
+			}
+			// A tenant that keeps failing is worth flagging here, since this is
+			// where it can be taken out of the set.
+			if why, bad := m.tenantIssues[t.TSGID]; bad {
+				tag += styleWarn.Render("  " + why)
+			}
+			out = append(out, box+fmt.Sprintf("%-24s", truncate(t.Name, 24))+
 				styleDim.Render(t.TSGID)+tag)
 		}
 
@@ -380,7 +421,7 @@ func (m tuiModel) sectionHint() string {
 	case secBatch:
 		return "↑↓ row · enter change · tab back · esc back"
 	case secTenants:
-		return "↑↓ row · enter edit · s switch · u add user · x forget · tab back"
+		return "↑↓ row · space include · a add · enter edit · s switch · u add user · x forget"
 	case secUsers:
 		return "↑↓ row · enter edit · r run as · a add · p password · d default · x remove · tab back"
 	case secSession:
@@ -498,4 +539,24 @@ func shortenPath(p string, n int) string {
 		return p
 	}
 	return "…" + string(r[len(r)-(n-1):])
+}
+
+// defaultMode is the saved mode the element list opens in.
+func (m tuiModel) defaultMode() pickMode {
+	if mode, ok := parseMode(m.cfg.DefaultMode); ok {
+		return mode
+	}
+	return modeShell
+}
+
+func (m tuiModel) cycleDefaultMode() (tea.Model, tea.Cmd) {
+	next := m.defaultMode().next()
+	m.cfg.DefaultMode = next.String()
+	// The change applies now as well as next launch, which is what pressing it
+	// on this screen looks like it should do.
+	m.mode = next
+	if err := m.store.SaveConfig(m.cfg); err != nil {
+		m.status = err.Error()
+	}
+	return m, nil
 }

@@ -57,7 +57,7 @@ func TestFormsWarnBeforeASecretIsTyped(t *testing.T) {
 
 	t.Run("a masked field on a plaintext store warns", func(t *testing.T) {
 		m := warnModel(t, plain)
-		mm, _ := m.openUserFormFor("Acme Co")
+		mm, _ := m.openUserFormFor(config.Tenant{Name: "Acme Co", TSGID: "1"})
 		m = mm.(tuiModel)
 
 		if got := m.plaintextWarning(); got == "" {
@@ -81,7 +81,7 @@ func TestFormsWarnBeforeASecretIsTyped(t *testing.T) {
 
 	t.Run("a keyring needs no warning", func(t *testing.T) {
 		m := warnModel(t, fakeKeyring{m: map[string]string{}})
-		mm, _ := m.openUserFormFor("Acme Co")
+		mm, _ := m.openUserFormFor(config.Tenant{Name: "Acme Co", TSGID: "1"})
 		m = mm.(tuiModel)
 		if got := m.plaintextWarning(); got != "" {
 			t.Errorf("plaintextWarning() = %q, want nothing when a keyring is in use", got)
@@ -146,14 +146,14 @@ func TestGeneralSectionHasARefreshRow(t *testing.T) {
 	}
 	m.spinner = newSpinner("")
 
-	if got := m.sectionRows(); got != 3 {
-		t.Fatalf("sectionRows() = %d, want 3 so the refresh row is reachable", got)
+	if got := m.sectionRows(); got != 4 {
+		t.Fatalf("sectionRows() = %d, want 4 so the refresh row is reachable", got)
 	}
 	if out := m.viewSettings(); !strings.Contains(out, "elements") {
 		t.Errorf("the General section has no elements row:\n%s", out)
 	}
 
-	m.setCursor = 2
+	m.setCursor = 3
 	mm, cmd := m.onGeneralKey("enter")
 	got := mm.(tuiModel)
 	if got.cacheState != cacheUpdating {

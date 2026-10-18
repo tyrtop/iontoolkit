@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -49,6 +50,11 @@ func runBatch(ctx context.Context) error {
 		return err
 	}
 
+	// The api package no longer prints refresh failures itself, so a batch run
+	// has to say them out loud or a token dying mid-run looks like the devices
+	// going quiet.
+	go reportTokenErrors(client.TokenErrors(), os.Stderr)
+
 	// The file is only created once the run is ready to produce something, so a
 	// failure before this point leaves no empty report behind.
 	out, where, err := openOutput(flagOut, dest, format, time.Now())
@@ -61,7 +67,7 @@ func runBatch(ctx context.Context) error {
 	}
 	sink := newResultSink(out, format)
 
-	events := sase.RunStream(ctx, client, opts, f.Elements)
+	events := sase.RunStream(ctx, opts, sase.Targets(client, f.Elements))
 
 	var total int
 	var failed int
@@ -118,4 +124,12 @@ func drainPlain(events <-chan sase.Event, total int, sink resultSink) (int, int,
 		}
 	}
 	return total, failed, nil
+}
+
+// reportTokenErrors writes refresh failures as they happen. The channel closes
+// when refreshing stops for good, which ends the loop.
+func reportTokenErrors(ch <-chan error, w io.Writer) {
+	for err := range ch {
+		fmt.Fprintln(w, err)
+	}
 }

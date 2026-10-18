@@ -71,46 +71,84 @@ func (m tuiModel) paneSize() (int, int) {
 	return max(20, m.width), max(3, m.height-4-m.slashHeight())
 }
 
-func (m tuiModel) openSession(eid, name string) (tea.Model, tea.Cmd) {
-	if m.client == nil {
-		m.status = "not connected to a tenant yet"
+func (m tuiModel) openSession(eid, name, tsg string) (tea.Model, tea.Cmd) {
+	return m.openSessions([]sessionTarget{{eid: eid, name: name, tsg: tsg}})
+}
+
+func (m tuiModel) openOneSession(t sessionTarget) (tea.Model, tea.Cmd) {
+	c := m.tenantClient(t.tsg)
+	if c == nil {
+		// ensureClients already tried; reaching here means that tenant could
+		// not authenticate, and tenantErr has said why.
+		if m.status == "" {
+			m.status = "could not reach " + m.tenantName(t.tsg)
+		}
 		return m, nil
 	}
 	cols, rows := m.sessionGeometry()
-	m.connecting = name
+	m.connecting = t.name
 	m.status = ""
 	m.phase = phaseSession
 	return m, tea.Batch(
 		m.spinner.Tick,
-		openSessionCmd(m.ctx, m.sessions, toolkitDialer{m.client}, eid, name, cols, rows, m.sessionCreds()),
+		openSessionCmd(m.ctx, m.sessions, toolkitDialer{c}, t.eid, t.name, cols, rows, m.credsFor(t.tsg)),
 	)
 }
 
-func (m tuiModel) sessionCreds() ionterm.Credentials {
-	f := tenantFlags(m.store, m.tenant, m.ionUser)
-	return ionterm.Credentials{User: f.IONUsername, Pass: f.IONPassword}
-}
-
-func (m tuiModel) openSessions(targets [][2]string) (tea.Model, tea.Cmd) {
-	if m.client == nil {
-		m.status = "not connected to a tenant yet"
+func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
+	if len(targets) == 0 {
 		return m, nil
+	}
+	// Remembered so a credential failure can replay exactly this request after
+	// signing in.
+	m.lastTargets = targets
+	if m.needsSignIn() {
+		return m.signInThenSessions(targets)
+	}
+	// Any tenant without a client is authenticated first and the request
+	// replayed. This has to come before the single-target path below, which
+	// would otherwise report a disconnected tenant instead of connecting it.
+	if conn := m.ensureClients(tsgsOf(targets)); len(conn) > 0 {
+		m.resumeSessions = targets
+		m.connectWait = len(conn)
+		m.connecting = fmt.Sprintf("%d sessions", len(targets))
+		if len(targets) == 1 {
+			m.connecting = targets[0].name
+		}
+		m.status = ""
+		m.phase = phaseSession
+		return m, tea.Batch(append(conn, m.spinner.Tick)...)
+	}
+
+	if len(targets) == 1 {
+		return m.openOneSession(targets[0])
 	}
 
 	cols, rows := m.sessionGeometry()
-	creds := m.sessionCreds()
-	d := toolkitDialer{m.client}
 
 	cmds := []tea.Cmd{m.spinner.Tick}
+	var unreachable []string
 	for _, t := range targets {
-		cmds = append(cmds, openSessionCmd(m.ctx, m.sessions, d, t[0], t[1], cols, rows, creds))
+		c := m.tenantClient(t.tsg)
+		if c == nil {
+			unreachable = append(unreachable, t.name)
+			continue
+		}
+		cmds = append(cmds, openSessionCmd(m.ctx, m.sessions, toolkitDialer{c},
+			t.eid, t.name, cols, rows, m.credsFor(t.tsg)))
+	}
+	if len(cmds) == 1 {
+		m.status = "could not reach " + strings.Join(unreachable, ", ")
+		return m, nil
+	}
+	if len(unreachable) > 0 {
+		m.status = "skipped " + strings.Join(unreachable, ", ") + ": tenant unreachable"
 	}
 
-	m.connecting = fmt.Sprintf("%d sessions", len(targets))
+	m.connecting = fmt.Sprintf("%d sessions", len(targets)-len(unreachable))
 	if len(targets) == 1 {
-		m.connecting = targets[0][1]
+		m.connecting = targets[0].name
 	}
-	m.status = ""
 	m.phase = phaseSession
 	return m, tea.Batch(cmds...)
 }
@@ -213,7 +251,7 @@ func (m tuiModel) reopenLastTab() (tea.Model, tea.Cmd) {
 		m.status = "nothing to reattach"
 		return m, nil
 	}
-	return m.openSession(eid, name)
+	return m.openSession(eid, name, m.tsgForElement(eid))
 }
 
 func (m tuiModel) tabBar() string {
@@ -278,4 +316,21 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 func (m tuiModel) viewSession() string {
 	content, _ := m.renderSession()
 	return content
+}
+
+// signInThenSessions reopens the browser and, once signed in, opens the
+// sessions that were interrupted. With nothing to replay it just reports.
+func (m tuiModel) signInThenSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
+	if len(targets) == 0 {
+		m.signInResume = true
+		return m.startSignIn()
+	}
+	m.resumeSessions = targets
+	return m.startSignIn()
+}
+
+// needsSignIn reports whether the credential is already known to be dead, so
+// an action can re-auth before attempting a dial that would only fail.
+func (m tuiModel) needsSignIn() bool {
+	return m.tokenDead != "" && m.tenant.UsesBrowser()
 }

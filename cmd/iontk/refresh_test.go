@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -255,6 +257,8 @@ func TestFreshCacheSkipsTheRefetchOnceAuthenticated(t *testing.T) {
 	}
 	m.spinner = newSpinner("")
 
+	// This client has no refresh loop, so watchToken contributes nothing and a
+	// non-nil command means a fetch was started.
 	mm, cmd := m.Update(clientReadyMsg{client: &api.Client{}})
 	got := mm.(tuiModel)
 	if cmd != nil {
@@ -264,7 +268,13 @@ func TestFreshCacheSkipsTheRefetchOnceAuthenticated(t *testing.T) {
 		t.Errorf("phase = %v, want phasePicking once the client is ready", got.phase)
 	}
 
-	// A stale cache must still fetch.
+	// A stale cache must still fetch, which needs a tenant with credentials.
+	if err := st.Secrets.Set(config.ClientSecretKey("1"), "s"); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+	m.cfg = &config.Config{Tenants: []config.Tenant{
+		{Name: "Acme Co", TSGID: "1", ClientID: "svc", Added: true},
+	}}
 	m.cacheState = cacheUpdating
 	_, cmd = m.Update(clientReadyMsg{client: &api.Client{}})
 	if cmd == nil {
@@ -298,5 +308,68 @@ func TestLaunchRefreshDoesNotHijackTheMenuWithABrowser(t *testing.T) {
 	}
 	if got.signInResume {
 		t.Error("signInResume was set by a background refresh")
+	}
+}
+
+func TestWatchTokenDoesNotBlockWithoutARefreshLoop(t *testing.T) {
+	// api.NewClient takes a fixed token and starts no refresh loop, so it has no
+	// error channel. Receiving from a nil channel blocks forever, which would
+	// strand a goroutine for the whole session.
+	if got := watchToken(nil); got != nil {
+		t.Error("watchToken(nil) returned a command, which would block on receive")
+	}
+
+	ch := make(chan error, 1)
+	cmd := watchToken(ch)
+	if cmd == nil {
+		t.Fatal("watchToken returned nil for a real channel")
+	}
+	ch <- errTokenTest
+	msg, ok := cmd().(tokenErrMsg)
+	if !ok {
+		t.Fatalf("got %T, want tokenErrMsg", cmd())
+	}
+	if !errors.Is(msg.err, errTokenTest) {
+		t.Errorf("err = %v, want %v", msg.err, errTokenTest)
+	}
+	if msg.stopped {
+		t.Error("stopped = true for a plain error")
+	}
+
+	// A closed channel means refreshing gave up for good.
+	closed := make(chan error)
+	close(closed)
+	msg, ok = watchToken(closed)().(tokenErrMsg)
+	if !ok {
+		t.Fatal("a closed channel did not produce a tokenErrMsg")
+	}
+	if !msg.stopped {
+		t.Error("stopped = false after the channel closed")
+	}
+}
+
+var errTokenTest = errors.New("token refresh: boom")
+
+func TestReportTokenErrorsWritesEachFailureAndStopsWhenClosed(t *testing.T) {
+	ch := make(chan error, 2)
+	ch <- errors.New("token refresh: first")
+	ch <- errors.New("token refresh: second")
+	close(ch)
+
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() { reportTokenErrors(ch, &buf); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reportTokenErrors did not return after the channel closed")
+	}
+
+	out := buf.String()
+	for _, want := range []string{"first", "second"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output is missing %q:\n%s", want, out)
+		}
 	}
 }

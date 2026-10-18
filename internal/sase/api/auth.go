@@ -3,11 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -82,7 +82,45 @@ func (s *Client) mint(ctx context.Context) (time.Duration, error) {
 	return ttl, nil
 }
 
+// retryAfterFailure is how long to wait before trying again after a refresh
+// that could plausibly succeed later. Waiting out the whole token lifetime
+// turns a momentary network problem into a quarter hour of 401s.
+const retryAfterFailure = 30 * time.Second
+
+// temporary is implemented by errors that know whether retrying could help. A
+// TokenSource uses it to say that nothing will change without a human.
+type temporary interface{ Temporary() bool }
+
+func retryable(err error) bool {
+	var t temporary
+	if errors.As(err, &t) {
+		return t.Temporary()
+	}
+	return true
+}
+
+// TokenErrors reports refresh failures so the caller can decide what to say
+// about them. The channel is buffered and sends are dropped rather than
+// blocked, so a caller that never reads it costs nothing. It closes when
+// refreshing stops for good, which is the signal that the credential needs
+// human attention.
+func (s *Client) TokenErrors() <-chan error { return s.tokenErrs }
+
+func (s *Client) reportTokenError(err error) {
+	if s.tokenErrs == nil {
+		return
+	}
+	select {
+	case s.tokenErrs <- err:
+	default:
+	}
+}
+
 func (s *Client) refreshLoop(ctx context.Context, ttl, margin time.Duration) {
+	if s.tokenErrs != nil {
+		defer close(s.tokenErrs)
+	}
+
 	timer := time.NewTimer(ttl - margin)
 	defer timer.Stop()
 	for {
@@ -92,13 +130,20 @@ func (s *Client) refreshLoop(ctx context.Context, ttl, margin time.Duration) {
 		case <-timer.C:
 			next, err := s.mint(ctx)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "token refresh:", err)
-				next = ttl
+				s.reportTokenError(fmt.Errorf("token refresh: %w", err))
+				// A credential that needs a human back at the keyboard will not
+				// start working on its own, so stop instead of spinning. Signing
+				// in again builds a new client with a new loop.
+				if !retryable(err) {
+					return
+				}
+				timer.Reset(retryAfterFailure)
+				continue
 			}
 			ttl = next
 			wait := ttl - margin
 			if wait <= 0 {
-				fmt.Fprintf(os.Stderr, "token lifetime %s is shorter than refresh margin %s, stopping refresh\n", ttl, margin)
+				s.reportTokenError(fmt.Errorf("token lifetime %s is shorter than the refresh margin %s, so refreshing stopped", ttl, margin))
 				return
 			}
 			timer.Reset(wait)

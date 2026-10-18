@@ -23,6 +23,8 @@ var (
 	styleCmd     = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
 	styleElement = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
 	styleDim     = lipgloss.NewStyle().Faint(true)
+	// The nearest thing to orange in the 0-15 range, for a session about to go.
+	styleHot = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 
 	markCheck = styleOK.SetString("✓")
 	markCross = styleErr.SetString("✗")

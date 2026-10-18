@@ -45,7 +45,8 @@ const (
 	phaseUsers
 	phaseSignIn
 	phaseSignedIn
-	phaseAuthPick
+	phaseDiscover
+	phaseTenantPick
 )
 
 type pickMode int
@@ -55,11 +56,32 @@ const (
 	modeBatch
 )
 
+// pickModes is the cycle alt+m walks. Adding a mode means adding it here.
+var pickModes = []pickMode{modeShell, modeBatch}
+
 func (p pickMode) String() string {
 	if p == modeBatch {
 		return "batch"
 	}
 	return "shell"
+}
+
+func (p pickMode) next() pickMode {
+	for i, m := range pickModes {
+		if m == p {
+			return pickModes[(i+1)%len(pickModes)]
+		}
+	}
+	return modeShell
+}
+
+func parseMode(s string) (pickMode, bool) {
+	for _, m := range pickModes {
+		if m.String() == s {
+			return m, true
+		}
+	}
+	return modeShell, false
 }
 
 type cacheState int
@@ -100,9 +122,22 @@ type clientErrMsg string
 // browser can renew them.
 type needsSignInMsg struct{}
 
+// discoveredMsg carries the tenants a browser sign-in found.
+type discoveredMsg struct {
+	d   saseauth.Discovery
+	err error
+}
+
 // signedInMsg carries the outcome of a browser sign-in, including the facts
 // that prove it worked: a client that authenticated from the stored refresh
 // token, and a profile fetched with it.
+// tokenErrMsg is a refresh failure reported by the client. A closed channel
+// means refreshing has stopped for good.
+type tokenErrMsg struct {
+	err     error
+	stopped bool
+}
+
 type signedInMsg struct {
 	client  *api.Client
 	ident   saseauth.Identity
@@ -141,11 +176,38 @@ type tuiModel struct {
 	menuCursor   int
 	switchCursor int
 	setCursor    int
-	authCursor   int
-	signInResume bool
-	ident        saseauth.Identity
-	profile      api.Profile
-	tokenTTL     time.Duration
+	tokenDead    string
+	authMode     authMode
+	tenantIssues map[string]string
+	// The device login chosen per tenant, keyed by tenant ID, and which tenant
+	// the users panel is managing.
+	runAs    map[string]string
+	usersTSG string
+	// Derived when the element list changes, not per render.
+	scope       string
+	tenantCount int
+	// showSelected narrows the list to what has been picked.
+	showSelected bool
+	// The last selection alt+c threw away, so it can be put back.
+	lastCleared     map[string]bool
+	lastClearedView bool
+	// Outstanding tenant connections, and the batch commands waiting on them.
+	connectWait int
+	resumeRun   []string
+	discovered  []saseauth.Tenant
+	picked      map[string]bool
+	pickCursor  int
+
+	// What to replay once an unplanned sign-in finishes. At most one is set.
+	// A sign-in with something to replay skips the confirmation screen, since
+	// it is plumbing in the middle of an action the user already chose.
+	signInResume   bool
+	resumeSessions []sessionTarget
+	lastTargets    []sessionTarget
+
+	ident    saseauth.Identity
+	profile  api.Profile
+	tokenTTL time.Duration
 
 	form           []formField
 	formCursor     int
@@ -153,6 +215,7 @@ type tuiModel struct {
 	formTitle      string
 	formReturn     tuiPhase
 	formTenantName string
+	formTenantTSG  string
 	formUserName   string
 	formAuth       string
 	formOldTSG     string
@@ -161,13 +224,18 @@ type tuiModel struct {
 	setSection int
 	setFocus   int
 
-	all      []api.Element
+	all      []elementRow
 	sites    map[string]string
 	matches  []int
 	selected map[string]bool
-	table    table.Model
-	filter   textinput.Model
-	filterOn bool
+
+	// One client per tenant, built on demand. A browser account can reach many
+	// tenants, so there is no single "the" client any more.
+	pool           *clientPool
+	pendingTenants int
+	table          table.Model
+	filter         textinput.Model
+	filterOn       bool
 
 	cmdInput textinput.Model
 
@@ -261,8 +329,19 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 		resFilter:   newResultsFilter(),
 		resTable:    newResultsTable(),
 		sessions:    ionterm.NewManager(),
+		pool:        newClientPool(),
 		width:       80,
 		height:      24,
+	}
+	if mode, ok := parseMode(cfg.DefaultMode); ok {
+		m.mode = mode
+	}
+	if am, ok := parseAuthMode(cfg.AuthMode); ok {
+		m.authMode = am
+	} else if t, ok := resolveTenant(cfg, ""); ok && !t.UsesBrowser() {
+		// Nothing saved: follow whatever the tenant already uses, so an existing
+		// service account setup does not open on a browser prompt.
+		m.authMode = authTenant
 	}
 	m.tenant, m.hasTenant = resolveTenant(cfg, "")
 	if m.hasTenant {
@@ -326,11 +405,7 @@ func (m tuiModel) refreshNow() (tea.Model, tea.Cmd) {
 	}
 	m.flags = f
 	m.status = ""
-	m.cacheState = cacheUpdating
-	if m.client != nil {
-		return m, tea.Batch(m.spinner.Tick, refreshElements(m.ctx, m.client, m.store, m.tenant.TSGID))
-	}
-	return m, tea.Batch(m.spinner.Tick, connect(m.ctx, f))
+	return m.refreshActive()
 }
 
 func connect(ctx context.Context, f flags) tea.Cmd {
@@ -378,6 +453,24 @@ func signIn(ctx context.Context, f flags, st *config.Store) tea.Cmd {
 	}
 }
 
+// watchToken surfaces refresh failures instead of letting them print into the
+// frame. The api package no longer writes to stderr, which the TUI never
+// redirected, so a failed refresh used to land in the middle of the display.
+func watchToken(ch <-chan error) tea.Cmd {
+	// A static token has no refresh loop, so there is no channel and nothing to
+	// watch. Receiving from a nil channel would block this goroutine forever.
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		err, ok := <-ch
+		if !ok {
+			return tokenErrMsg{stopped: true}
+		}
+		return tokenErrMsg{err: err}
+	}
+}
+
 func refreshElements(ctx context.Context, c *api.Client, st *config.Store, tsg string) tea.Cmd {
 	return func() tea.Msg {
 		els, err := c.ListElements(ctx)
@@ -418,6 +511,26 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = phaseMenu
 		return m, nil
 
+	case tokenErrMsg:
+		if msg.stopped {
+			// Refreshing gave up. Whatever is on screen will start failing, so
+			// say so rather than letting it look like the device is at fault.
+			if m.tokenDead == "" {
+				m.tokenDead = "token expired — sign in again"
+			}
+			return m, nil
+		}
+		if errors.Is(msg.err, saseauth.ErrInteractiveRequired) {
+			m.tokenDead = "sign-in expired"
+			m.status = m.tokenDead + " — the next action will reopen your browser"
+			return m, nil
+		}
+		m.status = msg.err.Error()
+		if c := m.pool.get(m.tenant.TSGID); c != nil {
+			return m, watchToken(c.TokenErrors())
+		}
+		return m, nil
+
 	case needsSignInMsg:
 		if m.phase == phaseMenu {
 			m.status = "sign-in required — pick the browser sign-in below"
@@ -426,6 +539,57 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.signInResume = true
 		return m.startSignIn()
+
+	case discoveredMsg:
+		if msg.err != nil {
+			m.status = "sign-in failed: " + msg.err.Error()
+			m.phase = phaseMenu
+			return m, nil
+		}
+		m.ident = msg.d.Identity
+		if msg.d.RefreshToken != "" {
+			if err := m.store.Secrets.Set(config.AccountRefreshTokenKey(), msg.d.RefreshToken); err != nil {
+				m.status = err.Error()
+			}
+		}
+
+		known := make([]config.KnownTenant, 0, len(msg.d.Tenants))
+		for _, t := range msg.d.Tenants {
+			known = append(known, config.KnownTenant{TSGID: t.ID, Name: t.Name})
+		}
+		if err := m.store.SaveTenantCache(&config.TenantCache{
+			FetchedAt: time.Now(),
+			Account:   msg.d.Identity.Display(),
+			Tenants:   known,
+		}); err != nil {
+			m.status = err.Error()
+		}
+
+		m.discovered = msg.d.Tenants
+		next, cmd := m.startTenantPick()
+		return next, cmd
+
+	case tokenRefreshedMsg:
+		if msg.err != nil {
+			if errors.Is(msg.err, saseauth.ErrInteractiveRequired) {
+				// The stored credential is spent, so the quiet path cannot
+				// finish; fall through to the browser.
+				m.tokenDead = "sign-in expired"
+				m.signInResume = false
+				return m.startSignIn()
+			}
+			m.status = "token refresh failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.ident = msg.ident
+		m.tokenTTL = msg.ttl
+		m.tokenDead = ""
+		m.status = "token refreshed"
+		// The old client holds the previous token, so let the next action build
+		// one with the new.
+		m.pool.drop(m.tenant.TSGID)
+		m.client = nil
+		return m, nil
 
 	case signedInMsg:
 		if msg.err != nil {
@@ -436,27 +600,52 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.client = msg.client
+		m.pool.set(m.tenant.TSGID, msg.client)
+		m.status = ""
+		m.tokenDead = ""
+		watch := watchToken(msg.client.TokenErrors())
+
+		// Something was interrupted to get here, so go straight back to it
+		// rather than making the user acknowledge a screen first.
+		if targets := m.resumeSessions; len(targets) > 0 {
+			m.resumeSessions = nil
+			next, cmd := m.openSessions(targets)
+			return next, tea.Batch(watch, cmd)
+		}
+		if m.signInResume {
+			m.signInResume = false
+			next, cmd := m.startContinue()
+			return next, tea.Batch(watch, cmd)
+		}
+
 		m.ident = msg.ident
 		m.profile = msg.profile
 		m.tokenTTL = msg.ttl
-		m.status = ""
 		m.phase = phaseSignedIn
 		// Elements are fetched behind the confirmation, so dismissing it lands on
 		// a list that is already current.
-		m.cacheState = cacheUpdating
-		return m, tea.Batch(m.spinner.Tick, refreshElements(m.ctx, m.client, m.store, m.tenant.TSGID))
+		next, cmd := m.refreshActive()
+		return next, tea.Batch(m.spinner.Tick, watch, cmd)
 
 	case clientReadyMsg:
 		m.client = msg.client
+		m.pool.set(m.tenant.TSGID, msg.client)
+		watch := watchToken(msg.client.TokenErrors())
 		if m.cacheState == cacheCached {
 			if m.phase == phaseLoading {
 				m.phase = phasePicking
 			}
-			return m, nil
+			return m, watch
 		}
-		return m, refreshElements(m.ctx, m.client, m.store, m.tenant.TSGID)
+		next, cmd := m.refreshActive()
+		return next, tea.Batch(watch, cmd)
 
 	case elementsErrMsg:
+		if isAuthFailure(string(msg)) {
+			m.tokenDead = "sign-in expired"
+			m.signInResume = true
+			return m.startSignIn()
+		}
 		m.status = string(msg)
 		m.cacheState = cacheFailed
 		if len(m.all) == 0 {
@@ -464,13 +653,59 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case elementsLoadedMsg:
-		m.sites = msg.sites
-		m.setElements(msg.elements)
-		m.cacheState = cacheUpdated
-		m.cacheAt = time.Now()
-		m.cacheCount = len(m.all)
-		if m.phase == phaseLoading {
+	case tenantConnectedMsg:
+		if m.connectWait > 0 {
+			m.connectWait--
+		}
+		if msg.err != nil {
+			m.tenantErr(msg.tsg, m.tenantName(msg.tsg), msg.err)
+		} else {
+			m.pool.set(msg.tsg, msg.client)
+		}
+		if m.connectWait > 0 {
+			return m, nil
+		}
+		// Everything that was waiting on a connection can go ahead now.
+		if cmds := m.resumeRun; len(cmds) > 0 {
+			m.resumeRun = nil
+			return m.startRun(cmds)
+		}
+		if targets := m.resumeSessions; len(targets) > 0 {
+			m.resumeSessions = nil
+			return m.openSessions(targets)
+		}
+		return m, nil
+
+	case tenantElementsMsg:
+		if m.pendingTenants > 0 {
+			m.pendingTenants--
+		}
+		if msg.err != nil {
+			m.tenantErr(msg.tsg, msg.tenant, msg.err)
+		} else {
+			delete(m.tenantIssues, msg.tsg)
+			if msg.siteErr != nil && m.status == "" {
+				m.status = msg.tenant + ": site names unavailable: " + shortTenantErr(msg.siteErr)
+			}
+			if m.sites == nil {
+				m.sites = map[string]string{}
+			}
+			for k, v := range msg.sites {
+				m.sites[k] = v
+			}
+			m.mergeTenantElements(msg.tsg, msg.tenant, msg.elements)
+		}
+
+		if m.pendingTenants == 0 {
+			m.cacheCount = len(m.all)
+			m.cacheAt = time.Now()
+			if len(m.all) > 0 {
+				m.cacheState = cacheUpdated
+			} else {
+				m.cacheState = cacheFailed
+			}
+		}
+		if m.phase == phaseLoading && len(m.all) > 0 {
 			m.phase = phasePicking
 		}
 		return m, nil
@@ -494,6 +729,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sessionErrMsg:
 		m.connecting = ""
+		if isAuthFailure(string(msg)) {
+			m.tokenDead = "sign-in expired"
+			return m.signInThenSessions(m.lastTargets)
+		}
 		m.status = string(msg)
 		return m, nil
 
@@ -570,17 +809,27 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) wantsSpinner() bool {
 	switch m.phase {
-	case phaseLoading, phaseRunning, phaseSettings, phaseSignIn:
+	case phaseLoading, phaseRunning, phaseSettings, phaseSignIn, phaseDiscover:
 		return true
+	case phasePicking:
+		// Only while a refresh is actually in flight, so the list is not
+		// repainted several times a second for nothing.
+		return m.cacheState == cacheUpdating
 	case phaseSession:
 		return m.connecting != ""
 	}
 	return false
 }
 
-func (m *tuiModel) setElements(els []api.Element) {
+func (m *tuiModel) setElements(els []elementRow) {
 	m.all = els
-	sort.Slice(m.all, func(i, j int) bool { return m.all[i].Name < m.all[j].Name })
+	m.computeScope()
+	sort.Slice(m.all, func(i, j int) bool {
+		if m.all[i].Name != m.all[j].Name {
+			return m.all[i].Name < m.all[j].Name
+		}
+		return m.all[i].TSG < m.all[j].TSG
+	})
 
 	names := make([]string, 0, len(m.all))
 	for _, el := range m.all {
@@ -592,8 +841,10 @@ func (m *tuiModel) setElements(els []api.Element) {
 	m.applyFilter()
 }
 
-func (m tuiModel) siteName(el api.Element) string {
-	if n, ok := m.sites[el.SiteID]; ok && n != "" {
+// siteName looks up a site within its own tenant, since two tenants can use the
+// same site identifier for different places.
+func (m tuiModel) siteName(el elementRow) string {
+	if n, ok := m.sites[el.TSG+"/"+el.SiteID]; ok && n != "" {
 		return n
 	}
 	if el.SiteID != "" {
@@ -602,32 +853,65 @@ func (m tuiModel) siteName(el api.Element) string {
 	return "-"
 }
 
+// showTenantColumn is true once more than one tenant is loaded; with a single
+// tenant the column is just noise.
+func (m tuiModel) showTenantColumn() bool { return m.tenantCount > 1 }
+
 func (m *tuiModel) rebuildRows() {
 	rows := make([]table.Row, 0, len(m.matches))
+	tenants := m.showTenantColumn()
 	for _, i := range m.matches {
 		el := m.all[i]
 		mark := " "
-		if m.selected[el.ID] {
+		if m.selected[el.key()] {
 			mark = "x"
 		}
-		name := el.Name
-		if name == "" {
-			name = el.ID
-		}
+		name := el.label()
 		state := "offline"
 		if el.Connected {
 			state = "connected"
 		}
-		rows = append(rows, table.Row{
+		row := table.Row{
 			mark,
 			truncate(name, 26),
 			truncate(m.siteName(el), 22),
 			truncate(el.Model, 11),
 			state,
-		})
+		}
+		if tenants {
+			row = append(row, truncate(el.Tenant, 20))
+		}
+		rows = append(rows, row)
 	}
-	m.table.SetRows(rows)
-	m.table.SetWidth(min(m.width, 78))
+
+	cols := []table.Column{
+		{Title: "", Width: 3},
+		{Title: "element", Width: 26},
+		{Title: "site", Width: 22},
+		{Title: "model", Width: 11},
+		{Title: "state", Width: 9},
+	}
+	width := 78
+	if tenants {
+		cols = append(cols, table.Column{Title: "tenant", Width: 20})
+		width = 100
+	}
+	// Columns and rows have to agree at every moment: the table re-renders
+	// inside each setter, so changing the column count while the old rows are
+	// still in place indexes past the end of them. Clearing the rows first is
+	// safe but resets the cursor, so only do it when the shape really changed.
+	if len(m.table.Columns()) != len(cols) {
+		cursor := m.table.Cursor()
+		m.table.SetRows(nil)
+		m.table.SetColumns(cols)
+		m.table.SetRows(rows)
+		if cursor > 0 && cursor < len(rows) {
+			m.table.SetCursor(cursor)
+		}
+	} else {
+		m.table.SetRows(rows)
+	}
+	m.table.SetWidth(min(m.width, width))
 	m.table.SetHeight(m.listHeight())
 }
 
@@ -691,8 +975,15 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.onUsersKey(key)
 	case phaseAddTenant, phaseAddUser, phasePassword:
 		return m.onFormKey(msg, key)
-	case phaseAuthPick:
-		return m.onAuthPickKey(key)
+
+	case phaseTenantPick:
+		return m.onTenantPickKey(key)
+	case phaseDiscover:
+		if key == "esc" || key == "q" {
+			m.status = "cancelled"
+			m.phase = phaseMenu
+		}
+		return m, nil
 	case phaseSignIn:
 		// The browser owns the keyboard until it is done; esc only stops waiting.
 		if key == "esc" || key == "q" {
@@ -751,21 +1042,69 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		m.phase = phaseMenu
 		return m, nil
 
-	case "up", "down", "pgup", "pgdown", "home", "end":
+	case "up", "down", "k", "j", "pgup", "pgdown", "home", "end":
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
 		return m, cmd
 
-	case "space":
-		if el, ok := m.current(); ok {
-			if m.selected[el.ID] {
-				delete(m.selected, el.ID)
-			} else {
-				m.selected[el.ID] = true
-			}
-			m.rebuildRows()
+	case "alt+c":
+		if len(m.selected) == 0 {
+			m.status = "nothing selected"
+			return m, nil
 		}
+		n := len(m.selected)
+		// Kept so alt+z can put it back. The map is copied rather than
+		// aliased: the model is passed by value and the live selection is
+		// about to be replaced.
+		m.lastCleared = make(map[string]bool, n)
+		for k := range m.selected {
+			m.lastCleared[k] = true
+		}
+		m.lastClearedView = m.showSelected
+
+		m.selected = map[string]bool{}
+		// Showing only the selection with nothing selected would be an empty
+		// list and no way back, so that view is dropped too.
+		m.showSelected = false
+		m.applyFilter()
+		m.status = fmt.Sprintf("cleared %d selected — alt+z to undo", n)
 		return m, nil
+
+	case "alt+z", "ctrl+z":
+		if len(m.lastCleared) == 0 {
+			m.status = "nothing to undo"
+			return m, nil
+		}
+		// Anything selected since the clear is kept: undo restores, it does
+		// not replace.
+		for k := range m.lastCleared {
+			m.selected[k] = true
+		}
+		n := len(m.lastCleared)
+		m.lastCleared = nil
+		m.showSelected = m.lastClearedView
+		m.applyFilter()
+		m.status = fmt.Sprintf("restored %d selected", n)
+		return m, nil
+
+	case "alt+s":
+		if !m.showSelected && len(m.selected) == 0 {
+			m.status = "nothing selected"
+			return m, nil
+		}
+		m.showSelected = !m.showSelected
+		m.status = ""
+		m.applyFilter()
+		m.table.SetCursor(0)
+		return m, nil
+
+	case "space":
+		// Filtering and selecting are separate modes: while the query is being
+		// typed every space belongs to it, and selection resumes once the
+		// filter is applied with enter.
+		if !m.filterOn {
+			return m.toggleCurrent(), nil
+		}
 
 	case "alt+r":
 		return m.refreshNow()
@@ -773,6 +1112,12 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 	case "alt+u":
 		m.userCursor = 0
 		m.status = ""
+		// Open on the tenant of whatever is highlighted, which is the one the
+		// user is looking at; the browsed tenant is the fallback.
+		m.usersTSG = m.tenant.TSGID
+		if el, ok := m.current(); ok {
+			m.usersTSG = el.TSG
+		}
 		m.phase = phaseUsers
 		return m, nil
 
@@ -788,22 +1133,46 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 	case "ctrl+a":
 		all := true
 		for _, i := range m.matches {
-			if !m.selected[m.all[i].ID] {
+			if !m.selected[m.all[i].key()] {
 				all = false
 				break
 			}
 		}
 		for _, i := range m.matches {
 			if all {
-				delete(m.selected, m.all[i].ID)
+				delete(m.selected, m.all[i].key())
 			} else {
-				m.selected[m.all[i].ID] = true
+				m.selected[m.all[i].key()] = true
 			}
 		}
 		m.rebuildRows()
 		return m, nil
 
 	case "enter":
+		if m.filterOn {
+			m.filterOn = false
+			m.filter.Blur()
+
+			// A query that has narrowed to a single ION is unambiguous, so
+			// enter acts on it instead of only applying the filter. In shell
+			// mode that means going straight in; in batch mode it means
+			// selecting it and staying, since a command still has to be chosen.
+			if len(m.matches) == 1 {
+				el := m.all[m.matches[0]]
+				if m.mode == modeBatch {
+					m.selected[el.key()] = true
+					m.rebuildRows()
+					return m, nil
+				}
+				m.table.SetCursor(0)
+				return m.onPickTargets([]sessionTarget{
+					{eid: el.ID, name: el.label(), tsg: el.TSG},
+				})
+			}
+
+			// Otherwise the query is applied and the narrowed list selected from.
+			return m, nil
+		}
 		return m.onPickEnter()
 	}
 
@@ -818,8 +1187,12 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		return m.reopenLastTab()
 	}
 	if key == "alt+w" {
-		m.sessions.CloseAll()
-		return m, tea.Quit
+		// alt+w closes what you are in. On the element list that is the list
+		// itself, so it goes back to the menu; only the menu's alt+w quits.
+		// Any sessions keep running and are still reachable with alt+t.
+		m.status = ""
+		m.phase = phaseMenu
+		return m, nil
 	}
 	if next, handled := m.onTabKey(key); handled {
 		return next, nil
@@ -843,39 +1216,60 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 	return m, cmd
 }
 
-func (m tuiModel) pickTargets() [][2]string {
-	var out [][2]string
+// pickTargets is what enter acts on: everything selected, or the highlighted
+// row when nothing is.
+func (m tuiModel) pickTargets() []sessionTarget {
+	var out []sessionTarget
 	for _, el := range m.all {
-		if !m.selected[el.ID] {
+		if !m.selected[el.key()] {
 			continue
 		}
-		name := el.Name
-		if name == "" {
-			name = el.ID
-		}
-		out = append(out, [2]string{el.ID, name})
+		out = append(out, sessionTarget{eid: el.ID, name: el.label(), tsg: el.TSG})
 	}
 	if len(out) > 0 {
 		return out
 	}
 	if el, ok := m.current(); ok {
-		name := el.Name
-		if name == "" {
-			name = el.ID
-		}
-		return [][2]string{{el.ID, name}}
+		return []sessionTarget{{eid: el.ID, name: el.label(), tsg: el.TSG}}
 	}
 	return nil
 }
 
 func (m tuiModel) onPickEnter() (tea.Model, tea.Cmd) {
-	targets := m.pickTargets()
+	return m.onPickTargets(m.pickTargets())
+}
+
+// onPickTargets acts on an explicit set of elements, running the per-tenant
+// credential and connection checks first. Separate from onPickEnter so a search
+// that narrows to a single ION can act on that one rather than on whatever
+// happens to be selected.
+func (m tuiModel) onPickTargets(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	if len(targets) == 0 {
 		return m, nil
 	}
 
-	if needsIONPassword(m.store, m.tenant, m.ionUser) {
-		return m.openPasswordForm()
+	// An explicit action is a fresh attempt, so an earlier connection failure
+	// stops blocking the tenants it affected.
+	for _, want := range targets {
+		delete(m.tenantIssues, want.tsg)
+	}
+
+	// A selection can span tenants, and each keeps its own device login, so
+	// every tenant involved has to be asked about rather than only the first.
+	for _, want := range targets {
+		t, ok := m.tenantOf(want.tsg)
+		if !ok {
+			t = config.Tenant{Name: want.tsg, TSGID: want.tsg, Auth: config.AuthBrowser}
+			for _, r := range m.all {
+				if r.TSG == want.tsg {
+					t.Name = r.Tenant
+					break
+				}
+			}
+		}
+		if needsIONPassword(m.store, t, m.ionUserFor(t)) {
+			return m.openPasswordForm(t, m.ionUserFor(t))
+		}
 	}
 
 	if m.mode == modeShell {
@@ -918,9 +1312,11 @@ func (m tuiModel) onCommandKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 }
 
 func (m tuiModel) startRun(cmds []string) (tea.Model, tea.Cmd) {
+	var picked []elementRow
 	var ids []string
 	for _, el := range m.all {
-		if m.selected[el.ID] {
+		if m.selected[el.key()] {
+			picked = append(picked, el)
 			ids = append(ids, el.ID)
 		}
 	}
@@ -932,9 +1328,30 @@ func (m tuiModel) startRun(cmds []string) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Credentials are resolved per element, since a run can span tenants. The
+	// flags still carry one pair so the shared validation has something to
+	// check, but it is only a fallback for targets that supply none.
+	targets := m.targetsFor(picked)
+	for i, t := range targets {
+		if t.User == "" || t.Pass == "" {
+			m.status = "no ION login for " + picked[i].Tenant
+			return m, nil
+		}
+	}
+
+	if conn := m.ensureClients(tsgsOfRows(picked)); len(conn) > 0 {
+		m.resumeRun = cmds
+		m.connectWait = len(conn)
+		m.status = "connecting tenants"
+		return m, tea.Batch(append(conn, m.spinner.Tick)...)
+	}
+
 	f := tenantFlags(m.store, m.tenant, m.ionUser)
 	f.Elements = ids
 	f.Commands = cmds
+	if f.IONUsername == "" || f.IONPassword == "" {
+		f.IONUsername, f.IONPassword = targets[0].User, targets[0].Pass
+	}
 	if err := f.Validate(); err != nil {
 		m.status = err.Error()
 		return m, nil
@@ -959,20 +1376,19 @@ func (m tuiModel) startRun(cmds []string) (tea.Model, tea.Cmd) {
 	m.running = nil
 	m.errGroups = nil
 	m.phase = phaseRunning
-	m.events = sase.RunStream(m.ctx, m.client, opts, ids)
+	m.events = sase.RunStream(m.ctx, opts, targets)
 
 	return m, tea.Batch(waitForEvent(m.events), m.spinner.Tick)
 }
 
 func (m *tuiModel) applyFilter() {
-	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	terms := strings.Fields(strings.ToLower(m.filter.Value()))
 	m.matches = m.matches[:0]
 	for i, el := range m.all {
-		if q == "" ||
-			strings.Contains(strings.ToLower(el.Name), q) ||
-			strings.Contains(strings.ToLower(el.ID), q) ||
-			strings.Contains(strings.ToLower(m.siteName(el)), q) ||
-			strings.Contains(strings.ToLower(el.Model), q) {
+		if m.showSelected && !m.selected[el.key()] {
+			continue
+		}
+		if m.matchesTerms(el, terms) {
 			m.matches = append(m.matches, i)
 		}
 	}
@@ -982,10 +1398,94 @@ func (m *tuiModel) applyFilter() {
 	}
 }
 
-func (m tuiModel) current() (api.Element, bool) {
+// matchesTerms requires every term to match the element somewhere. Splitting on
+// whitespace is what makes a query like "s50 ion 1200" work: each word can land
+// in a different field, so the store number and the model are found together
+// without having to know which field holds what.
+func (m tuiModel) matchesTerms(el elementRow, terms []string) bool {
+	if len(terms) == 0 {
+		return true
+	}
+	fields := m.searchFields(el)
+	for _, term := range terms {
+		if !matchesAnyField(term, fields) {
+			return false
+		}
+	}
+	return true
+}
+
+// searchField is one value a term can match.
+type searchField struct {
+	value string
+	// exact restricts this field to whole-value matches. Opaque identifiers are
+	// long digit strings, so a partial match in one is almost always
+	// coincidence: searching "1200" for a model found an ion 2000 whose site id
+	// happened to contain those digits.
+	exact bool
+}
+
+// searchFields is everything a term may match against.
+func (m tuiModel) searchFields(el elementRow) []searchField {
+	state := "offline"
+	if el.Connected {
+		state = "connected"
+	}
+
+	// A site that did not resolve shows its raw id, which is as opaque as any
+	// other identifier and must not be matched piecemeal.
+	site := searchField{value: strings.ToLower(m.siteName(el))}
+	if _, resolved := m.sites[el.TSG+"/"+el.SiteID]; !resolved {
+		site.exact = true
+	}
+
+	return []searchField{
+		{value: strings.ToLower(el.Name)},
+		{value: strings.ToLower(el.ID), exact: true},
+		site,
+		{value: strings.ToLower(el.Tenant)},
+		{value: strings.ToLower(el.Model)},
+		{value: strings.ToLower(el.HWID), exact: true},
+		{value: strings.ToLower(el.Software)},
+		{value: strings.ToLower(el.TSG), exact: true},
+		{value: state},
+	}
+}
+
+func matchesAnyField(term string, fields []searchField) bool {
+	for _, f := range fields {
+		if f.exact {
+			if f.value == term {
+				return true
+			}
+			continue
+		}
+		if strings.Contains(f.value, term) {
+			return true
+		}
+	}
+	return false
+}
+func looseMatch(term, s string) bool {
+	if term == "" {
+		return true
+	}
+	at := 0
+	for _, r := range s {
+		if rune(term[at]) == r {
+			at++
+			if at == len(term) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (m tuiModel) current() (elementRow, bool) {
 	c := m.table.Cursor()
 	if c < 0 || c >= len(m.matches) {
-		return api.Element{}, false
+		return elementRow{}, false
 	}
 	return m.all[m.matches[c]], true
 }
@@ -1013,8 +1513,11 @@ func (m tuiModel) View() tea.View {
 		v = tea.NewView(m.viewUsers())
 	case phaseAddTenant, phaseAddUser, phasePassword:
 		v = tea.NewView(m.viewForm())
-	case phaseAuthPick:
-		v = tea.NewView(m.viewAuthPick())
+
+	case phaseDiscover:
+		v = tea.NewView(m.viewDiscover())
+	case phaseTenantPick:
+		v = tea.NewView(m.viewTenantPick())
 	case phaseSignIn:
 		v = tea.NewView(m.viewSignIn())
 	case phaseSignedIn:
@@ -1067,7 +1570,8 @@ func (m tuiModel) viewPicking() string {
 	}
 	modeLabel := styleElement.Render(m.mode.String() + " mode")
 	b.WriteString(styleCmd.Render("iontk") + "  " + modeLabel +
-		styleDim.Render(fmt.Sprintf("   %s · %d selected / %d elements", m.tenant.Name, len(m.selected), len(m.all))) + "\n")
+		styleDim.Render("   "+m.scopeLabel()+" · "+m.countLabel()) +
+		m.selectedNote() + m.refreshNote() + "\n")
 
 	if m.filterOn || m.filter.Value() != "" {
 		line := m.filter.View()
@@ -1098,7 +1602,28 @@ func (m tuiModel) viewPicking() string {
 		if m.mode == modeBatch {
 			act = fmt.Sprintf("enter command on %d", n)
 		}
-		hint := fmt.Sprintf("↑↓ move · / filter · space select · alt+m mode · alt+u user · alt+r refresh · %s · esc menu · alt+w quit", act)
+		// While typing a query the only keys that matter are the ones that end
+		// it, so the hint says just those.
+		clear := "alt+c clear"
+		if len(m.lastCleared) > 0 {
+			clear = "alt+z undo clear"
+		}
+		hint := fmt.Sprintf("↑↓/jk move · / filter · space select · alt+s selected · %s · alt+r refresh · alt+m mode · alt+u user · %s · esc/alt+w menu", clear, act)
+		if m.showSelected {
+			hint = fmt.Sprintf("↑↓/jk move · alt+s all · alt+c clear · space unselect · %s · esc/alt+w menu", act)
+		}
+		if m.filterOn {
+			// With one match left, enter does the thing rather than just
+			// applying the query, so the hint says which.
+			enter := "enter apply"
+			if len(m.matches) == 1 {
+				enter = "enter open"
+				if m.mode == modeBatch {
+					enter = "enter select"
+				}
+			}
+			hint = "↑↓ move · tab complete · " + enter + " · esc clear"
+		}
 		b.WriteString(footer(m.status, hint))
 	}
 	return b.String()
