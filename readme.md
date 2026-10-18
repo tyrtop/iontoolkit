@@ -19,7 +19,7 @@ Navigate to the releases page and download your binary. Run it from the command 
 
 ### Go Install 
 
-go install github.com/tyrtop/iontoolkit/cmd/iontk@latest
+go install tyrtop.com/iontk/cmd/iontk@latest
 
 ### Build from Source
 
