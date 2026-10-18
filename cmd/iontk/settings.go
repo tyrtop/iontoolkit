@@ -18,7 +18,11 @@ const (
 
 var setSections = []string{"General", "Batch", "Tenants", "Users", "Session", "Debug"}
 
-func label(s string) string { return styleDim.Render(fmt.Sprintf("%-13s", s)) }
+// labelWidth is the gutter every key is padded into. A longer key overruns it
+// and collides with its value.
+const labelWidth = 13
+
+func label(s string) string { return styleDim.Render(fmt.Sprintf("%-*s", labelWidth, s)) }
 
 const (
 	secGeneral = iota

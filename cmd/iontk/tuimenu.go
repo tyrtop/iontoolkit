@@ -112,6 +112,11 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q":
 		return m, tea.Quit
+	case "alt+w":
+		m.sessions.CloseAll()
+		return m, tea.Quit
+	case "alt+t":
+		return m.reopenFromMenu()
 	case "up", "k":
 		m.menuCursor = max(0, m.menuCursor-1)
 		return m, nil
@@ -590,8 +595,29 @@ func (m tuiModel) viewMenu() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(footer(m.status, "↑↓ move · enter select · q quit"))
+	hint := "↑↓ move · enter select · alt+w quit"
+	if m.sessions.DetachedCount() > 0 || m.sessions.Count() > 0 {
+		hint = "↑↓ move · enter select · alt+t reattach · alt+w quit"
+	}
+	b.WriteString(footer(m.status, hint))
 	return b.String()
+}
+
+// reopenFromMenu brings back the state the menu was left from. A reattached
+// session sits behind tab 2 onwards, so the elements list that owns tab 1 is
+// restored from cache first; otherwise reattaching lands on an empty list.
+func (m tuiModel) reopenFromMenu() (tea.Model, tea.Cmd) {
+	if len(m.all) == 0 && m.hasTenant {
+		if c, err := m.store.Cache(m.tenant.TSGID); err == nil && c != nil && len(c.Elements) > 0 {
+			m.setElements(c.Elements)
+			m.cacheCount = len(c.Elements)
+			m.cacheAt = time.Now().Add(-c.Age())
+			if m.cacheState == cacheNone {
+				m.cacheState = cacheCached
+			}
+		}
+	}
+	return m.reopenLastTab()
 }
 
 func (m tuiModel) viewSwitch() string {
@@ -886,5 +912,57 @@ func (m tuiModel) viewSignIn() string {
 	b.WriteString("  " + styleDim.Render("finish signing in to "+m.tenant.Name+" in the browser window") + "\n")
 	b.WriteString("\n")
 	b.WriteString(footer(m.status, "esc stop waiting"))
+	return b.String()
+}
+
+// viewSignedIn reports what a sign-in actually achieved. Each line is something
+// that was checked, not something assumed: the identity comes from the tokens,
+// the region and roles from a profile call that the API had to accept, and the
+// session expiry from the refresh token itself.
+func (m tuiModel) viewSignedIn() string {
+	var b strings.Builder
+	b.WriteString(banner(m.width, m.height))
+	b.WriteString(styleOK.Render(markCheck.String()+" signed in to "+m.tenant.Name) + "\n\n")
+
+	row := func(k, v string) {
+		b.WriteString("  " + label(k) + v + "\n")
+	}
+
+	row("account", styleElement.Render(m.ident.Display()))
+	row("tenant", m.tenant.TSGID)
+	if m.profile.Region != "" {
+		row("region", m.profile.Region)
+	}
+	if len(m.profile.Roles) > 0 {
+		row("roles", strings.Join(m.profile.Roles, ", "))
+	}
+	if m.tokenTTL > 0 {
+		row("api token", styleDim.Render("renews every "+age(m.tokenTTL)))
+	}
+	if left, ok := m.ident.SessionLeft(); ok {
+		if left <= 0 {
+			row("sign-in", styleErr.Render("expired"))
+		} else {
+			line := "no browser needed for " + age(left)
+			if left < time.Hour {
+				row("sign-in", styleWarn.Render(line))
+			} else {
+				row("sign-in", styleOK.Render(line))
+			}
+		}
+	} else {
+		row("sign-in", styleDim.Render("lifetime not stated by the token"))
+	}
+
+	b.WriteString("\n")
+	switch m.cacheState {
+	case cacheUpdating:
+		b.WriteString("  " + m.spinner.View() + " " + styleDim.Render("fetching elements") + "\n")
+	default:
+		b.WriteString("  " + m.cacheLine() + "\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(footer(m.status, "enter continue · esc menu"))
 	return b.String()
 }

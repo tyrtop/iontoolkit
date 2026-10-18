@@ -23,8 +23,10 @@ type Source struct {
 	opt  Options
 	save func(refreshToken string) error
 
-	mu      sync.Mutex
-	refresh string
+	mu       sync.Mutex
+	refresh  string
+	identity Identity
+	lastTTL  time.Duration
 }
 
 // NewSource builds a Source for tsg. refreshToken may be empty. save, when not
@@ -41,9 +43,28 @@ func (s *Source) RefreshToken() string {
 }
 
 // accept records a freshly issued token and returns its access half.
+// LastTTL is how long the most recent access token is good for.
+func (s *Source) LastTTL() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastTTL
+}
+
+// Identity is who the most recent token says you are. It is empty until a
+// token has been obtained.
+func (s *Source) Identity() Identity {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.identity
+}
+
 func (s *Source) accept(tok *Token) (string, time.Duration, error) {
 	s.mu.Lock()
 	s.refresh = tok.RefreshToken
+	s.lastTTL = tok.ExpiresIn
+	if id := identityFrom(tok); id.Subject != "" || id.Email != "" || id.TSG != "" {
+		s.identity = id
+	}
 	save := s.save
 	s.mu.Unlock()
 

@@ -44,6 +44,7 @@ const (
 	phaseSession
 	phaseUsers
 	phaseSignIn
+	phaseSignedIn
 	phaseAuthPick
 )
 
@@ -99,7 +100,16 @@ type clientErrMsg string
 // browser can renew them.
 type needsSignInMsg struct{}
 
-type signedInMsg struct{ err error }
+// signedInMsg carries the outcome of a browser sign-in, including the facts
+// that prove it worked: a client that authenticated from the stored refresh
+// token, and a profile fetched with it.
+type signedInMsg struct {
+	client  *api.Client
+	ident   saseauth.Identity
+	profile api.Profile
+	ttl     time.Duration
+	err     error
+}
 
 type formField struct {
 	label string
@@ -133,6 +143,9 @@ type tuiModel struct {
 	setCursor    int
 	authCursor   int
 	signInResume bool
+	ident        saseauth.Identity
+	profile      api.Profile
+	tokenTTL     time.Duration
 
 	form           []formField
 	formCursor     int
@@ -335,10 +348,33 @@ func connect(ctx context.Context, f flags) tea.Cmd {
 
 // signIn opens the browser and waits for the sign-in to finish. It is the only
 // path in iontk that ever shows a browser window.
+//
+// Finishing the exchange is not the same as working, so this goes on to build a
+// client the ordinary way and fetch a profile with it. That exercises the
+// stored refresh token, which is what decides whether the next run needs a
+// browser at all, and the profile call is the one that proves the SD-WAN API
+// accepts the token.
 func signIn(ctx context.Context, f flags, st *config.Store) tea.Cmd {
 	return func() tea.Msg {
-		src := browserSource(f, &http.Client{Timeout: f.HTTPTimeout}, st)
-		return signedInMsg{err: src.SignIn(ctx)}
+		httpClient := &http.Client{Timeout: f.HTTPTimeout}
+		src := browserSource(f, httpClient, st)
+		if err := src.SignIn(ctx); err != nil {
+			return signedInMsg{err: err}
+		}
+		ident := src.Identity()
+		if !ident.ScopedTo(f.TSGID) {
+			return signedInMsg{err: fmt.Errorf("signed in, but the token is scoped to %q rather than tenant %s", ident.Scope, f.TSGID)}
+		}
+
+		c, err := newClient(ctx, f, io.Discard)
+		if err != nil {
+			return signedInMsg{err: fmt.Errorf("signed in, but the saved credential did not work: %w", err)}
+		}
+		prof, err := c.Profile(ctx)
+		if err != nil {
+			return signedInMsg{err: fmt.Errorf("signed in, but the API rejected the token: %w", err)}
+		}
+		return signedInMsg{client: c, ident: ident, profile: prof, ttl: src.LastTTL()}
 	}
 }
 
@@ -399,14 +435,16 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.phase = phaseMenu
 			return m, nil
 		}
-		m.status = "signed in"
-		if m.signInResume {
-			m.signInResume = false
-			m.phase = phaseLoading
-			return m, tea.Batch(m.spinner.Tick, connect(m.ctx, m.flags))
-		}
-		m.phase = phaseMenu
-		return m, nil
+		m.client = msg.client
+		m.ident = msg.ident
+		m.profile = msg.profile
+		m.tokenTTL = msg.ttl
+		m.status = ""
+		m.phase = phaseSignedIn
+		// Elements are fetched behind the confirmation, so dismissing it lands on
+		// a list that is already current.
+		m.cacheState = cacheUpdating
+		return m, tea.Batch(m.spinner.Tick, refreshElements(m.ctx, m.client, m.store, m.tenant.TSGID))
 
 	case clientReadyMsg:
 		m.client = msg.client
@@ -660,6 +698,16 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if key == "esc" || key == "q" {
 			m.signInResume = false
 			m.status = "sign-in cancelled"
+			m.phase = phaseMenu
+		}
+		return m, nil
+	case phaseSignedIn:
+		switch key {
+		case "enter", "esc", "q":
+			if m.signInResume {
+				m.signInResume = false
+				return m.startContinue()
+			}
 			m.phase = phaseMenu
 		}
 		return m, nil
@@ -969,6 +1017,8 @@ func (m tuiModel) View() tea.View {
 		v = tea.NewView(m.viewAuthPick())
 	case phaseSignIn:
 		v = tea.NewView(m.viewSignIn())
+	case phaseSignedIn:
+		v = tea.NewView(m.viewSignedIn())
 	case phaseLoading:
 		v = tea.NewView(banner(m.width, m.height) +
 			fmt.Sprintf("  %s loading elements\n", m.spinner.View()))

@@ -26,6 +26,7 @@ const userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, li
 type Token struct {
 	AccessToken  string
 	RefreshToken string
+	IDToken      string
 	Scope        string
 	ExpiresIn    time.Duration
 }
@@ -142,6 +143,7 @@ func exchange(ctx context.Context, client *http.Client, tokenURL string, form ur
 	var out struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
+		IDToken      string `json:"id_token"`
 		Scope        string `json:"scope"`
 		ExpiresIn    int    `json:"expires_in"`
 	}
@@ -154,6 +156,7 @@ func exchange(ctx context.Context, client *http.Client, tokenURL string, form ur
 	return &Token{
 		AccessToken:  out.AccessToken,
 		RefreshToken: out.RefreshToken,
+		IDToken:      out.IDToken,
 		Scope:        out.Scope,
 		ExpiresIn:    time.Duration(out.ExpiresIn) * time.Second,
 	}, nil

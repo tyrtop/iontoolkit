@@ -5,10 +5,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/ionterm"
+	"tyrtop.com/iontk/internal/sase/api"
+	"tyrtop.com/iontk/internal/saseauth"
 )
 
 func signInModel(t *testing.T, tenant config.Tenant) tuiModel {
@@ -207,31 +212,111 @@ func TestSignInWaitingScreenSaysWhatItIsWaitingFor(t *testing.T) {
 	t.Log("\n" + out)
 }
 
-func TestSignedInResumesOrReturns(t *testing.T) {
+func TestSignedInLandsOnAConfirmation(t *testing.T) {
+	m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
+	m.phase = phaseSignIn
+	m.signInResume = true
+	m.spinner = newSpinner("")
+
+	mm, cmd := m.Update(signedInMsg{
+		client: &api.Client{},
+		ident:  saseauth.Identity{Name: "Ben Hall", Email: "ben@example.test", TSG: "1"},
+		ttl:    899 * time.Second,
+	})
+	got := mm.(tuiModel)
+	if got.phase != phaseSignedIn {
+		t.Fatalf("phase = %v, want phaseSignedIn so the result is actually visible", got.phase)
+	}
+	if got.client == nil {
+		t.Error("the verified client was discarded, so the next step would authenticate again")
+	}
+	if got.cacheState != cacheUpdating {
+		t.Errorf("cacheState = %v, want elements fetched behind the confirmation", got.cacheState)
+	}
+	if cmd == nil {
+		t.Error("no command returned, want the element fetch started")
+	}
+	if !got.signInResume {
+		t.Error("signInResume was cleared too early; dismissing the confirmation should resume")
+	}
+}
+
+func TestDismissingTheConfirmation(t *testing.T) {
 	tests := []struct {
 		name      string
 		resume    bool
 		wantPhase tuiPhase
 	}{
-		{"an interrupted connect resumes", true, phaseLoading},
 		{"an explicit sign-in returns to the menu", false, phaseMenu},
+		// A browser tenant needs no stored secret to validate, so resuming goes
+		// on to load elements rather than bouncing back to the menu.
+		{"an interrupted action resumes", true, phaseLoading},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
-			m.phase = phaseSignIn
+			m.phase = phaseSignedIn
 			m.signInResume = tt.resume
 			m.spinner = newSpinner("")
+			m.selected = map[string]bool{}
 
-			mm, _ := m.Update(signedInMsg{})
+			mm, _ := m.onKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 			got := mm.(tuiModel)
+			if got.phase == phaseSignedIn {
+				t.Error("enter left the confirmation on screen")
+			}
 			if got.phase != tt.wantPhase {
 				t.Errorf("phase = %v, want %v", got.phase, tt.wantPhase)
 			}
 			if got.signInResume {
-				t.Error("signInResume stayed set after the sign-in completed")
+				t.Error("signInResume stayed set after the confirmation was dismissed")
 			}
 		})
+	}
+}
+
+func TestSignedInConfirmationReportsWhatWasVerified(t *testing.T) {
+	m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1984021017", Auth: config.AuthBrowser})
+	m.phase = phaseSignedIn
+	m.spinner = newSpinner("")
+	m.width, m.height = 100, 30
+	m.ident = saseauth.Identity{
+		Name:           "Ben Hall",
+		Email:          "ben@example.test",
+		TSG:            "1984021017",
+		SessionExpires: time.Now().Add(8 * time.Hour),
+	}
+	m.profile = api.Profile{Region: "hood", Roles: []string{"tenant_super"}}
+	m.tokenTTL = 899 * time.Second
+	m.cacheState, m.cacheCount, m.cacheAt = cacheUpdated, 5613, time.Now()
+
+	out := plain(m.viewSignedIn())
+	for _, want := range []string{
+		"signed in to Acme Co",
+		"Ben Hall <ben@example.test>",
+		"1984021017",
+		"hood",
+		"tenant_super",
+		"no browser needed for 7h59m",
+		"5613 elements cached",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the confirmation is missing %q:\n%s", want, out)
+		}
+	}
+	t.Log("\n" + m.viewSignedIn())
+}
+
+func TestSignedInConfirmationWhenTheTokenIsSilentAboutExpiry(t *testing.T) {
+	m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
+	m.phase = phaseSignedIn
+	m.spinner = newSpinner("")
+	m.width, m.height = 100, 30
+	m.ident = saseauth.Identity{Name: "Ben Hall"}
+
+	out := plain(m.viewSignedIn())
+	if !strings.Contains(out, "not stated") {
+		t.Errorf("want the unknown session lifetime said plainly rather than guessed:\n%s", out)
 	}
 }
 
@@ -312,4 +397,84 @@ func TestForgettingATenantDropsItsRefreshToken(t *testing.T) {
 	if v, _ := st.Secrets.Get(config.RefreshTokenKey("1")); v != "" {
 		t.Errorf("refresh token survived forgetTenant: %q", v)
 	}
+}
+
+func TestLabelKeysFitTheGutter(t *testing.T) {
+	// Every key rendered through label() has to fit labelWidth, or it collides
+	// with its value instead of being padded away from it.
+	keys := []string{
+		"account", "tenant", "region", "roles", "api token", "sign-in",
+		"spinner", "commands", "elements", "secrets",
+		"format", "output", "folder",
+	}
+	for _, k := range keys {
+		t.Run(k, func(t *testing.T) {
+			if len(k) > labelWidth {
+				t.Fatalf("key %q is %d chars, want at most %d", k, len(k), labelWidth)
+			}
+			if got := ansi.StringWidth(plain(label(k))); got != labelWidth {
+				t.Errorf("label(%q) renders %d columns, want exactly %d", k, got, labelWidth)
+			}
+		})
+	}
+}
+
+func TestMenuKeybinds(t *testing.T) {
+	t.Run("alt+w quits from the menu", func(t *testing.T) {
+		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1"})
+		m.phase = phaseMenu
+		_, cmd := m.onMenuKey("alt+w")
+		if cmd == nil {
+			t.Fatal("alt+w returned no command, want a quit")
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Errorf("alt+w produced %T, want tea.QuitMsg", cmd())
+		}
+	})
+
+	t.Run("alt+w is advertised on the menu", func(t *testing.T) {
+		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1"})
+		m.width, m.height = 100, 30
+		m.spinner = newSpinner("")
+		if out := plain(m.viewMenu()); !strings.Contains(out, "alt+w quit") {
+			t.Errorf("the menu does not advertise alt+w:\n%s", out)
+		}
+	})
+
+	t.Run("alt+t with nothing to reattach says so", func(t *testing.T) {
+		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1"})
+		m.phase = phaseMenu
+		m.sessions = ionterm.NewManager()
+		mm, _ := m.onMenuKey("alt+t")
+		got := mm.(tuiModel)
+		if !strings.Contains(got.status, "nothing to reattach") {
+			t.Errorf("status = %q, want it to say there is nothing to reattach", got.status)
+		}
+		if got.phase != phaseMenu {
+			t.Errorf("phase = %v, want to stay on the menu", got.phase)
+		}
+	})
+
+	t.Run("alt+t restores the elements list behind tab 1", func(t *testing.T) {
+		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1"})
+		m.phase = phaseMenu
+		m.sessions = ionterm.NewManager()
+		m.selected = map[string]bool{}
+		m.table = newElementTable()
+		m.filter = newField("", "", false).input
+		m.width, m.height = 100, 30
+
+		els := []api.Element{{ID: "e1", Name: "s0100-rtr-01"}, {ID: "e2", Name: "s0100-rtr-02"}}
+		if err := m.store.SaveCache(&config.ElementCache{TSGID: "1", FetchedAt: time.Now(), Elements: els}); err != nil {
+			t.Fatalf("SaveCache() error = %v", err)
+		}
+
+		mm, _ := m.onMenuKey("alt+t")
+		got := mm.(tuiModel)
+		// Nothing was open to reattach to, but the elements that own tab 1 must
+		// still have been restored, or a reattach would land on an empty list.
+		if len(got.all) != len(els) {
+			t.Errorf("loaded %d elements, want %d restored from cache", len(got.all), len(els))
+		}
+	})
 }
