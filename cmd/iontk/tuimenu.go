@@ -17,6 +17,7 @@ const (
 	actBatch
 	actSwitch
 	actAddTenant
+	actSignIn
 	actSettings
 	actQuit
 )
@@ -36,6 +37,9 @@ func (m tuiModel) menuEntries() []menuEntry {
 			menuEntry{"start ION shell for " + m.tenant.Name, actShell},
 			menuEntry{"send batch commands for " + m.tenant.Name, actBatch},
 		)
+	}
+	if m.hasTenant && m.tenant.UsesBrowser() {
+		e = append(e, menuEntry{"sign in to " + m.tenant.Name + " with browser", actSignIn})
 	}
 	if len(m.cfg.Tenants) > 1 {
 		e = append(e, menuEntry{"switch tenant", actSwitch})
@@ -96,7 +100,13 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 			m.phase = phaseSwitch
 			return m, nil
 		case actAddTenant:
-			return m.openTenantForm()
+			m.authCursor = 0
+			m.status = ""
+			m.phase = phaseAuthPick
+			return m, nil
+		case actSignIn:
+			m.signInResume = false
+			return m.startSignIn()
 		case actSettings:
 			m.setCursor = 0
 			m.phase = phaseSettings
@@ -194,13 +204,22 @@ func (m tuiModel) openForm(kind formKind, title string, phase tuiPhase, fields [
 	return m, m.form[0].input.Focus()
 }
 
-func (m tuiModel) openTenantForm() (tea.Model, tea.Cmd) {
-	return m.openForm(formTenant, "Add Tenant", phaseAddTenant, []formField{
+func (m tuiModel) openTenantForm(auth string) (tea.Model, tea.Cmd) {
+	m.formAuth = auth
+	fields := []formField{
 		newField("name", "Acme Co", false),
 		newField("tsg id", "1234567890", false),
-		newField("client id", "svc@1234.iam.panserviceaccount.com", false),
-		newField("client secret", "", true),
-	})
+	}
+	title := "Add Tenant"
+	if auth == config.AuthBrowser {
+		title = "Add Tenant (browser sign-in)"
+	} else {
+		fields = append(fields,
+			newField("client id", "svc@1234.iam.panserviceaccount.com", false),
+			newField("client secret", "", true),
+		)
+	}
+	return m.openForm(formTenant, title, phaseAddTenant, fields)
 }
 
 func (m tuiModel) openUserFormFor(name string) (tea.Model, tea.Cmd) {
@@ -262,6 +281,9 @@ func (m tuiModel) onFormKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 }
 
 func (m tuiModel) formValue(i int) string {
+	if i >= len(m.form) {
+		return ""
+	}
 	return strings.TrimSpace(m.form[i].input.Value())
 }
 
@@ -274,7 +296,7 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 			m.status = "name and tsg id are required"
 			return m, nil
 		}
-		t := config.Tenant{Name: name, TSGID: tsg, ClientID: m.formValue(2)}
+		t := config.Tenant{Name: name, TSGID: tsg, ClientID: m.formValue(2), Auth: m.formAuth}
 		m.cfg.Upsert(t)
 		m.cfg.LastTenant = name
 		if err := m.store.SaveConfig(m.cfg); err != nil {
@@ -348,6 +370,10 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 			if v, err := m.store.Secrets.Get(config.ClientSecretKey(m.formOldTSG)); err == nil && v != "" {
 				_ = m.store.Secrets.Set(config.ClientSecretKey(tsg), v)
 				_ = m.store.Secrets.Delete(config.ClientSecretKey(m.formOldTSG))
+			}
+			if v, err := m.store.Secrets.Get(config.RefreshTokenKey(m.formOldTSG)); err == nil && v != "" {
+				_ = m.store.Secrets.Set(config.RefreshTokenKey(tsg), v)
+				_ = m.store.Secrets.Delete(config.RefreshTokenKey(m.formOldTSG))
 			}
 			for _, u := range old.Users {
 				if v, err := m.store.Secrets.Get(config.IONPassKey(m.formOldTSG, u.Name)); err == nil && v != "" {
@@ -670,6 +696,12 @@ func (m tuiModel) openEditTenantForm(t config.Tenant) (tea.Model, tea.Cmd) {
 	name.input.SetValue(t.Name)
 	tsg := newField("tsg id", "", false)
 	tsg.input.SetValue(t.TSGID)
+	m.formAuth = t.Auth
+	if t.UsesBrowser() {
+		return m.openForm(formEditTenant, "Edit "+t.Name+" (browser sign-in)", phaseAddTenant,
+			[]formField{name, tsg})
+	}
+
 	client := newField("client id", "", false)
 	client.input.SetValue(t.ClientID)
 	secret := newField("client secret", "leave blank to keep", true)
@@ -710,4 +742,76 @@ func (m tuiModel) moveUserSecret(tsg, from, to string) {
 		_ = m.store.Secrets.Set(config.IONPassKey(tsg, to), v)
 		_ = m.store.Secrets.Delete(config.IONPassKey(tsg, from))
 	}
+}
+
+// authChoices are the sign-in methods offered when adding a tenant.
+var authChoices = []struct {
+	label string
+	help  string
+	auth  string
+}{
+	{"service account", "a client ID and secret, for unattended runs", config.AuthServiceAccount},
+	{"browser account", "sign in as yourself; no secret to manage", config.AuthBrowser},
+}
+
+func (m tuiModel) onAuthPickKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "esc", "q":
+		m.phase = phaseMenu
+		return m, nil
+	case "up", "k":
+		m.authCursor = max(0, m.authCursor-1)
+		return m, nil
+	case "down", "j":
+		m.authCursor = min(len(authChoices)-1, m.authCursor+1)
+		return m, nil
+	case "enter", "right", "l":
+		return m.openTenantForm(authChoices[m.authCursor].auth)
+	}
+	return m, nil
+}
+
+func (m tuiModel) viewAuthPick() string {
+	var b strings.Builder
+	b.WriteString(banner(m.width, m.height))
+	b.WriteString(styleCmd.Render("how should iontk sign in to this tenant?") + "\n\n")
+
+	for i, c := range authChoices {
+		cursor := "  "
+		label := c.label
+		if i == m.authCursor {
+			cursor = styleCmd.Render("> ")
+			label = styleElement.Render(label)
+		}
+		b.WriteString(cursor + label + "\n")
+		b.WriteString("    " + styleDim.Render(c.help) + "\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(footer(m.status, "↑↓ move · enter select · esc back"))
+	return b.String()
+}
+
+// startSignIn shows the waiting screen and opens the browser.
+func (m tuiModel) startSignIn() (tea.Model, tea.Cmd) {
+	if !m.hasTenant {
+		m.status = "no tenant to sign in to"
+		m.phase = phaseMenu
+		return m, nil
+	}
+	f := tenantFlags(m.store, m.tenant, m.ionUser)
+	m.flags = f
+	m.status = ""
+	m.phase = phaseSignIn
+	return m, tea.Batch(m.spinner.Tick, signIn(m.ctx, f, m.store))
+}
+
+func (m tuiModel) viewSignIn() string {
+	var b strings.Builder
+	b.WriteString(banner(m.width, m.height))
+	b.WriteString(fmt.Sprintf("  %s waiting for browser\n\n", m.spinner.View()))
+	b.WriteString("  " + styleDim.Render("finish signing in to "+m.tenant.Name+" in the browser window") + "\n")
+	b.WriteString("\n")
+	b.WriteString(footer(m.status, "esc stop waiting"))
+	return b.String()
 }

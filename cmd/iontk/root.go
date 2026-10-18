@@ -28,8 +28,6 @@ var (
 	flagVerbose       bool
 	flagNoProgress    bool
 	flagAllowWrites   bool
-	flagBrowser       bool
-	flagChrome        string
 	flagTSG           string
 )
 
@@ -94,11 +92,9 @@ func init() {
 	pf.BoolVarP(&flagVerbose, "verbose", "v", false, "print request details, rate limit headers, attempt errors")
 	pf.BoolVar(&flagNoProgress, "no-progress", false, "never draw the batch progress bar")
 	pf.BoolVar(&flagAllowWrites, "allow-writes", false, "permit commands that are not read-only")
-	pf.BoolVar(&flagBrowser, "browser", false, "authenticate in a browser instead of with a service account")
-	pf.StringVar(&flagChrome, "chrome", "", "browser binary to use for --browser (default: search PATH)")
 	pf.StringVar(&flagTSG, "tsg", "", "tenant service group ID (overrides SCM_TSG_ID)")
 
-	rootCmd.AddCommand(runCmd, shellCmd, versionCmd, loginCmd)
+	rootCmd.AddCommand(runCmd, shellCmd, versionCmd)
 }
 
 func baseFlags() flags {
@@ -118,8 +114,6 @@ func baseFlags() flags {
 		ElementTimeout: flagElementTO,
 		SessionTimeout: flagSessionTO,
 		Attempts:       flagAttempts,
-		BrowserAuth:    flagBrowser,
-		Chrome:         flagChrome,
 	}
 	if flagTSG != "" {
 		f.TSGID = flagTSG
@@ -139,8 +133,8 @@ func newClient(ctx context.Context, f flags, logw io.Writer) (*api.Client, error
 		fmt.Fprintln(logw, "using SCM_TOKEN")
 		return api.NewClient(httpClient, wsClient, f.Token, f.Verbose, f.RPS, f.Burst), nil
 	}
-	if f.ClientID == "" || f.ClientSecret == "" {
-		fmt.Fprintln(logw, "authenticating in a browser")
+	if f.BrowserAuth {
+		fmt.Fprintln(logw, "using the browser sign-in for this tenant")
 		src := browserSource(f, httpClient, openStore())
 		return api.NewTokenSourceClient(ctx, httpClient, wsClient, src, f.RefreshMargin, f.Verbose, f.RPS, f.Burst)
 	}

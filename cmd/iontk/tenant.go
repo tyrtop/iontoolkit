@@ -38,10 +38,11 @@ func tenantFlags(st *config.Store, t config.Tenant, ionUser string) flags {
 	if t.TSGID != "" {
 		f.TSGID = t.TSGID
 	}
+	f.BrowserAuth = t.UsesBrowser()
 	if f.ClientID == "" {
 		f.ClientID = t.ClientID
 	}
-	if f.ClientSecret == "" && t.TSGID != "" {
+	if f.ClientSecret == "" && t.TSGID != "" && !f.BrowserAuth {
 		if v, err := st.Secrets.Get(config.ClientSecretKey(t.TSGID)); err == nil {
 			f.ClientSecret = v
 		}
@@ -80,6 +81,7 @@ func forgetTenant(st *config.Store, cfg *config.Config, t config.Tenant) error {
 		_ = st.Secrets.Delete(config.IONPassKey(t.TSGID, u.Name))
 	}
 	_ = st.Secrets.Delete(config.ClientSecretKey(t.TSGID))
+	_ = st.Secrets.Delete(config.RefreshTokenKey(t.TSGID))
 	_ = st.DropCache(t.TSGID)
 	cfg.Remove(t.Name)
 	return st.SaveConfig(cfg)

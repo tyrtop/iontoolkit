@@ -280,7 +280,7 @@ func TestPasteReachesFocusedInput(t *testing.T) {
 	base.table = newElementTable()
 
 	t.Run("add tenant form", func(t *testing.T) {
-		mm, _ := base.openTenantForm()
+		mm, _ := base.openTenantForm(config.AuthServiceAccount)
 		m := mm.(tuiModel)
 
 		mm, _ = m.Update(tea.PasteMsg{Content: "1234567890"})
@@ -292,7 +292,7 @@ func TestPasteReachesFocusedInput(t *testing.T) {
 	})
 
 	t.Run("second form field after tab", func(t *testing.T) {
-		mm, _ := base.openTenantForm()
+		mm, _ := base.openTenantForm(config.AuthServiceAccount)
 		m := mm.(tuiModel)
 
 		mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
@@ -378,7 +378,7 @@ func TestEnterSavesFromAnyField(t *testing.T) {
 	m.table = newElementTable()
 	m.cmdInput = newField("", "", false).input
 
-	mm, _ := m.openTenantForm()
+	mm, _ := m.openTenantForm(config.AuthServiceAccount)
 	m = mm.(tuiModel)
 
 	m = typeString(t, m, "Acme Co")
@@ -410,7 +410,7 @@ func TestEnterReportsMissingRequiredFields(t *testing.T) {
 	st := config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json"))
 
 	m := tuiModel{store: st, cfg: &config.Config{}, selected: map[string]bool{}}
-	mm, _ := m.openTenantForm()
+	mm, _ := m.openTenantForm(config.AuthServiceAccount)
 	m = mm.(tuiModel)
 
 	m = typeString(t, m, "Acme Co")
@@ -435,7 +435,7 @@ func TestPlaceholdersRenderInFull(t *testing.T) {
 		t.Errorf("cmdInput placeholder = %q, want the full hint", got)
 	}
 
-	mm, _ := m.openTenantForm()
+	mm, _ := m.openTenantForm(config.AuthServiceAccount)
 	fm := mm.(tuiModel)
 	wants := []string{"Acme Co", "1234567890", "svc@1234.iam.panserviceaccount.com"}
 	for i, want := range wants {

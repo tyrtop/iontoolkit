@@ -13,11 +13,29 @@ type IONUser struct {
 	Default bool   `json:"default,omitempty"`
 }
 
+// How a tenant proves who it is. An empty Auth means a service account, so
+// tenants written before browser sign-in existed keep working.
+const (
+	AuthServiceAccount = "service_account"
+	AuthBrowser        = "browser"
+)
+
 type Tenant struct {
 	Name     string    `json:"name"`
 	TSGID    string    `json:"tsg_id"`
 	ClientID string    `json:"client_id"`
+	Auth     string    `json:"auth,omitempty"`
 	Users    []IONUser `json:"users,omitempty"`
+}
+
+func (t Tenant) UsesBrowser() bool { return t.Auth == AuthBrowser }
+
+// AuthLabel names the tenant's sign-in method for display.
+func (t Tenant) AuthLabel() string {
+	if t.UsesBrowser() {
+		return "browser"
+	}
+	return "service account"
 }
 
 type Config struct {
