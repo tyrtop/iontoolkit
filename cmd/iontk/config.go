@@ -25,15 +25,23 @@ type flags struct {
 	ClientSecret   string
 	TSGID          string
 	RefreshMargin  time.Duration
+	BrowserAuth    bool
+	Chrome         string
 }
 
 func (f flags) validateCreds() error {
-	if f.Token == "" {
-		if f.ClientID == "" || f.ClientSecret == "" || f.TSGID == "" {
-			return fmt.Errorf("set SCM_CLIENT_ID, SCM_CLIENT_SECRET, and SCM_TSG_ID, or SCM_TOKEN to override")
-		}
+	if f.Token != "" {
+		return nil
 	}
-	return nil
+	if f.ClientID != "" && f.ClientSecret != "" && f.TSGID != "" {
+		return nil
+	}
+	// Browser authentication carries the tenant in the token scope, so the
+	// tenant is the only thing it still needs up front.
+	if f.BrowserAuth && f.TSGID != "" {
+		return nil
+	}
+	return fmt.Errorf("set SCM_CLIENT_ID, SCM_CLIENT_SECRET, and SCM_TSG_ID; or SCM_TOKEN; or --browser with SCM_TSG_ID")
 }
 
 func (f flags) Validate() error {

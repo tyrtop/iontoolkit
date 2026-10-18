@@ -14,11 +14,22 @@ import (
 
 const authURL = "https://auth.apps.paloaltonetworks.com/oauth2/access_token"
 
-type auth struct {
+// TokenSource produces access tokens and says how long each one lasts, so that
+// refreshLoop can schedule the next one. Implementations may be anything from a
+// service account to a browser sign-in.
+type TokenSource interface {
+	Token(ctx context.Context) (string, time.Duration, error)
+}
+
+type serviceAccount struct {
 	client *http.Client
 	id     string
 	secret string
 	tsg    string
+}
+
+func (a serviceAccount) Token(ctx context.Context) (string, time.Duration, error) {
+	return MintToken(ctx, a.client, a.id, a.secret, a.tsg)
 }
 
 func MintToken(ctx context.Context, client *http.Client, id, secret, tsg string) (string, time.Duration, error) {
@@ -60,7 +71,7 @@ func MintToken(ctx context.Context, client *http.Client, id, secret, tsg string)
 }
 
 func (s *Client) mint(ctx context.Context) (time.Duration, error) {
-	tok, ttl, err := MintToken(ctx, s.auth.client, s.auth.id, s.auth.secret, s.auth.tsg)
+	tok, ttl, err := s.src.Token(ctx)
 	if err != nil {
 		return 0, err
 	}
