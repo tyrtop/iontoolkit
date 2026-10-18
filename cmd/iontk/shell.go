@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"tyrtop.com/iontk/internal/app"
 )
 
 var shellCmd = &cobra.Command{
@@ -25,7 +24,7 @@ func runShell(ctx context.Context, eid string) error {
 		return fmt.Errorf("--element is required")
 	}
 
-	f := app.BaseFlags()
+	f := baseFlags()
 	f.Elements = []string{eid}
 	f.Concurrency = 1
 
@@ -33,7 +32,7 @@ func runShell(ctx context.Context, eid string) error {
 		return err
 	}
 
-	client, err := app.NewClient(ctx, f, os.Stderr)
+	client, err := newClient(ctx, f, os.Stderr)
 	if err != nil {
 		return err
 	}

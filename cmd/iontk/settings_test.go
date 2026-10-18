@@ -1,4 +1,4 @@
-package tui
+package main
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/config"
-	"tyrtop.com/iontk/internal/ui"
 )
 
 func settingsModel(t *testing.T) tuiModel {
@@ -35,21 +34,6 @@ func settingsModel(t *testing.T) tuiModel {
 	return m
 }
 
-// navTo walks the nav pane down to section want, so these tests do not depend
-// on which sections happen to sit next to each other.
-func navTo(t *testing.T, m tuiModel, want int) tuiModel {
-	t.Helper()
-	for i := 0; i < len(setSections); i++ {
-		if m.setSection == want {
-			return m
-		}
-		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
-		m = mm.(tuiModel)
-	}
-	t.Fatalf("never reached section %d; stopped at %d", want, m.setSection)
-	return m
-}
-
 func TestSettingsNavAndContentFocus(t *testing.T) {
 	m := settingsModel(t)
 
@@ -57,9 +41,13 @@ func TestSettingsNavAndContentFocus(t *testing.T) {
 		t.Fatal("settings should start on the nav pane")
 	}
 
-	m = navTo(t, m, secTenants)
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	m = mm.(tuiModel)
+	if m.setSection != secTenants {
+		t.Errorf("section = %d, want secTenants", m.setSection)
+	}
 
-	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	m = mm.(tuiModel)
 	if m.setFocus != focusContent {
 		t.Fatal("tab should move into the content pane")
@@ -255,7 +243,7 @@ func TestSettingsFrameFitsTheTerminal(t *testing.T) {
 			m := settingsModel(t)
 			m.height = h
 			m.setSection = sec
-			if n := len(strings.Split(ui.ClipFrame(m.viewSettings(), h), "\n")); n > h {
+			if n := len(strings.Split(clipFrame(m.viewSettings(), h), "\n")); n > h {
 				t.Errorf("height %d section %d: frame is %d lines", h, sec, n)
 			}
 		}
@@ -273,8 +261,8 @@ func TestRenderSettingsPanes(t *testing.T) {
 
 func TestLabelsPadVisibleWidthNotEscapeBytes(t *testing.T) {
 	for _, s := range []string{"spinner", "commands", "a"} {
-		if got := len(plain(ui.Label(s))); got != 13 {
-			t.Errorf("ui.Label(%q) visible width = %d, want 13", s, got)
+		if got := len(plain(label(s))); got != 13 {
+			t.Errorf("label(%q) visible width = %d, want 13", s, got)
 		}
 	}
 
@@ -286,6 +274,27 @@ func TestLabelsPadVisibleWidthNotEscapeBytes(t *testing.T) {
 	}
 	if !strings.Contains(got, "commands     read-only") {
 		t.Errorf("label not padded:\n%s", got)
+	}
+}
+
+func TestTruncateIsAnsiAndWidthAware(t *testing.T) {
+	styled := styleElement.Render("readonly") + styleDim.Render("  (default)") + styleOK.Render("  saved")
+
+	got := truncate(styled, 40)
+	if plain(got) != plain(styled) {
+		t.Errorf("a styled string that fits was altered:\n got %q\nwant %q", plain(got), plain(styled))
+	}
+
+	cut := truncate(styled, 10)
+	if w := len([]rune(plain(cut))); w > 10 {
+		t.Errorf("truncated visible width = %d, want at most 10", w)
+	}
+
+	if got := truncate("ünïcødé-name", 6); len([]rune(plain(got))) > 6 {
+		t.Errorf("multi-byte truncate gave %q", got)
+	}
+	if got := truncate("short", 0); got != "" {
+		t.Errorf("zero width gave %q", got)
 	}
 }
 
@@ -415,9 +424,13 @@ func TestEnterOpensSectionFromNav(t *testing.T) {
 		t.Fatal("expected nav focus")
 	}
 
-	m = navTo(t, m, secTenants)
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	m = mm.(tuiModel)
+	if m.setSection != secTenants {
+		t.Fatalf("section = %d, want secTenants", m.setSection)
+	}
 
-	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = mm.(tuiModel)
 	if m.setFocus != focusContent {
 		t.Fatal("enter from the nav pane should open the section")

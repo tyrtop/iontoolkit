@@ -1,4 +1,4 @@
-package tui
+package main
 
 import (
 	"fmt"
@@ -6,10 +6,8 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/ioncmd"
 	"tyrtop.com/iontk/internal/sase/ioncli"
-	"tyrtop.com/iontk/internal/ui"
 )
 
 type slashMode int
@@ -52,7 +50,7 @@ func (m tuiModel) closeSlash() tuiModel {
 
 func (m tuiModel) catalog() []string {
 	all := ioncmd.Embedded()
-	if app.Defaults.AllowWrites || m.cfg.AllowWrites {
+	if flagAllowWrites || m.cfg.AllowWrites {
 		return all
 	}
 	return ioncmd.ReadOnly(all, ioncli.IsReadOnly)
@@ -149,7 +147,7 @@ func (m tuiModel) activateSlash() (tea.Model, tea.Cmd) {
 			if s == nil {
 				return m.closeSlash(), nil
 			}
-			creds := m.activeSessionCreds()
+			creds := m.sessionCreds()
 			if !s.Login(creds) {
 				m = m.closeSlash()
 				m.status = "no stored credentials for this tenant"
@@ -169,7 +167,7 @@ func (m tuiModel) activateSlash() (tea.Model, tea.Cmd) {
 		if text == "" {
 			return m.closeSlash(), nil
 		}
-		if !app.Defaults.AllowWrites && !m.cfg.AllowWrites && !ioncli.IsReadOnly(text) {
+		if !flagAllowWrites && !m.cfg.AllowWrites && !ioncli.IsReadOnly(text) {
 			m.status = "not read-only: " + text
 			return m.closeSlash(), nil
 		}
@@ -249,42 +247,42 @@ func (m tuiModel) slashHeight() int {
 
 func (m tuiModel) viewSlash() string {
 	var b strings.Builder
-	b.WriteString(ui.StyleDim.Render(strings.Repeat("─", max(10, min(m.width, 80)))) + "\n")
+	b.WriteString(styleDim.Render(strings.Repeat("─", max(10, min(m.width, 80)))) + "\n")
 
 	switch m.slash {
 	case slashHelp:
-		b.WriteString(ui.StyleCmd.Render("/help") + "\n\n")
-		b.WriteString("  " + ui.StyleElement.Render("/login") + ui.StyleDim.Render("     fill the stored ION user and password") + "\n")
-		b.WriteString("  " + ui.StyleElement.Render("/commands") + ui.StyleDim.Render("  browse the ION command reference, enter inserts") + "\n")
-		b.WriteString("  " + ui.StyleElement.Render("/debug") + ui.StyleDim.Render("     buffer and pane geometry") + "\n")
-		b.WriteString("  " + ui.StyleElement.Render("/help") + ui.StyleDim.Render("      this list") + "\n\n")
-		b.WriteString(ui.StyleDim.Render("  tab completes the selection · enter inserts without sending") + "\n")
-		b.WriteString(ui.StyleDim.Render("  / only opens here when the device line is empty") + "\n")
-		b.WriteString(ui.StyleDim.Render("esc back"))
+		b.WriteString(styleCmd.Render("/help") + "\n\n")
+		b.WriteString("  " + styleElement.Render("/login") + styleDim.Render("     fill the stored ION user and password") + "\n")
+		b.WriteString("  " + styleElement.Render("/commands") + styleDim.Render("  browse the ION command reference, enter inserts") + "\n")
+		b.WriteString("  " + styleElement.Render("/debug") + styleDim.Render("     buffer and pane geometry") + "\n")
+		b.WriteString("  " + styleElement.Render("/help") + styleDim.Render("      this list") + "\n\n")
+		b.WriteString(styleDim.Render("  tab completes the selection · enter inserts without sending") + "\n")
+		b.WriteString(styleDim.Render("  / only opens here when the device line is empty") + "\n")
+		b.WriteString(styleDim.Render("esc back"))
 		return b.String()
 
 	case slashDebug:
-		b.WriteString(ui.StyleCmd.Render("/debug") + "\n\n")
+		b.WriteString(styleCmd.Render("/debug") + "\n\n")
 		cols, rows := m.paneSize()
 		s := m.sessions.Active()
 		if s == nil {
-			b.WriteString(ui.StyleDim.Render("  no active session") + "\n")
+			b.WriteString(styleDim.Render("  no active session") + "\n")
 		} else {
 			bc, br := s.Size()
 			cx, cy := s.Cursor()
-			b.WriteString("  " + ui.Label("buffer") + fmt.Sprintf("%d x %d\n", bc, br))
-			b.WriteString("  " + ui.Label("pane") + fmt.Sprintf("%d x %d\n", cols, rows))
-			b.WriteString("  " + ui.Label("cursor") + fmt.Sprintf("%d, %d\n", cx, cy))
-			b.WriteString("  " + ui.Label("terminal") + fmt.Sprintf("%d x %d\n", m.width, m.height))
-			b.WriteString("  " + ui.Label("line") + fmt.Sprintf("%q\n", s.Line()))
+			b.WriteString("  " + label("buffer") + fmt.Sprintf("%d x %d\n", bc, br))
+			b.WriteString("  " + label("pane") + fmt.Sprintf("%d x %d\n", cols, rows))
+			b.WriteString("  " + label("cursor") + fmt.Sprintf("%d, %d\n", cx, cy))
+			b.WriteString("  " + label("terminal") + fmt.Sprintf("%d x %d\n", m.width, m.height))
+			b.WriteString("  " + label("line") + fmt.Sprintf("%q\n", s.Line()))
 		}
-		b.WriteString(ui.StyleDim.Render("esc back"))
+		b.WriteString(styleDim.Render("esc back"))
 		return b.String()
 	}
 
 	b.WriteString(m.slashInput.View())
 	if n := len(m.slashItems); n > 0 {
-		b.WriteString(ui.StyleDim.Render(fmt.Sprintf("   %d", n)))
+		b.WriteString(styleDim.Render(fmt.Sprintf("   %d", n)))
 	}
 	b.WriteString("\n")
 
@@ -297,16 +295,16 @@ func (m tuiModel) viewSlash() string {
 		prefix := "  "
 		line := m.slashItems[i]
 		if i == m.slashCursor {
-			prefix = ui.StyleCmd.Render("> ")
-			line = ui.StyleElement.Render(line)
+			prefix = styleCmd.Render("> ")
+			line = styleElement.Render(line)
 		}
-		b.WriteString(prefix + ui.Truncate(line, max(10, m.width-4)) + "\n")
+		b.WriteString(prefix + truncate(line, max(10, m.width-4)) + "\n")
 		shown++
 	}
 	for ; shown < slashRows; shown++ {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(ui.StyleDim.Render("↑↓ select · tab complete · enter use · esc close"))
+	b.WriteString(styleDim.Render("↑↓ select · tab complete · enter use · esc close"))
 	return b.String()
 }

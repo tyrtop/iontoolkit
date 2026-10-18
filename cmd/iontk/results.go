@@ -1,4 +1,4 @@
-package tui
+package main
 
 import (
 	"fmt"
@@ -9,7 +9,6 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/sase"
-	"tyrtop.com/iontk/internal/ui"
 )
 
 func newResultsTable() table.Model {
@@ -78,9 +77,9 @@ func (m *tuiModel) rebuildResultRows() {
 	rows := make([]table.Row, 0, len(m.resMatches))
 	for _, i := range m.resMatches {
 		r := m.results[i]
-		mark := ui.MarkCheck.String()
+		mark := markCheck.String()
 		if r.Error != "" {
-			mark = ui.MarkCross.String()
+			mark = markCross.String()
 		}
 		name := r.Name
 		if name == "" {
@@ -92,8 +91,8 @@ func (m *tuiModel) rebuildResultRows() {
 		}
 		rows = append(rows, table.Row{
 			mark,
-			ui.Truncate(name, 26),
-			ui.Truncate(r.Model, 11),
+			truncate(name, 26),
+			truncate(r.Model, 11),
 			fmt.Sprintf("%d", len(r.Commands)),
 			took,
 		})
@@ -197,20 +196,20 @@ func (m tuiModel) resultDetail(idx int) []string {
 	var lines []string
 
 	if r.Error != "" {
-		lines = append(lines, ui.StyleErr.Render(r.Error))
+		lines = append(lines, styleErr.Render(r.Error))
 	}
 	if r.HWID != "" || r.Model != "" {
-		lines = append(lines, ui.StyleDim.Render(fmt.Sprintf("%s  %s  %s  connected=%v",
+		lines = append(lines, styleDim.Render(fmt.Sprintf("%s  %s  %s  connected=%v",
 			r.HWID, r.Model, r.Software, r.Connected)))
 	}
 	for _, c := range r.Commands {
-		lines = append(lines, "", ui.StyleCmd.Render(c.Command))
+		lines = append(lines, "", styleCmd.Render(c.Command))
 		for _, out := range strings.Split(strings.TrimRight(c.Output, "\n"), "\n") {
 			lines = append(lines, "  "+out)
 		}
 	}
 	if len(lines) == 0 {
-		lines = append(lines, ui.StyleDim.Render("no output"))
+		lines = append(lines, styleDim.Render("no output"))
 	}
 	return lines
 }
@@ -219,25 +218,25 @@ func (m tuiModel) viewResults() string {
 	var b strings.Builder
 
 	done := m.completedCount()
-	header := ui.StyleCmd.Render("results") +
-		ui.StyleDim.Render(fmt.Sprintf("   %d/%d done", done, len(m.ran)))
+	header := styleCmd.Render("results") +
+		styleDim.Render(fmt.Sprintf("   %d/%d done", done, len(m.ran)))
 	if m.failed > 0 {
-		header += ui.StyleErr.Render(fmt.Sprintf("  %d failed", m.failed))
+		header += styleErr.Render(fmt.Sprintf("  %d failed", m.failed))
 	}
 	b.WriteString(header + "\n")
 
 	if m.resFilterOn || m.resFilter.Value() != "" {
 		line := m.resFilter.View()
 		if m.resFilter.Value() != "" {
-			line += ui.StyleDim.Render(fmt.Sprintf("   %d", len(m.resMatches)))
+			line += styleDim.Render(fmt.Sprintf("   %d", len(m.resMatches)))
 		}
 		b.WriteString(line + "\n")
 	} else {
-		b.WriteString(ui.StyleDim.Render("press / to filter") + "\n")
+		b.WriteString(styleDim.Render("press / to filter") + "\n")
 	}
 
 	if len(m.resMatches) == 0 {
-		b.WriteString(ui.StyleDim.Render("  nothing completed yet") + "\n")
+		b.WriteString(styleDim.Render("  nothing completed yet") + "\n")
 	} else {
 		b.WriteString(m.resTable.View() + "\n")
 	}
@@ -249,18 +248,18 @@ func (m tuiModel) viewResults() string {
 			name = r.ElementID
 		}
 
-		b.WriteString(ui.StyleDim.Render(strings.Repeat("─", max(10, min(m.width, 70)))) + "\n")
-		b.WriteString(ui.StyleElement.Render(name) + "\n")
+		b.WriteString(styleDim.Render(strings.Repeat("─", max(10, min(m.width, 70)))) + "\n")
+		b.WriteString(styleElement.Render(name) + "\n")
 
 		lines := m.resultDetail(idx)
 		used := len(strings.Split(strings.TrimRight(b.String(), "\n"), "\n"))
 		room := max(2, m.height-used-2)
 		start := min(m.resScroll, max(0, len(lines)-room))
 		for i := start; i < len(lines) && i-start < room; i++ {
-			b.WriteString(ui.Truncate(lines[i], max(10, m.width-1)) + "\n")
+			b.WriteString(truncate(lines[i], max(10, m.width-1)) + "\n")
 		}
 		if rest := len(lines) - start - room; rest > 0 {
-			b.WriteString(ui.StyleDim.Render(fmt.Sprintf("  … %d more lines (pgdn)", rest)) + "\n")
+			b.WriteString(styleDim.Render(fmt.Sprintf("  … %d more lines (pgdn)", rest)) + "\n")
 		}
 	}
 
@@ -274,7 +273,7 @@ func (m tuiModel) viewResults() string {
 	if m.resOpen {
 		hint = "↑↓ close and move · pgup/pgdn scroll · esc close · q quit"
 	}
-	return body + "\n" + ui.Footer(m.status, hint)
+	return body + "\n" + footer(m.status, hint)
 }
 
 func (m tuiModel) seedResultsForTest(rs []sase.Result, el []time.Duration) tuiModel {

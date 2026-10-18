@@ -3,33 +3,22 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
 
 const authURL = "https://auth.apps.paloaltonetworks.com/oauth2/access_token"
 
-// TokenSource produces access tokens and says how long each one lasts, so that
-// refreshLoop can schedule the next one. Implementations may be anything from a
-// service account to a browser sign-in.
-type TokenSource interface {
-	Token(ctx context.Context) (string, time.Duration, error)
-}
-
-type serviceAccount struct {
+type auth struct {
 	client *http.Client
 	id     string
 	secret string
 	tsg    string
-}
-
-func (a serviceAccount) Token(ctx context.Context) (string, time.Duration, error) {
-	return MintToken(ctx, a.client, a.id, a.secret, a.tsg)
 }
 
 func MintToken(ctx context.Context, client *http.Client, id, secret, tsg string) (string, time.Duration, error) {
@@ -71,7 +60,7 @@ func MintToken(ctx context.Context, client *http.Client, id, secret, tsg string)
 }
 
 func (s *Client) mint(ctx context.Context) (time.Duration, error) {
-	tok, ttl, err := s.src.Token(ctx)
+	tok, ttl, err := MintToken(ctx, s.auth.client, s.auth.id, s.auth.secret, s.auth.tsg)
 	if err != nil {
 		return 0, err
 	}
@@ -82,45 +71,7 @@ func (s *Client) mint(ctx context.Context) (time.Duration, error) {
 	return ttl, nil
 }
 
-// retryAfterFailure is how long to wait before trying again after a refresh
-// that could plausibly succeed later. Waiting out the whole token lifetime
-// turns a momentary network problem into a quarter hour of 401s.
-const retryAfterFailure = 30 * time.Second
-
-// temporary is implemented by errors that know whether retrying could help. A
-// TokenSource uses it to say that nothing will change without a human.
-type temporary interface{ Temporary() bool }
-
-func retryable(err error) bool {
-	var t temporary
-	if errors.As(err, &t) {
-		return t.Temporary()
-	}
-	return true
-}
-
-// TokenErrors reports refresh failures so the caller can decide what to say
-// about them. The channel is buffered and sends are dropped rather than
-// blocked, so a caller that never reads it costs nothing. It closes when
-// refreshing stops for good, which is the signal that the credential needs
-// human attention.
-func (s *Client) TokenErrors() <-chan error { return s.tokenErrs }
-
-func (s *Client) reportTokenError(err error) {
-	if s.tokenErrs == nil {
-		return
-	}
-	select {
-	case s.tokenErrs <- err:
-	default:
-	}
-}
-
 func (s *Client) refreshLoop(ctx context.Context, ttl, margin time.Duration) {
-	if s.tokenErrs != nil {
-		defer close(s.tokenErrs)
-	}
-
 	timer := time.NewTimer(ttl - margin)
 	defer timer.Stop()
 	for {
@@ -130,20 +81,13 @@ func (s *Client) refreshLoop(ctx context.Context, ttl, margin time.Duration) {
 		case <-timer.C:
 			next, err := s.mint(ctx)
 			if err != nil {
-				s.reportTokenError(fmt.Errorf("token refresh: %w", err))
-				// A credential that needs a human back at the keyboard will not
-				// start working on its own, so stop instead of spinning. Signing
-				// in again builds a new client with a new loop.
-				if !retryable(err) {
-					return
-				}
-				timer.Reset(retryAfterFailure)
-				continue
+				fmt.Fprintln(os.Stderr, "token refresh:", err)
+				next = ttl
 			}
 			ttl = next
 			wait := ttl - margin
 			if wait <= 0 {
-				s.reportTokenError(fmt.Errorf("token lifetime %s is shorter than the refresh margin %s, so refreshing stopped", ttl, margin))
+				fmt.Fprintf(os.Stderr, "token lifetime %s is shorter than refresh margin %s, stopping refresh\n", ttl, margin)
 				return
 			}
 			timer.Reset(wait)

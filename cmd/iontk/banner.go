@@ -1,4 +1,4 @@
-package ui
+package main
 
 import "strings"
 
@@ -16,20 +16,20 @@ func bannerFits(width, height int) bool {
 	return width >= bannerWidth && height >= 18
 }
 
-func BannerHeight(width, height int) int {
+func bannerHeight(width, height int) int {
 	if bannerFits(width, height) {
 		return len(bannerRows) + 1
 	}
 	return 1
 }
 
-func Banner(width, height int) string {
+func banner(width, height int) string {
 	if !bannerFits(width, height) {
-		return StyleCmd.Render("iontk") + "\n"
+		return styleCmd.Render("iontk") + "\n"
 	}
 	var b strings.Builder
 	for _, r := range bannerRows {
-		b.WriteString(StyleCmd.Render(r) + "\n")
+		b.WriteString(styleCmd.Render(r) + "\n")
 	}
 	b.WriteString("\n")
 	return b.String()

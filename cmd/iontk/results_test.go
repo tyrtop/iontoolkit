@@ -1,4 +1,4 @@
-package tui
+package main
 
 import (
 	"strings"
@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/ioncli"
-	"tyrtop.com/iontk/internal/ui"
 )
 
 func resultsModel(t *testing.T) tuiModel {
@@ -174,7 +173,7 @@ func TestResultsFrameFitsTheTerminal(t *testing.T) {
 		m.resOpen = true
 		m.rebuildResultRows()
 
-		if n := len(strings.Split(ui.ClipFrame(m.viewResults(), h), "\n")); n > h {
+		if n := len(strings.Split(clipFrame(m.viewResults(), h), "\n")); n > h {
 			t.Errorf("height %d: frame is %d lines", h, n)
 		}
 	}

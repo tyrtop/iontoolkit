@@ -1,4 +1,4 @@
-package app
+package main
 
 import (
 	"os"
@@ -22,7 +22,7 @@ func tenantFromEnv() (config.Tenant, bool) {
 	return t, true
 }
 
-func ResolveTenant(cfg *config.Config, name string) (config.Tenant, bool) {
+func resolveTenant(cfg *config.Config, name string) (config.Tenant, bool) {
 	if t, ok := cfg.Resolve(name); ok {
 		return t, true
 	}
@@ -32,17 +32,16 @@ func ResolveTenant(cfg *config.Config, name string) (config.Tenant, bool) {
 	return config.Tenant{}, false
 }
 
-func TenantFlags(st *config.Store, t config.Tenant, ionUser string) Flags {
-	f := BaseFlags()
+func tenantFlags(st *config.Store, t config.Tenant, ionUser string) flags {
+	f := baseFlags()
 
 	if t.TSGID != "" {
 		f.TSGID = t.TSGID
 	}
-	f.BrowserAuth = t.UsesBrowser()
 	if f.ClientID == "" {
 		f.ClientID = t.ClientID
 	}
-	if f.ClientSecret == "" && t.TSGID != "" && !f.BrowserAuth {
+	if f.ClientSecret == "" && t.TSGID != "" {
 		if v, err := st.Secrets.Get(config.ClientSecretKey(t.TSGID)); err == nil {
 			f.ClientSecret = v
 		}
@@ -62,7 +61,7 @@ func TenantFlags(st *config.Store, t config.Tenant, ionUser string) Flags {
 	return f
 }
 
-func NeedsIONPassword(st *config.Store, t config.Tenant, ionUser string) bool {
+func needsIONPassword(st *config.Store, t config.Tenant, ionUser string) bool {
 	if os.Getenv("ION_PASS") != "" {
 		return false
 	}
@@ -74,4 +73,14 @@ func NeedsIONPassword(st *config.Store, t config.Tenant, ionUser string) bool {
 	}
 	v, err := st.Secrets.Get(config.IONPassKey(t.TSGID, ionUser))
 	return err != nil || v == ""
+}
+
+func forgetTenant(st *config.Store, cfg *config.Config, t config.Tenant) error {
+	for _, u := range t.Users {
+		_ = st.Secrets.Delete(config.IONPassKey(t.TSGID, u.Name))
+	}
+	_ = st.Secrets.Delete(config.ClientSecretKey(t.TSGID))
+	_ = st.DropCache(t.TSGID)
+	cfg.Remove(t.Name)
+	return st.SaveConfig(cfg)
 }

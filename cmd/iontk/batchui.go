@@ -1,4 +1,4 @@
-package tui
+package main
 
 import (
 	"context"
@@ -13,30 +13,38 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
-	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/sase"
-	"tyrtop.com/iontk/internal/ui"
 )
 
-// DrainLive draws batch progress on stderr. stdinTaken says the element list
-// was read from stdin, which the progress UI must then leave alone.
-func DrainLive(ctx context.Context, events <-chan sase.Event, commands []string, total int, sink output.Sink, stdinTaken bool) (int, int, error) {
+var (
+	styleOK      = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	styleErr     = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	styleWarn    = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	styleCmd     = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	styleElement = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
+	styleDim     = lipgloss.NewStyle().Faint(true)
+
+	markCheck = styleOK.SetString("✓")
+	markCross = styleErr.SetString("✗")
+)
+
+func drainLive(ctx context.Context, events <-chan sase.Event, commands []string, total int) ([]sase.Result, int, error) {
 	opts := []tea.ProgramOption{
 		tea.WithContext(ctx),
 		tea.WithOutput(os.Stderr),
 		tea.WithoutSignalHandler(),
 	}
-	if stdinTaken || !term.IsTerminal(int(os.Stdin.Fd())) {
+	if flagElementsPath == "-" || !term.IsTerminal(int(os.Stdin.Fd())) {
 		opts = append(opts, tea.WithInput(nil))
 	}
 
-	final, err := tea.NewProgram(newBatchModel(events, commands, total, sink), opts...).Run()
+	final, err := tea.NewProgram(newBatchModel(events, commands, total), opts...).Run()
 	if err != nil && !errors.Is(err, tea.ErrProgramKilled) {
-		return 0, 0, err
+		return nil, 0, err
 	}
 
 	fm := final.(batchModel)
-	return total, fm.failed, fm.sinkErr
+	return fm.results, fm.failed, nil
 }
 
 type inflight struct {
@@ -55,8 +63,7 @@ type batchModel struct {
 	commands []string
 	total    int
 
-	sink      output.Sink
-	sinkErr   error
+	results   []sase.Result
 	finished  int
 	failed    int
 	running   []inflight
@@ -72,14 +79,14 @@ type batchModel struct {
 type eventMsg sase.Event
 type streamClosedMsg struct{}
 
-func newBatchModel(events <-chan sase.Event, commands []string, total int, sink output.Sink) batchModel {
+func newBatchModel(events <-chan sase.Event, commands []string, total int) batchModel {
 	s := spinner.New()
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 	return batchModel{
 		events:   events,
 		commands: commands,
 		total:    total,
-		sink:     sink,
+		results:  make([]sase.Result, total),
 		spinner:  s,
 		progress: progress.New(
 			progress.WithDefaultBlend(),
@@ -126,9 +133,7 @@ func (m batchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForEvent(m.events)
 		}
 
-		if err := m.sink.Add(ev.Index, ev.Result); err != nil && m.sinkErr == nil {
-			m.sinkErr = fmt.Errorf("write result: %w", err)
-		}
+		m.results[ev.Index] = ev.Result
 		m.finished++
 		for i, f := range m.running {
 			if f.element == ev.Element {
@@ -151,7 +156,7 @@ func (m batchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				name = ev.Element
 			}
 			cmds = append(cmds, tea.Printf("%s %s  %s",
-				ui.MarkCheck, ui.StyleElement.Render(name), ui.StyleDim.Render(short(ev.Elapsed))))
+				markCheck, styleElement.Render(name), styleDim.Render(short(ev.Elapsed))))
 		}
 
 		return m, tea.Batch(cmds...)
@@ -186,12 +191,12 @@ func (m *batchModel) recordError(element, msg string) {
 
 func (m batchModel) summaryCmds() []tea.Cmd {
 	if m.failed == 0 {
-		return []tea.Cmd{tea.Printf("%s %d/%d elements succeeded", ui.MarkCheck, m.finished, m.total)}
+		return []tea.Cmd{tea.Printf("%s %d/%d elements succeeded", markCheck, m.finished, m.total)}
 	}
-	cmds := []tea.Cmd{tea.Printf("%s %d of %d elements failed", ui.MarkCross, m.failed, m.total)}
+	cmds := []tea.Cmd{tea.Printf("%s %d of %d elements failed", markCross, m.failed, m.total)}
 	for _, g := range m.errGroups {
 		cmds = append(cmds, tea.Printf("    %d × %s %s",
-			g.count, g.msg, ui.StyleDim.Render("(first: "+g.first+")")))
+			g.count, g.msg, styleDim.Render("(first: "+g.first+")")))
 	}
 	return cmds
 }
@@ -203,16 +208,16 @@ func (m batchModel) View() tea.View {
 
 	var b strings.Builder
 
-	b.WriteString(ui.Banner(m.width, m.height))
-	b.WriteString(ui.StyleCmd.Render(strings.Join(m.commands, ", ")) + "\n")
+	b.WriteString(banner(m.width, m.height))
+	b.WriteString(styleCmd.Render(strings.Join(m.commands, ", ")) + "\n")
 
 	counts := fmt.Sprintf("  %d/%d", m.finished, m.total)
 	if m.failed > 0 {
-		counts += ui.StyleErr.Render(fmt.Sprintf("  %d failed", m.failed))
+		counts += styleErr.Render(fmt.Sprintf("  %d failed", m.failed))
 	}
 	b.WriteString(m.spinner.View() + " " + m.progress.View() + counts + "\n")
 
-	avail := max(2, m.height-6-ui.BannerHeight(m.width, m.height))
+	avail := max(2, m.height-6-bannerHeight(m.width, m.height))
 	errShown := min(len(m.errGroups), max(1, avail/2))
 	flightShown := min(len(m.running), max(1, avail-errShown))
 
@@ -220,11 +225,11 @@ func (m batchModel) View() tea.View {
 		b.WriteString("\n")
 		for _, g := range m.errGroups[:errShown] {
 			b.WriteString(fmt.Sprintf("%s %d × %s %s\n",
-				ui.MarkCross, g.count, g.msg,
-				ui.StyleDim.Render("(first: "+g.first+")")))
+				markCross, g.count, g.msg,
+				styleDim.Render("(first: "+g.first+")")))
 		}
 		if n := len(m.errGroups) - errShown; n > 0 {
-			b.WriteString(ui.StyleDim.Render(fmt.Sprintf("  … %d more error kinds\n", n)))
+			b.WriteString(styleDim.Render(fmt.Sprintf("  … %d more error kinds\n", n)))
 		}
 	}
 
@@ -232,11 +237,11 @@ func (m batchModel) View() tea.View {
 		b.WriteString("\n")
 		for _, f := range m.running[:flightShown] {
 			b.WriteString(fmt.Sprintf("  %s  %s\n",
-				ui.StyleElement.Render(f.element),
-				ui.StyleDim.Render(short(time.Since(f.started)))))
+				styleElement.Render(f.element),
+				styleDim.Render(short(time.Since(f.started)))))
 		}
 		if n := len(m.running) - flightShown; n > 0 {
-			b.WriteString(ui.StyleDim.Render(fmt.Sprintf("  … %d more\n", n)))
+			b.WriteString(styleDim.Render(fmt.Sprintf("  … %d more\n", n)))
 		}
 	}
 

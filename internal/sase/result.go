@@ -19,8 +19,7 @@ type Result struct {
 	Commands  []ioncli.CommandOutput `json:"commands,omitempty"`
 }
 
-func runElement(ctx context.Context, client Client, o Options, target Target) (Result, error) {
-	eid := target.ElementID
+func runElement(ctx context.Context, client Client, o Options, eid string) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, o.ElementTimeout)
 	defer cancel()
 
@@ -35,7 +34,7 @@ func runElement(ctx context.Context, client Client, o Options, target Target) (R
 	var lastErr error
 
 	for attempt := 1; attempt <= o.Attempts; attempt++ {
-		outs, lastErr = attemptSession(ctx, client, o, target, eid, prompt)
+		outs, lastErr = attemptSession(ctx, client, o, eid, prompt)
 		if lastErr == nil {
 			break
 		}
@@ -57,9 +56,8 @@ func runElement(ctx context.Context, client Client, o Options, target Target) (R
 	}, nil
 }
 
-func attemptSession(ctx context.Context, client Client, o Options, target Target, eid, prompt string) ([]ioncli.CommandOutput, error) {
+func attemptSession(ctx context.Context, client Client, o Options, eid, prompt string) ([]ioncli.CommandOutput, error) {
 	ctx, cancel := context.WithTimeout(ctx, o.SessionTimeout)
 	defer cancel()
-	user, pass := target.creds(o)
-	return client.ToolkitSession(ctx, eid, prompt, user, pass, o.Commands)
+	return client.ToolkitSession(ctx, eid, prompt, o.Username, o.Password, o.Commands)
 }

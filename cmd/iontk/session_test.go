@@ -1,4 +1,4 @@
-package tui
+package main
 
 import (
 	"context"
@@ -9,12 +9,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/coder/websocket"
-	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/ioncli"
-	"tyrtop.com/iontk/internal/ui"
 )
 
 func TestSessionGeometryAsksBigByDefault(t *testing.T) {
@@ -58,7 +56,7 @@ func TestFrameNeverExceedsTerminalHeight(t *testing.T) {
 			m.slash = sl
 
 			content, _ := m.renderSession()
-			if n := len(strings.Split(ui.ClipFrame(content, h), "\n")); n > h {
+			if n := len(strings.Split(clipFrame(content, h), "\n")); n > h {
 				t.Errorf("height %d slash %d: frame is %d lines", h, sl, n)
 			}
 		}
@@ -67,7 +65,7 @@ func TestFrameNeverExceedsTerminalHeight(t *testing.T) {
 
 func TestEnterWithNoSelectionOpensASession(t *testing.T) {
 	m := pickModel(t)
-	setTestClient(&m, &api.Client{})
+	m.client = &api.Client{}
 
 	mm, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	got := mm.(tuiModel)
@@ -288,23 +286,9 @@ func TestSpinnerOnlyTicksWhereVisible(t *testing.T) {
 	for phase, want := range cases {
 		m.phase = phase
 		m.connecting = ""
-		m.cacheState = cacheUpdated
 		if got := m.wantsSpinner(); got != want {
 			t.Errorf("phase %d wantsSpinner = %v, want %v", phase, got, want)
 		}
-	}
-
-	// The element list is the exception: it carries a "refreshing" marker, so
-	// the spinner has to tick there while a refresh is in flight and stop once
-	// it is not.
-	m.phase = phasePicking
-	m.cacheState = cacheUpdating
-	if !m.wantsSpinner() {
-		t.Error("the element list does not tick while refreshing, so its marker would sit still")
-	}
-	m.cacheState = cacheCached
-	if m.wantsSpinner() {
-		t.Error("the element list keeps ticking when idle")
 	}
 
 	m.phase = phaseSession
@@ -339,7 +323,7 @@ func TestRenderSlashViews(t *testing.T) {
 func TestShellModeEnterOpensOneTabPerSelection(t *testing.T) {
 	m := pickModel(t)
 	m.mode = modeShell
-	setTestClient(&m, &api.Client{})
+	m.client = &api.Client{}
 
 	for i := 0; i < 2; i++ {
 		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
@@ -391,8 +375,8 @@ func TestPickTargetsFallsBackToTheHighlightedElement(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("pickTargets() = %d with nothing selected, want 1", len(got))
 	}
-	if got[0].name != "S0100-RTR-01" {
-		t.Errorf("target = %q, want the highlighted element", got[0].name)
+	if got[0][1] != "S0100-RTR-01" {
+		t.Errorf("target = %q, want the highlighted element", got[0][1])
 	}
 }
 
@@ -417,8 +401,8 @@ func TestFirstLoginAsksForCredentialsThenProceeds(t *testing.T) {
 	m.tenant, m.hasTenant = cfg.Tenants[0], true
 	m.phase = phasePicking
 	m.mode = modeShell
-	setTestClient(&m, &api.Client{})
-	m.setElements([]elementRow{{Element: api.Element{ID: "1", Name: "S0100-RTR-01"}, TSG: "1", Tenant: "Acme Co"}})
+	m.client = &api.Client{}
+	m.setElements([]api.Element{{ID: "1", Name: "S0100-RTR-01"}})
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	f := mm.(tuiModel)
@@ -446,7 +430,7 @@ func TestFirstLoginAsksForCredentialsThenProceeds(t *testing.T) {
 	m2 := newTUIModel(context.Background(), st, cfg)
 	m2.tenant, m2.hasTenant = done.tenant, true
 	m2.ionUser = "cisops"
-	if app.NeedsIONPassword(st, m2.tenant, m2.ionUser) {
+	if needsIONPassword(st, m2.tenant, m2.ionUser) {
 		t.Error("second login should not ask again")
 	}
 }
@@ -535,7 +519,7 @@ func TestSessionCredentialsComeFromTheStore(t *testing.T) {
 	m.tenant, m.hasTenant = cfg.Tenants[0], true
 	m.ionUser = "cisops"
 
-	creds := m.credsFor("1")
+	creds := m.sessionCreds()
 	if creds.User != "cisops" || creds.Pass != "s3cret" {
 		t.Errorf("sessionCreds = %+v, want the stored pair", creds)
 	}
@@ -554,9 +538,9 @@ func TestReopenWorksFromTheElementsList(t *testing.T) {
 	m := newTUIModel(context.Background(), st, cfg)
 	m.tenant, m.hasTenant = cfg.Tenants[0], true
 	m.ionUser = "u"
-	setTestClient(&m, &api.Client{})
+	m.client = &api.Client{}
 	m.phase = phasePicking
-	m.setElements([]elementRow{{Element: api.Element{ID: "1", Name: "S0100-RTR-01"}, TSG: "1", Tenant: "Acme Co"}})
+	m.setElements([]api.Element{{ID: "1", Name: "S0100-RTR-01"}})
 
 	live, err := m.sessions.Open(context.Background(), stubDialer{}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
 	if err != nil {
@@ -613,7 +597,7 @@ func TestReopenWithNothingClosedReports(t *testing.T) {
 
 func TestReopenFocusesAnAlreadyOpenTab(t *testing.T) {
 	m := pickModel(t)
-	setTestClient(&m, &api.Client{})
+	m.client = &api.Client{}
 
 	for _, eid := range []string{"1", "2"} {
 		if _, err := m.sessions.Open(context.Background(), stubDialer{}, eid, "e"+eid, 200, 50, ionterm.Credentials{}); err != nil {
@@ -652,25 +636,20 @@ func (stubConn) Read(ctx context.Context) (websocket.MessageType, []byte, error)
 func (stubConn) Write(ctx context.Context, typ websocket.MessageType, p []byte) error { return nil }
 func (stubConn) Close(code websocket.StatusCode, reason string) error                 { return nil }
 
-func TestAltWOnElementsReturnsToTheMenu(t *testing.T) {
-	// alt+w closes whatever you are in. On the element list that is the list,
-	// so it falls back to the menu; only the menu's alt+w leaves the app.
+func TestAltWOnElementsQuits(t *testing.T) {
 	m := pickModel(t)
 
 	mm, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'w', Mod: tea.ModAlt}))
-	got := mm.(tuiModel)
-	if got.phase != phaseMenu {
-		t.Errorf("phase = %v, want the menu", got.phase)
+	if cmd == nil {
+		t.Fatal("alt+w on the elements page should quit")
 	}
-	if cmd != nil {
-		if _, quit := cmd().(tea.QuitMsg); quit {
-			t.Error("alt+w on the element list quit the app")
-		}
+	if got := mm.(tuiModel).phase; got != phasePicking {
+		t.Errorf("phase = %v", got)
 	}
 
 	hint := plain(m.viewPicking())
-	if !strings.Contains(hint, "alt+w menu") {
-		t.Errorf("the element list does not advertise alt+w as the way back:\n%s", hint)
+	if !strings.Contains(hint, "alt+w quit") {
+		t.Errorf("bottom line should advertise alt+w quit:\n%s", hint)
 	}
 }
 
@@ -925,7 +904,7 @@ func TestSlashTypedWriteCommandIsBlocked(t *testing.T) {
 func TestElementsListAlwaysDialsFresh(t *testing.T) {
 	m := pickModel(t)
 	m.mode = modeShell
-	setTestClient(&m, &api.Client{})
+	m.client = &api.Client{}
 
 	first, err := m.sessions.Open(context.Background(), stubDialer{}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
 	if err != nil {
@@ -982,7 +961,7 @@ func TestStatusSitsAboveTheKeybindLine(t *testing.T) {
 	if !strings.Contains(got, "detached S0100-RTR-01") {
 		t.Fatalf("status missing:\n%s", got)
 	}
-	if !strings.Contains(got, "alt+w menu") {
+	if !strings.Contains(got, "alt+w quit") {
 		t.Fatalf("keybind line was overwritten by the status:\n%s", got)
 	}
 
@@ -992,7 +971,7 @@ func TestStatusSitsAboveTheKeybindLine(t *testing.T) {
 		if strings.Contains(ln, "detached S0100-RTR-01") {
 			statusAt = i
 		}
-		if strings.Contains(ln, "alt+w menu") {
+		if strings.Contains(ln, "alt+w quit") {
 			hintAt = i
 		}
 	}
