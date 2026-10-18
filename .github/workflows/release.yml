@@ -24,7 +24,9 @@ jobs:
           go-version-file: go.mod
 
       - name: Test
-        run: go test -timeout 5m ./...
+        # Discover's first sign-in opens a real window, which chromedp will not
+        # do without a display. Xvfb comes with the runner image.
+        run: xvfb-run -a go test -timeout 5m ./...
 
       - name: Build Linux
         run: |
