@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"golang.org/x/term"
 	"tyrtop.com/iontk/internal/sase"
@@ -39,46 +39,83 @@ func runBatch(ctx context.Context) error {
 		return err
 	}
 
+	format, dest, err := batchOutput()
+	if err != nil {
+		return err
+	}
+
 	client, err := newClient(ctx, f, os.Stderr)
 	if err != nil {
 		return err
 	}
 
+	// The file is only created once the run is ready to produce something, so a
+	// failure before this point leaves no empty report behind.
+	out, where, err := openOutput(flagOut, dest, format, time.Now())
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if where != "stdout" {
+		fmt.Fprintln(os.Stderr, "writing", format, "results to", where)
+	}
+	sink := newResultSink(out, format)
+
 	events := sase.RunStream(ctx, client, opts, f.Elements)
 
-	var results []sase.Result
+	var total int
 	var failed int
 
 	if !flagNoProgress && term.IsTerminal(int(os.Stderr.Fd())) {
-		results, failed, err = drainLive(ctx, events, f.Commands, len(f.Elements))
-		if err != nil {
-			return err
-		}
+		total, failed, err = drainLive(ctx, events, f.Commands, len(f.Elements), sink)
 	} else {
-		results, failed = drainPlain(events, len(f.Elements))
+		total, failed, err = drainPlain(events, len(f.Elements), sink)
+	}
+	if err != nil {
+		return err
 	}
 
-	if err := json.NewEncoder(os.Stdout).Encode(results); err != nil {
-		return fmt.Errorf("encode results: %w", err)
+	if err := sink.Close(); err != nil {
+		return fmt.Errorf("write results: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", where, err)
 	}
 	if failed > 0 {
-		return fmt.Errorf("%d of %d elements failed", failed, len(results))
+		return fmt.Errorf("%d of %d elements failed", failed, total)
 	}
 	return nil
 }
 
-func drainPlain(events <-chan sase.Event, total int) ([]sase.Result, int) {
-	results := make([]sase.Result, total)
+// batchOutput resolves the format and destination folder, with flags winning
+// over the saved settings.
+func batchOutput() (format, dir string, err error) {
+	format, dir = formatJSON, ""
+	if st := openStore(); st != nil {
+		if cfg, cerr := st.Config(); cerr == nil {
+			format, dir = cfg.BatchFormat, cfg.BatchOutDir()
+		}
+	}
+	if flagFormat != "" {
+		format = flagFormat
+	}
+	format, err = normalizeFormat(format)
+	return format, dir, err
+}
+
+func drainPlain(events <-chan sase.Event, total int, sink resultSink) (int, int, error) {
 	failed := 0
 	for ev := range events {
 		if !ev.Done {
 			continue
 		}
-		results[ev.Index] = ev.Result
+		if err := sink.Add(ev.Index, ev.Result); err != nil {
+			return total, failed, fmt.Errorf("write result: %w", err)
+		}
 		if ev.Result.Error != "" {
 			failed++
 			fmt.Fprintln(os.Stderr, ev.Result.Error)
 		}
 	}
-	return results, failed
+	return total, failed, nil
 }

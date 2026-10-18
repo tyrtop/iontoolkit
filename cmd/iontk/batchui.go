@@ -28,7 +28,7 @@ var (
 	markCross = styleErr.SetString("✗")
 )
 
-func drainLive(ctx context.Context, events <-chan sase.Event, commands []string, total int) ([]sase.Result, int, error) {
+func drainLive(ctx context.Context, events <-chan sase.Event, commands []string, total int, sink resultSink) (int, int, error) {
 	opts := []tea.ProgramOption{
 		tea.WithContext(ctx),
 		tea.WithOutput(os.Stderr),
@@ -38,13 +38,13 @@ func drainLive(ctx context.Context, events <-chan sase.Event, commands []string,
 		opts = append(opts, tea.WithInput(nil))
 	}
 
-	final, err := tea.NewProgram(newBatchModel(events, commands, total), opts...).Run()
+	final, err := tea.NewProgram(newBatchModel(events, commands, total, sink), opts...).Run()
 	if err != nil && !errors.Is(err, tea.ErrProgramKilled) {
-		return nil, 0, err
+		return 0, 0, err
 	}
 
 	fm := final.(batchModel)
-	return fm.results, fm.failed, nil
+	return total, fm.failed, fm.sinkErr
 }
 
 type inflight struct {
@@ -63,7 +63,8 @@ type batchModel struct {
 	commands []string
 	total    int
 
-	results   []sase.Result
+	sink      resultSink
+	sinkErr   error
 	finished  int
 	failed    int
 	running   []inflight
@@ -79,14 +80,14 @@ type batchModel struct {
 type eventMsg sase.Event
 type streamClosedMsg struct{}
 
-func newBatchModel(events <-chan sase.Event, commands []string, total int) batchModel {
+func newBatchModel(events <-chan sase.Event, commands []string, total int, sink resultSink) batchModel {
 	s := spinner.New()
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 	return batchModel{
 		events:   events,
 		commands: commands,
 		total:    total,
-		results:  make([]sase.Result, total),
+		sink:     sink,
 		spinner:  s,
 		progress: progress.New(
 			progress.WithDefaultBlend(),
@@ -133,7 +134,9 @@ func (m batchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForEvent(m.events)
 		}
 
-		m.results[ev.Index] = ev.Result
+		if err := m.sink.Add(ev.Index, ev.Result); err != nil && m.sinkErr == nil {
+			m.sinkErr = fmt.Errorf("write result: %w", err)
+		}
 		m.finished++
 		for i, f := range m.running {
 			if f.element == ev.Element {

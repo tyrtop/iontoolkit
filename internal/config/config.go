@@ -44,7 +44,20 @@ type Config struct {
 	AllowWrites bool     `json:"allow_writes,omitempty"`
 	SessionCols int      `json:"session_cols,omitempty"`
 	SessionRows int      `json:"session_rows,omitempty"`
+	BatchFormat string   `json:"batch_format,omitempty"`
+	BatchToFile bool     `json:"batch_to_file,omitempty"`
+	BatchDir    string   `json:"batch_dir,omitempty"`
 	Tenants     []Tenant `json:"tenants,omitempty"`
+}
+
+// BatchOutDir is the folder batch results are written to, or empty for stdout.
+// A folder is only used when output to a file is turned on, so turning it off
+// does not lose the path.
+func (c *Config) BatchOutDir() string {
+	if c == nil || !c.BatchToFile {
+		return ""
+	}
+	return c.BatchDir
 }
 
 type Store struct {

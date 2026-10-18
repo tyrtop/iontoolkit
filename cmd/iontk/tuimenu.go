@@ -290,6 +290,22 @@ func (m tuiModel) formValue(i int) string {
 func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 	switch m.formKind {
 
+	case formBatchDir:
+		dir, err := expandHome(m.formValue(0))
+		if err != nil {
+			m.status = err.Error()
+			return m, nil
+		}
+		m.cfg.BatchDir = dir
+		if err := m.store.SaveConfig(m.cfg); err != nil {
+			m.status = err.Error()
+			return m, nil
+		}
+		m.status = ""
+		m.form, m.formKind = nil, formNone
+		m.phase = m.formReturn
+		return m, nil
+
 	case formTenant:
 		name, tsg := m.formValue(0), m.formValue(1)
 		if name == "" || tsg == "" {
