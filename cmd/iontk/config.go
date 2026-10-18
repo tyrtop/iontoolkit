@@ -26,7 +26,6 @@ type flags struct {
 	TSGID          string
 	RefreshMargin  time.Duration
 	BrowserAuth    bool
-	Chrome         string
 }
 
 func (f flags) validateCreds() error {
@@ -41,7 +40,7 @@ func (f flags) validateCreds() error {
 	if f.BrowserAuth && f.TSGID != "" {
 		return nil
 	}
-	return fmt.Errorf("set SCM_CLIENT_ID, SCM_CLIENT_SECRET, and SCM_TSG_ID; or SCM_TOKEN; or --browser with SCM_TSG_ID")
+	return fmt.Errorf("set SCM_CLIENT_ID, SCM_CLIENT_SECRET, and SCM_TSG_ID, or SCM_TOKEN to override")
 }
 
 func (f flags) Validate() error {

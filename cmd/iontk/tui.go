@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/ioncli"
+	"tyrtop.com/iontk/internal/saseauth"
 )
 
 type tuiPhase int
@@ -41,6 +43,8 @@ const (
 	phaseResults
 	phaseSession
 	phaseUsers
+	phaseSignIn
+	phaseAuthPick
 )
 
 type pickMode int
@@ -89,6 +93,12 @@ type elementsErrMsg string
 type clientReadyMsg struct{ client *api.Client }
 type clientErrMsg string
 
+// needsSignInMsg says the tenant's stored credentials are spent and only a
+// browser can renew them.
+type needsSignInMsg struct{}
+
+type signedInMsg struct{ err error }
+
 type formField struct {
 	label string
 	input textinput.Model
@@ -119,6 +129,8 @@ type tuiModel struct {
 	menuCursor   int
 	switchCursor int
 	setCursor    int
+	authCursor   int
+	signInResume bool
 
 	form           []formField
 	formCursor     int
@@ -127,6 +139,7 @@ type tuiModel struct {
 	formReturn     tuiPhase
 	formTenantName string
 	formUserName   string
+	formAuth       string
 	formOldTSG     string
 	formGeoRow     int
 
@@ -267,9 +280,21 @@ func connect(ctx context.Context, f flags) tea.Cmd {
 	return func() tea.Msg {
 		c, err := newClient(ctx, f, io.Discard)
 		if err != nil {
+			if errors.Is(err, saseauth.ErrInteractiveRequired) {
+				return needsSignInMsg{}
+			}
 			return clientErrMsg(err.Error())
 		}
 		return clientReadyMsg{client: c}
+	}
+}
+
+// signIn opens the browser and waits for the sign-in to finish. It is the only
+// path in iontk that ever shows a browser window.
+func signIn(ctx context.Context, f flags, st *config.Store) tea.Cmd {
+	return func() tea.Msg {
+		src := browserSource(f, &http.Client{Timeout: f.HTTPTimeout}, st)
+		return signedInMsg{err: src.SignIn(ctx)}
 	}
 }
 
@@ -310,6 +335,27 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clientErrMsg:
 		m.status = string(msg)
 		m.cacheState = cacheFailed
+		m.phase = phaseMenu
+		return m, nil
+
+	case needsSignInMsg:
+		m.signInResume = true
+		return m.startSignIn()
+
+	case signedInMsg:
+		if msg.err != nil {
+			m.status = "sign-in failed: " + msg.err.Error()
+			m.cacheState = cacheFailed
+			m.signInResume = false
+			m.phase = phaseMenu
+			return m, nil
+		}
+		m.status = "signed in"
+		if m.signInResume {
+			m.signInResume = false
+			m.phase = phaseLoading
+			return m, tea.Batch(m.spinner.Tick, connect(m.ctx, m.flags))
+		}
 		m.phase = phaseMenu
 		return m, nil
 
@@ -428,7 +474,7 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) wantsSpinner() bool {
 	switch m.phase {
-	case phaseLoading, phaseRunning, phaseSettings:
+	case phaseLoading, phaseRunning, phaseSettings, phaseSignIn:
 		return true
 	case phaseSession:
 		return m.connecting != ""
@@ -549,6 +595,16 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.onUsersKey(key)
 	case phaseAddTenant, phaseAddUser, phasePassword:
 		return m.onFormKey(msg, key)
+	case phaseAuthPick:
+		return m.onAuthPickKey(key)
+	case phaseSignIn:
+		// The browser owns the keyboard until it is done; esc only stops waiting.
+		if key == "esc" || key == "q" {
+			m.signInResume = false
+			m.status = "sign-in cancelled"
+			m.phase = phaseMenu
+		}
+		return m, nil
 	case phaseLoading:
 		if key == "esc" || key == "q" {
 			m.phase = phaseMenu
@@ -848,6 +904,10 @@ func (m tuiModel) View() tea.View {
 		v = tea.NewView(m.viewUsers())
 	case phaseAddTenant, phaseAddUser, phasePassword:
 		v = tea.NewView(m.viewForm())
+	case phaseAuthPick:
+		v = tea.NewView(m.viewAuthPick())
+	case phaseSignIn:
+		v = tea.NewView(m.viewSignIn())
 	case phaseLoading:
 		v = tea.NewView(banner(m.width, m.height) +
 			fmt.Sprintf("  %s loading elements\n", m.spinner.View()))
