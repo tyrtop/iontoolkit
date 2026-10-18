@@ -13,7 +13,8 @@ array to stdout — one object per element, carrying element metadata and a
 "error" instead.
 
 Identical to passing --cmd to iontk directly. Intended for read-only
-commands; see --attempts.`,
+commands, though a retry only re-dials: commands run once per element,
+however many dials it took to get there.`,
 	Example: `  iontk run --element 1234567890 --cmd "dump interface status 1"
   iontk run -f sites.txt -c "dump device status" -n 25
   cat ids.txt | iontk run -f - -c uptime`,

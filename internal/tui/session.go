@@ -232,6 +232,15 @@ func (m tuiModel) onSessionKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		return m, nil
 	}
 
+	// A redial is a new CLI session: enable and config context are gone, so it
+	// is never automatic for a shell someone is sitting in front of.
+	if key == "alt+r" && s.Hung() {
+		return m.redialActive()
+	}
+	if s.Hung() {
+		return m, nil
+	}
+
 	if key == "/" && s.LineEmpty() {
 		return m.openSlash()
 	}
@@ -259,6 +268,19 @@ func (m tuiModel) reopenLastTab() (tea.Model, tea.Cmd) {
 	return m.openSession(eid, name, m.tsgForElement(eid))
 }
 
+// redialActive replaces a hung tab with a fresh session on the same element.
+func (m tuiModel) redialActive() (tea.Model, tea.Cmd) {
+	s := m.sessions.Active()
+	if s == nil {
+		return m, nil
+	}
+	eid, name := s.ElementID, s.Name
+	tsg := m.tsgForElement(eid)
+	m.sessions.CloseActive()
+	m.status = ""
+	return m.openSession(eid, name, tsg)
+}
+
 func (m tuiModel) tabBar() string {
 	cur := m.currentTab()
 	render := func(i int, label string) string {
@@ -268,8 +290,11 @@ func (m tuiModel) tabBar() string {
 	parts := []string{render(0, fmt.Sprintf(" 1 elements (%s) ", m.mode))}
 	for i, s := range m.sessions.All() {
 		mark := ""
-		if s.Err() != nil {
+		switch {
+		case s.Err() != nil:
 			mark = ui.MarkCross.String() + " "
+		case s.Hung():
+			mark = "~ "
 		}
 		parts = append(parts, render(i+1, fmt.Sprintf(" %d %s%s ", i+2, mark, s.Name)))
 	}
@@ -311,6 +336,12 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 
 	if err := s.Err(); err != nil {
 		b.WriteString(ui.Footer(err.Error(), hint))
+		return b.String(), nil
+	}
+	if s.Hung() {
+		b.WriteString(ui.Footer(
+			ui.StyleWarn.Render("connection stopped answering — alt+r opens a new session on this ION"),
+			hint))
 		return b.String(), nil
 	}
 

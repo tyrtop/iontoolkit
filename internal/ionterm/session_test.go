@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,6 +53,8 @@ type fakeConn struct {
 	frames  [][]byte
 	i       int
 	readErr error
+	pingErr error
+	pings   atomic.Int32
 
 	mu      sync.Mutex
 	written []byte
@@ -92,6 +95,14 @@ func (c *fakeConn) Write(ctx context.Context, typ websocket.MessageType, p []byt
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.written = append(c.written, p...)
+	return nil
+}
+
+func (c *fakeConn) Ping(ctx context.Context) error {
+	if c.pingErr != nil {
+		return c.pingErr
+	}
+	c.pings.Add(1)
 	return nil
 }
 
@@ -358,7 +369,7 @@ func contextTODO() context.Context { return context.Background() }
 
 func plainWidth(s string) int { return len([]rune(plain(s))) }
 
-func TestWatchdogFailsASilentSession(t *testing.T) {
+func TestASocketThatNeverSpeaksIsGivenUpOn(t *testing.T) {
 	old := handshakeDeadline
 	handshakeDeadline = 60 * time.Millisecond
 	t.Cleanup(func() { handshakeDeadline = old })
@@ -372,7 +383,7 @@ func TestWatchdogFailsASilentSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	eventually(t, "watchdog to fail the silent session", func() bool { return s.Err() != nil })
+	eventually(t, "the silent session to fail", func() bool { return s.Err() != nil })
 	if got := s.Err().Error(); !strings.Contains(got, "no response") {
 		t.Errorf("Err() = %q", got)
 	}
@@ -748,5 +759,101 @@ func TestATornConnectionIsStillAnError(t *testing.T) {
 	eventually(t, "session to report the failure", func() bool { return s.Err() != nil })
 	if s.Ended() {
 		t.Error("Ended() = true for a dropped connection, want it reported rather than closed quietly")
+	}
+}
+
+func TestAQuietButLiveSessionIsNotHung(t *testing.T) {
+	oldPing, oldPong := pingEvery, pongWait
+	pingEvery, pongWait = 20*time.Millisecond, 50*time.Millisecond
+	t.Cleanup(func() { pingEvery, pongWait = oldPing, oldPong })
+
+	conn := newFakeConn([][]byte{[]byte("ion#")})
+	s, err := Open(context.Background(), &fakeDialer{conn: conn}, "e1", "ion", 80, 24, Credentials{}, nil)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer s.Close()
+
+	eventually(t, "the session to be pinged", func() bool { return conn.pings.Load() > 0 })
+	time.Sleep(80 * time.Millisecond)
+
+	// An idle ION prompt sends nothing for hours; a flat timer would have
+	// killed this session.
+	if s.Hung() {
+		t.Error("Hung() = true for a connection answering pings")
+	}
+	if err := s.Err(); err != nil {
+		t.Errorf("Err() = %v, want nil", err)
+	}
+}
+
+func TestASessionThatStopsAnsweringIsHung(t *testing.T) {
+	oldPing, oldPong := pingEvery, pongWait
+	pingEvery, pongWait = 20*time.Millisecond, 50*time.Millisecond
+	t.Cleanup(func() { pingEvery, pongWait = oldPing, oldPong })
+
+	conn := newFakeConn([][]byte{[]byte("ion#")})
+	conn.pingErr = errors.New("context deadline exceeded")
+	s, err := Open(context.Background(), &fakeDialer{conn: conn}, "e1", "ion", 80, 24, Credentials{}, nil)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer s.Close()
+
+	eventually(t, "the hang to be noticed", s.Hung)
+	// Hung is apart from Err because it is recoverable: the user redials.
+	if err := s.Err(); err != nil {
+		t.Errorf("Err() = %v, want a hang not to read as a failure", err)
+	}
+	if s.Ended() {
+		t.Error("Ended() = true, want a hang told apart from a clean exit")
+	}
+}
+
+func TestAHangIsNoticedWithoutWaitingOutAFlatDeadline(t *testing.T) {
+	oldPing, oldPong, oldHS := pingEvery, pongWait, handshakeDeadline
+	pingEvery, pongWait = 20*time.Millisecond, 30*time.Millisecond
+	// The old behaviour waited this out regardless; the ping answers sooner.
+	handshakeDeadline = 10 * time.Second
+	t.Cleanup(func() { pingEvery, pongWait, handshakeDeadline = oldPing, oldPong, oldHS })
+
+	conn := newFakeConn([][]byte{[]byte("ion#")})
+	conn.pingErr = errors.New("context deadline exceeded")
+	s, err := Open(context.Background(), &fakeDialer{conn: conn}, "e1", "ion", 80, 24, Credentials{}, nil)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer s.Close()
+
+	began := time.Now()
+	eventually(t, "the hang to be noticed", s.Hung)
+	if took := time.Since(began); took > time.Second {
+		t.Errorf("took %s to notice the hang, want it paced by pings not the deadline", took)
+	}
+}
+
+func TestTrafficAloneKeepsASessionAliveWithoutPinging(t *testing.T) {
+	oldPing := pingEvery
+	pingEvery = 40 * time.Millisecond
+	t.Cleanup(func() { pingEvery = oldPing })
+
+	conn := newFakeConn([][]byte{[]byte("ion#")})
+	s, err := Open(context.Background(), &fakeDialer{conn: conn}, "e1", "ion", 80, 24, Credentials{}, nil)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer s.Close()
+
+	// Output arriving is proof enough, so a busy session costs no pings.
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		conn.feed <- []byte(".")
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := conn.pings.Load(); got != 0 {
+		t.Errorf("pings = %d, want none while output keeps arriving", got)
+	}
+	if s.Hung() {
+		t.Error("Hung() = true for a session producing output")
 	}
 }

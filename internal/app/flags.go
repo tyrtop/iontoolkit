@@ -18,8 +18,9 @@ type RootFlags struct {
 	RefreshMargin  time.Duration
 	Concurrency    int
 	Burst          int
-	Attempts       int
 	RPS            float64
+	DialAttempts   int
+	DialTimeout    time.Duration
 	Verbose        bool
 	AllowWrites    bool
 	TSGID          string
@@ -34,7 +35,8 @@ var Defaults = RootFlags{
 	RefreshMargin:  75 * time.Second,
 	Concurrency:    10,
 	Burst:          10,
-	Attempts:       1,
+	DialAttempts:   3,
+	DialTimeout:    10 * time.Second,
 	RPS:            5,
 }
 
@@ -51,7 +53,8 @@ type Flags struct {
 	RPS            float64
 	Burst          int
 	SessionTimeout time.Duration
-	Attempts       int
+	DialAttempts   int
+	DialTimeout    time.Duration
 	ClientID       string
 	ClientSecret   string
 	TSGID          string
@@ -75,7 +78,8 @@ func BaseFlags() Flags {
 		Concurrency:    Defaults.Concurrency,
 		ElementTimeout: Defaults.ElementTimeout,
 		SessionTimeout: Defaults.SessionTimeout,
-		Attempts:       Defaults.Attempts,
+		DialAttempts:   Defaults.DialAttempts,
+		DialTimeout:    Defaults.DialTimeout,
 	}
 	if Defaults.TSGID != "" {
 		f.TSGID = Defaults.TSGID
@@ -128,7 +132,6 @@ func (f Flags) Options() sase.Options {
 		Concurrency:    f.Concurrency,
 		ElementTimeout: f.ElementTimeout,
 		SessionTimeout: f.SessionTimeout,
-		Attempts:       f.Attempts,
 		Verbose:        f.Verbose,
 	}
 }

@@ -58,10 +58,8 @@ func TestRunElementLookupError(t *testing.T) {
 	}
 }
 
-func TestRunElementRetriesThenSucceeds(t *testing.T) {
+func TestRunElementDoesNotRerunASessionThatConnected(t *testing.T) {
 	o := testOpts()
-	o.Attempts = 3
-	o.Verbose = true // exercises the per-attempt log at result.go:43
 
 	calls := 0
 	f := &fakeClient{
@@ -70,24 +68,22 @@ func TestRunElementRetriesThenSucceeds(t *testing.T) {
 		},
 		session: func(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
 			calls++
-			if calls < 3 {
-				return nil, errors.New("hung session")
-			}
-			return []ioncli.CommandOutput{{Command: "uptime"}}, nil
+			return nil, errors.New("hung session")
 		},
 	}
 
-	if _, err := runElement(context.Background(), f, o, Target{ElementID: "123"}); err != nil {
-		t.Fatal(err)
+	if _, err := runElement(context.Background(), f, o, Target{ElementID: "123"}); err == nil {
+		t.Fatal("runElement() error = nil, want the failure reported")
 	}
-	if calls != 3 {
-		t.Errorf("session calls = %d, want 3", calls)
+	// Commands may already have taken effect on the device, so a connected
+	// session is never replayed; the dial is what retries.
+	if calls != 1 {
+		t.Errorf("session calls = %d, want 1", calls)
 	}
 }
 
-func TestRunElementAllAttemptsFail(t *testing.T) {
+func TestRunElementReportsAFailedSession(t *testing.T) {
 	o := testOpts()
-	o.Attempts = 2
 
 	sessionErr := errors.New("hung session")
 	f := &fakeClient{

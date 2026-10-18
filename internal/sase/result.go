@@ -3,7 +3,6 @@ package sase
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"tyrtop.com/iontk/internal/sase/ioncli"
 )
@@ -31,24 +30,12 @@ func runElement(ctx context.Context, client Client, o Options, target Target) (R
 
 	prompt := el.Name + "#"
 
-	var outs []ioncli.CommandOutput
-	var lastErr error
-
-	for attempt := 1; attempt <= o.Attempts; attempt++ {
-		outs, lastErr = attemptSession(ctx, client, o, target, eid, prompt)
-		if lastErr == nil {
-			break
-		}
-		if o.Verbose {
-			fmt.Fprintf(os.Stderr, "element %s: attempt %d: %v\n", eid, attempt, lastErr)
-		}
-		// Retrying a spent credential only multiplies the wait.
-		if credentialDead(client) {
-			break
-		}
-	}
-	if lastErr != nil {
-		return Result{}, fmt.Errorf("element %s: run: %w", eid, lastErr)
+	// Re-running a session that connected would repeat commands that may
+	// already have taken effect. The retry that matters is the dial, which the
+	// client does for itself.
+	outs, err := attemptSession(ctx, client, o, target, eid, prompt)
+	if err != nil {
+		return Result{}, fmt.Errorf("element %s: run: %w", eid, err)
 	}
 	return Result{
 		ElementID: eid,

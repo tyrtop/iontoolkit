@@ -40,6 +40,9 @@ type Client struct {
 	// Tests only.
 	profileBase string
 
+	dialMu sync.RWMutex
+	dial   DialPolicy
+
 	src       TokenSource
 	tokenErrs chan error
 	// Keeps a caller's mint from racing refreshLoop's.
