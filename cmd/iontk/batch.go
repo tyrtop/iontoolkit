@@ -8,8 +8,11 @@ import (
 	"time"
 
 	"golang.org/x/term"
+	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/ioncli"
+	"tyrtop.com/iontk/internal/tui"
 )
 
 func runBatch(ctx context.Context) error {
@@ -22,11 +25,11 @@ func runBatch(ctx context.Context) error {
 		return err
 	}
 
-	f := baseFlags()
+	f := app.BaseFlags()
 	f.Elements = elements
-	f.Commands = splitCommands(flagCommands)
+	f.Commands = app.SplitCommands(flagCommands)
 
-	if !flagAllowWrites {
+	if !app.Defaults.AllowWrites {
 		if err := ioncli.CheckReadOnly(f.Commands); err != nil {
 			return fmt.Errorf("%w; override with --allow-writes", err)
 		}
@@ -35,7 +38,7 @@ func runBatch(ctx context.Context) error {
 	if err := f.Validate(); err != nil {
 		return err
 	}
-	opts := f.options()
+	opts := f.Options()
 	if err := opts.Validate(); err != nil {
 		return err
 	}
@@ -45,7 +48,7 @@ func runBatch(ctx context.Context) error {
 		return err
 	}
 
-	client, err := newClient(ctx, f, os.Stderr)
+	client, err := app.NewClient(ctx, f, os.Stderr)
 	if err != nil {
 		return err
 	}
@@ -57,7 +60,7 @@ func runBatch(ctx context.Context) error {
 
 	// The file is only created once the run is ready to produce something, so a
 	// failure before this point leaves no empty report behind.
-	out, where, err := openOutput(flagOut, dest, format, time.Now())
+	out, where, err := output.Open(flagOut, dest, format, time.Now())
 	if err != nil {
 		return err
 	}
@@ -65,7 +68,7 @@ func runBatch(ctx context.Context) error {
 	if where != "stdout" {
 		fmt.Fprintln(os.Stderr, "writing", format, "results to", where)
 	}
-	sink := newResultSink(out, format)
+	sink := output.NewSink(out, format)
 
 	events := sase.RunStream(ctx, opts, sase.Targets(client, f.Elements))
 
@@ -73,7 +76,7 @@ func runBatch(ctx context.Context) error {
 	var failed int
 
 	if !flagNoProgress && term.IsTerminal(int(os.Stderr.Fd())) {
-		total, failed, err = drainLive(ctx, events, f.Commands, len(f.Elements), sink)
+		total, failed, err = tui.DrainLive(ctx, events, f.Commands, len(f.Elements), sink, flagElementsPath == "-")
 	} else {
 		total, failed, err = drainPlain(events, len(f.Elements), sink)
 	}
@@ -96,8 +99,8 @@ func runBatch(ctx context.Context) error {
 // batchOutput resolves the format and destination folder, with flags winning
 // over the saved settings.
 func batchOutput() (format, dir string, err error) {
-	format, dir = formatJSON, ""
-	if st := openStore(); st != nil {
+	format, dir = output.FormatJSON, ""
+	if st := app.OpenStore(); st != nil {
 		if cfg, cerr := st.Config(); cerr == nil {
 			format, dir = cfg.BatchFormat, cfg.BatchOutDir()
 		}
@@ -105,11 +108,11 @@ func batchOutput() (format, dir string, err error) {
 	if flagFormat != "" {
 		format = flagFormat
 	}
-	format, err = normalizeFormat(format)
+	format, err = output.NormalizeFormat(format)
 	return format, dir, err
 }
 
-func drainPlain(events <-chan sase.Event, total int, sink resultSink) (int, int, error) {
+func drainPlain(events <-chan sase.Event, total int, sink output.Sink) (int, int, error) {
 	failed := 0
 	for ev := range events {
 		if !ev.Done {
