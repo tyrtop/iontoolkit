@@ -67,6 +67,7 @@ const (
 	cacheNone cacheState = iota
 	cacheUpdating
 	cacheUpdated
+	cacheCached
 	cacheFailed
 )
 
@@ -124,7 +125,7 @@ type tuiModel struct {
 	spinnerName string
 
 	cacheState cacheState
-	cacheAge   time.Duration
+	cacheAt    time.Time
 	cacheCount int
 
 	menuCursor   int
@@ -253,10 +254,16 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 	m.tenant, m.hasTenant = resolveTenant(cfg, "")
 	if m.hasTenant {
 		m.ionUser = m.tenant.DefaultUser()
-		if c, err := store.Cache(m.tenant.TSGID); err == nil && c != nil {
+		// Elements are refreshed on every launch so the list keeps up with the
+		// tenant; the cache only exists to reach the menu without waiting. A
+		// cache younger than cacheFresh is taken as current and left alone.
+		m.cacheState = cacheUpdating
+		if c, err := store.Cache(m.tenant.TSGID); err == nil && c != nil && len(c.Elements) > 0 {
 			m.cacheCount = len(c.Elements)
-			m.cacheAge = c.Age()
-			m.cacheState = cacheUpdated
+			m.cacheAt = time.Now().Add(-c.Age())
+			if c.Age() < cacheFresh {
+				m.cacheState = cacheCached
+			}
 		}
 	}
 	return m
@@ -275,7 +282,43 @@ func newElementTable() table.Model {
 	)
 }
 
-func (m tuiModel) Init() tea.Cmd { return m.spinner.Tick }
+// cacheFresh is how long cached elements are treated as current.
+const cacheFresh = 15 * time.Minute
+
+func (m tuiModel) Init() tea.Cmd {
+	cmds := []tea.Cmd{m.spinner.Tick}
+	if m.cacheState == cacheUpdating && m.hasTenant {
+		f := tenantFlags(m.store, m.tenant, m.ionUser)
+		if f.validateCreds() == nil {
+			cmds = append(cmds, connect(m.ctx, f))
+		} else {
+			cmds = cmds[:1]
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// refreshNow re-fetches elements, authenticating first if that has not happened
+// yet. It is what the refresh keybind and the settings entry both call.
+func (m tuiModel) refreshNow() (tea.Model, tea.Cmd) {
+	if !m.hasTenant {
+		m.status = "no tenant selected"
+		return m, nil
+	}
+	f := tenantFlags(m.store, m.tenant, m.ionUser)
+	if err := f.validateCreds(); err != nil {
+		m.status = err.Error()
+		m.cacheState = cacheFailed
+		return m, nil
+	}
+	m.flags = f
+	m.status = ""
+	m.cacheState = cacheUpdating
+	if m.client != nil {
+		return m, tea.Batch(m.spinner.Tick, refreshElements(m.ctx, m.client, m.store, m.tenant.TSGID))
+	}
+	return m, tea.Batch(m.spinner.Tick, connect(m.ctx, f))
+}
 
 func connect(ctx context.Context, f flags) tea.Cmd {
 	return func() tea.Msg {
@@ -340,6 +383,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case needsSignInMsg:
+		if m.phase == phaseMenu {
+			m.status = "sign-in required — pick the browser sign-in below"
+			m.cacheState = cacheFailed
+			return m, nil
+		}
 		m.signInResume = true
 		return m.startSignIn()
 
@@ -362,6 +410,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case clientReadyMsg:
 		m.client = msg.client
+		if m.cacheState == cacheCached {
+			if m.phase == phaseLoading {
+				m.phase = phasePicking
+			}
+			return m, nil
+		}
 		return m, refreshElements(m.ctx, m.client, m.store, m.tenant.TSGID)
 
 	case elementsErrMsg:
@@ -376,7 +430,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sites = msg.sites
 		m.setElements(msg.elements)
 		m.cacheState = cacheUpdated
-		m.cacheAge = 0
+		m.cacheAt = time.Now()
 		m.cacheCount = len(m.all)
 		if m.phase == phaseLoading {
 			m.phase = phasePicking
@@ -664,6 +718,9 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 			m.rebuildRows()
 		}
 		return m, nil
+
+	case "alt+r":
+		return m.refreshNow()
 
 	case "alt+u":
 		m.userCursor = 0
@@ -991,7 +1048,7 @@ func (m tuiModel) viewPicking() string {
 		if m.mode == modeBatch {
 			act = fmt.Sprintf("enter command on %d", n)
 		}
-		hint := fmt.Sprintf("↑↓ move · / filter · space select · alt+m mode · alt+u user · %s · esc menu · alt+w quit", act)
+		hint := fmt.Sprintf("↑↓ move · / filter · space select · alt+m mode · alt+u user · alt+r refresh · %s · esc menu · alt+w quit", act)
 		b.WriteString(footer(m.status, hint))
 	}
 	return b.String()

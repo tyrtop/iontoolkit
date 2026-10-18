@@ -73,10 +73,26 @@ func TestCacheLine(t *testing.T) {
 	}{
 		"no tenant": {tuiModel{}, "no tenant configured"},
 		"no cache":  {tuiModel{hasTenant: true, cacheState: cacheNone}, "no cached elements"},
-		"updating":  {tuiModel{hasTenant: true, cacheState: cacheUpdating, cacheCount: 847}, "847 elements cached (updating)"},
-		"updated":   {tuiModel{hasTenant: true, cacheState: cacheUpdated, cacheCount: 847}, "847 elements cached (updated)"},
-		"failed":    {tuiModel{hasTenant: true, cacheState: cacheFailed}, "element refresh failed"},
-		"aged":      {tuiModel{hasTenant: true, cacheState: cacheUpdated, cacheCount: 12, cacheAge: 2 * time.Hour}, "12 elements cached (updated)  2h0m0s ago"},
+		"first fetch has nothing to report yet": {
+			tuiModel{hasTenant: true, cacheState: cacheUpdating}, "fetching elements"},
+		"updating": {tuiModel{hasTenant: true, cacheState: cacheUpdating, cacheCount: 847}, "847 elements cached (updating)"},
+		"just updated": {
+			tuiModel{hasTenant: true, cacheState: cacheUpdated, cacheCount: 847, cacheAt: time.Now()},
+			"847 elements cached (updated)"},
+		"updated a few minutes ago": {
+			tuiModel{hasTenant: true, cacheState: cacheUpdated, cacheCount: 847, cacheAt: time.Now().Add(-4 * time.Minute)},
+			"847 elements cached (updated)  4m ago"},
+		"failed": {tuiModel{hasTenant: true, cacheState: cacheFailed}, "element refresh failed"},
+		"loaded from a fresh cache": {
+			tuiModel{hasTenant: true, cacheState: cacheCached, cacheCount: 5613, cacheAt: time.Now().Add(-9 * time.Minute)},
+			"5613 elements cached  9m ago"},
+		// A session left open long enough must stop claiming to be current.
+		"an updated cache that went stale stops saying so": {
+			tuiModel{hasTenant: true, cacheState: cacheUpdated, cacheCount: 5613, cacheAt: time.Now().Add(-38*time.Minute - 39*time.Second)},
+			"5613 elements cached  38m ago"},
+		"aged past an hour": {
+			tuiModel{hasTenant: true, cacheState: cacheCached, cacheCount: 12, cacheAt: time.Now().Add(-2 * time.Hour)},
+			"12 elements cached  2h ago"},
 	}
 
 	for name, tc := range cases {

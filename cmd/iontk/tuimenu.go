@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -58,18 +59,51 @@ func (m tuiModel) cacheLine() string {
 	}
 	switch m.cacheState {
 	case cacheUpdating:
-		return styleWarn.Render(fmt.Sprintf("%d elements cached (updating)", m.cacheCount))
-	case cacheUpdated:
-		if m.cacheAge > 0 {
-			return styleOK.Render(fmt.Sprintf("%d elements cached (updated)", m.cacheCount)) +
-				styleDim.Render("  "+short(m.cacheAge)+" ago")
+		if m.cacheCount == 0 {
+			return styleWarn.Render("fetching elements")
 		}
-		return styleOK.Render(fmt.Sprintf("%d elements cached (updated)", m.cacheCount))
+		return styleWarn.Render(fmt.Sprintf("%d elements cached (updating)", m.cacheCount))
 	case cacheFailed:
 		return styleErr.Render("element refresh failed")
-	default:
+	case cacheNone:
 		return styleDim.Render("no cached elements")
 	}
+
+	// cacheUpdated and cacheCached differ only in how recent the fetch was, and
+	// an "updated" that has since gone stale must stop claiming to be current.
+	d := m.cacheAgeNow()
+	if m.cacheState == cacheUpdated && d < cacheFresh {
+		line := styleOK.Render(fmt.Sprintf("%d elements cached (updated)", m.cacheCount))
+		if d >= time.Second {
+			line += styleDim.Render("  " + age(d) + " ago")
+		}
+		return line
+	}
+	return styleDim.Render(fmt.Sprintf("%d elements cached", m.cacheCount)) +
+		styleDim.Render("  "+age(d)+" ago")
+}
+
+func (m tuiModel) cacheAgeNow() time.Duration {
+	if m.cacheAt.IsZero() {
+		return 0
+	}
+	return time.Since(m.cacheAt)
+}
+
+// age formats a cache age coarsely. Sub-second precision is noise for something
+// measured in minutes, and "38m38.9s ago" reads like a stopwatch.
+func age(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", max(0, int(d.Seconds())))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	h, mins := int(d.Hours()), int(d.Minutes())%60
+	if mins == 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh%dm", h, mins)
 }
 
 func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
@@ -125,7 +159,7 @@ func (m tuiModel) startContinue() (tea.Model, tea.Cmd) {
 	if c, err := m.store.Cache(m.tenant.TSGID); err == nil && c != nil && len(c.Elements) > 0 {
 		m.setElements(c.Elements)
 		m.cacheCount = len(c.Elements)
-		m.cacheAge = c.Age()
+		m.cacheAt = time.Now().Add(-c.Age())
 		m.phase = phasePicking
 	} else {
 		m.phase = phaseLoading
@@ -165,10 +199,10 @@ func (m tuiModel) onSwitchKey(key string) (tea.Model, tea.Cmd) {
 				m.status = err.Error()
 			}
 			m.all, m.matches, m.selected = nil, nil, map[string]bool{}
-			m.cacheState, m.cacheCount, m.cacheAge = cacheNone, 0, 0
+			m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
 			if c, err := m.store.Cache(m.tenant.TSGID); err == nil && c != nil {
 				m.cacheCount = len(c.Elements)
-				m.cacheAge = c.Age()
+				m.cacheAt = time.Now().Add(-c.Age())
 				m.cacheState = cacheUpdated
 			}
 			m.menuCursor = 0
@@ -328,7 +362,7 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 		m.tenant, m.hasTenant = t, true
 		m.ionUser = ""
 		m.all, m.matches, m.selected = nil, nil, map[string]bool{}
-		m.cacheState, m.cacheCount, m.cacheAge = cacheNone, 0, 0
+		m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
 		m.form, m.formKind = nil, formNone
 		m.menuCursor = 0
 		m.phase = phaseMenu
@@ -595,9 +629,32 @@ func (m tuiModel) viewForm() string {
 		b.WriteString("  " + label + f.input.View() + "\n")
 	}
 
+	if w := m.plaintextWarning(); w != "" {
+		b.WriteString("\n  " + w + "\n")
+	}
+
 	b.WriteString("\n")
 	b.WriteString(footer(m.status, "tab next · enter save · esc cancel"))
 	return b.String()
+}
+
+// plaintextWarning is shown on any form that takes a secret, before it is
+// typed, whenever there is no OS keyring to put it in.
+func (m tuiModel) plaintextWarning() string {
+	if m.store == nil || !config.Plaintext(m.store.Secrets) {
+		return ""
+	}
+	masked := false
+	for _, f := range m.form {
+		if f.input.EchoMode == textinput.EchoPassword {
+			masked = true
+			break
+		}
+	}
+	if !masked {
+		return ""
+	}
+	return styleWarn.Render("saved as plaintext: no OS keyring is available")
 }
 
 func (m tuiModel) tenantIndex() int {
