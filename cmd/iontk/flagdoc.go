@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -27,7 +28,17 @@ var genFlagDocsCmd = &cobra.Command{
 		// Writing the file here rather than redirecting stdout keeps the
 		// go:generate line free of a shell, so it runs on Windows too.
 		if len(args) == 1 {
-			return os.WriteFile(args[0], []byte(b.String()), 0o644)
+			// docs/ is gitignored, so a fresh checkout has no directory to
+			// write into.
+			if dir := filepath.Dir(args[0]); dir != "." {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					return fmt.Errorf("create %s: %w", dir, err)
+				}
+			}
+			if err := os.WriteFile(args[0], []byte(b.String()), 0o644); err != nil {
+				return fmt.Errorf("write %s: %w", args[0], err)
+			}
+			return nil
 		}
 		_, err := io.WriteString(cmd.OutOrStdout(), b.String())
 		return err

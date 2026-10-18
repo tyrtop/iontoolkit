@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -101,6 +103,23 @@ func TestTheDocMentionsEveryFlagAndEnvVar(t *testing.T) {
 		if !strings.Contains(doc, env) {
 			t.Errorf("%s is missing from the generated doc", env)
 		}
+	}
+}
+
+func TestGeneratingIntoAMissingDirectory(t *testing.T) {
+	// docs/ is gitignored, so CI generates into a directory that is not there.
+	out := filepath.Join(t.TempDir(), "docs", "flags.md")
+
+	if err := genFlagDocsCmd.RunE(genFlagDocsCmd, []string{out}); err != nil {
+		t.Fatalf("gen-flag-docs %q error = %v", out, err)
+	}
+
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", out, err)
+	}
+	if !strings.HasPrefix(string(got), "# Flags") {
+		t.Errorf("%q starts with %q, want a flag reference", out, string(got[:min(len(got), 20)]))
 	}
 }
 
