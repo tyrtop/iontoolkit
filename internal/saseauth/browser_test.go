@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -28,6 +29,16 @@ func findChrome(t *testing.T) string {
 	}
 	t.Skip("no chrome or chromium on PATH")
 	return ""
+}
+
+// needsDisplay skips a test that opens a real browser window. Only the first
+// sign-in of a Discover opens one; chromedp refuses to without a display, and
+// CI gives it one with xvfb.
+func needsDisplay(t *testing.T) {
+	t.Helper()
+	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+		t.Skip("no DISPLAY or WAYLAND_DISPLAY; a visible window cannot open")
+	}
 }
 
 // fakeAuthServer stands in for the authorization server. Its authorize endpoint
@@ -239,6 +250,7 @@ func TestSignInSurvivesRestart(t *testing.T) {
 // because the first sign-in left a session in the browser profile.
 func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 	chrome := findChrome(t)
+	needsDisplay(t)
 
 	var mu sync.Mutex
 	var prompts []string
