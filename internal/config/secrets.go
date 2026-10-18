@@ -19,6 +19,19 @@ type Secrets interface {
 	Backend() string
 }
 
+// Plaintext reports whether secrets sit unencrypted on disk, which happens
+// whenever no OS keyring answered the probe.
+func Plaintext(s Secrets) bool { return s.Backend() == "file" }
+
+// SecretsWarning describes the store in a way that does not understate it, so
+// a plaintext fallback is never mistaken for a keyring.
+func SecretsWarning(s Secrets) string {
+	if Plaintext(s) {
+		return "plaintext file — no OS keyring available"
+	}
+	return "OS keyring"
+}
+
 func OpenSecrets(root string) Secrets {
 	k := keyringSecrets{}
 	if err := k.probe(); err == nil {
@@ -66,6 +79,9 @@ type fileSecrets struct {
 func NewFileSecrets(path string) Secrets { return &fileSecrets{path: path} }
 
 func (f *fileSecrets) Backend() string { return "file" }
+
+// Path is where the plaintext secrets live, so the UI can name the file.
+func (f *fileSecrets) Path() string { return f.path }
 
 func (f *fileSecrets) load() (map[string]string, error) {
 	b, err := os.ReadFile(f.path)

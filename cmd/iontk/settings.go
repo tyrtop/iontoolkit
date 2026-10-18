@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -31,7 +32,7 @@ const (
 func (m tuiModel) sectionRows() int {
 	switch m.setSection {
 	case secGeneral:
-		return 2
+		return 3
 	case secBatch:
 		return 3
 	case secTenants:
@@ -118,6 +119,9 @@ func (m tuiModel) onGeneralKey(key string) (tea.Model, tea.Cmd) {
 	if key != "enter" && key != " " && key != "space" {
 		return m, nil
 	}
+	if m.setCursor == 2 {
+		return m.refreshNow()
+	}
 	switch m.setCursor {
 	case 0:
 		next := nextSpinnerName(m.spinnerName)
@@ -154,7 +158,7 @@ func (m tuiModel) onTenantsKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.all, m.matches, m.selected = nil, nil, map[string]bool{}
-		m.cacheState, m.cacheCount, m.cacheAge = cacheNone, 0, 0
+		m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
 		m.status = "switched to " + t.Name
 	case "u":
 		return m.openUserFormFor(t.Name)
@@ -285,9 +289,16 @@ func (m tuiModel) sectionContent() []string {
 		out = append(out,
 			label("spinner")+m.spinner.View()+" "+styleElement.Render(m.spinnerName),
 			label("commands")+guard,
+			label("elements")+m.cacheLine(),
 			"",
-			label("secrets")+styleDim.Render(m.store.Secrets.Backend()),
+			label("secrets")+m.secretsLine(),
 		)
+		if config.Plaintext(m.store.Secrets) {
+			if fp, ok := m.store.Secrets.(interface{ Path() string }); ok {
+				out = append(out, label("")+styleDim.Render(shortenPath(fp.Path(), 52)))
+			}
+			out = append(out, label("")+styleWarn.Render("ION passwords are readable by anything that can read that file"))
+		}
 
 	case secTenants:
 		if len(m.cfg.Tenants) == 0 {
@@ -361,7 +372,7 @@ func (m tuiModel) sectionHint() string {
 	}
 	switch m.setSection {
 	case secGeneral:
-		return "↑↓ row · enter change · tab back · esc back"
+		return "↑↓ row · enter change/refresh · tab back · esc back"
 	case secBatch:
 		return "↑↓ row · enter change · tab back · esc back"
 	case secTenants:
@@ -465,4 +476,22 @@ func (m tuiModel) openBatchDirForm() (tea.Model, tea.Cmd) {
 	dir := newField("folder", "~/ion-reports", false)
 	dir.input.SetValue(m.cfg.BatchDir)
 	return m.openForm(formBatchDir, "Folder for batch output", phaseAddTenant, []formField{dir})
+}
+
+// secretsLine names the secret store without softening a plaintext fallback.
+func (m tuiModel) secretsLine() string {
+	if config.Plaintext(m.store.Secrets) {
+		return styleWarn.Render(config.SecretsWarning(m.store.Secrets))
+	}
+	return styleOK.Render(config.SecretsWarning(m.store.Secrets))
+}
+
+// shortenPath drops the front of a path rather than the end, since the file
+// name is the part worth reading.
+func shortenPath(p string, n int) string {
+	r := []rune(p)
+	if n <= 1 || len(r) <= n {
+		return p
+	}
+	return "…" + string(r[len(r)-(n-1):])
 }
