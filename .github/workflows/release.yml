@@ -44,9 +44,19 @@ jobs:
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS
 
+      # Generated here rather than via the action's generate_release_notes:
+      # on a re-run the action finds the existing release and appends a fresh
+      # copy of the notes to the body it already has. A body_path replaces it.
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$VERSION" --jq .body > notes.md
+
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}
