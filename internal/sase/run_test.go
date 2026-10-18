@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -165,5 +166,112 @@ func TestRunStreamDialsEachElementWithItsOwnLogin(t *testing.T) {
 	}
 	if got := rec.seen["2"]; got != [2]string{"nb-ops", "pw-nb"} {
 		t.Errorf("element 2 dialled with %v, want its own tenant's login", got)
+	}
+}
+
+type deadCredClient struct {
+	fakeClient
+	dead    atomic.Bool
+	lookups atomic.Int32
+	dials   atomic.Int32
+}
+
+func newDeadCredClient() *deadCredClient {
+	c := &deadCredClient{}
+	c.lookup = func(ctx context.Context, eid string) (api.Element, error) {
+		c.lookups.Add(1)
+		return api.Element{ID: eid, Name: "ion-" + eid}, nil
+	}
+	c.session = func(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
+		c.dials.Add(1)
+		return nil, errors.New("expected handshake response status code 101 but got 401")
+	}
+	return c
+}
+
+func (c *deadCredClient) RefreshStopped() bool { return c.dead.Load() }
+
+func TestARunStopsReachingOutOnceTheCredentialIsSpent(t *testing.T) {
+	c := newDeadCredClient()
+	c.dead.Store(true)
+
+	elements := []string{"1", "2", "3", "4", "5"}
+	var results []Result
+	for ev := range RunStream(context.Background(), testOpts(), Targets(c, elements)) {
+		if ev.Done {
+			results = append(results, ev.Result)
+		}
+	}
+
+	if len(results) != len(elements) {
+		t.Fatalf("got %d results, want one per element", len(results))
+	}
+	for _, r := range results {
+		if !strings.Contains(r.Error, "sign-in expired") {
+			t.Errorf("result error = %q, want it to name the expired sign-in", r.Error)
+		}
+	}
+	if got := c.lookups.Load(); got != 0 {
+		t.Errorf("%d element lookups were attempted, want 0 on a spent credential", got)
+	}
+	if got := c.dials.Load(); got != 0 {
+		t.Errorf("%d sessions were dialled, want 0 on a spent credential", got)
+	}
+}
+
+func TestAHealthyCredentialRunsNormally(t *testing.T) {
+	c := newDeadCredClient()
+	c.session = func(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
+		c.dials.Add(1)
+		return []ioncli.CommandOutput{{Command: "uptime", Output: "up 1 day"}}, nil
+	}
+
+	for ev := range RunStream(context.Background(), testOpts(), Targets(c, []string{"1", "2"})) {
+		if ev.Done && ev.Result.Error != "" {
+			t.Errorf("element %s failed: %s", ev.Element, ev.Result.Error)
+		}
+	}
+	if got := c.dials.Load(); got != 2 {
+		t.Errorf("%d sessions dialled, want 2", got)
+	}
+}
+
+func TestRetriesStopOnceTheCredentialDies(t *testing.T) {
+	c := newDeadCredClient()
+	o := testOpts()
+	o.Attempts = 3
+	o.ElementTimeout = 10 * time.Second
+	o.SessionTimeout = 2 * time.Second
+
+	c.session = func(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
+		c.dials.Add(1)
+		c.dead.Store(true)
+		return nil, errors.New("expected handshake response status code 101 but got 401")
+	}
+
+	res := Run(context.Background(), c, o, []string{"1"})
+	if len(res) != 1 || res[0].Error == "" {
+		t.Fatalf("results = %+v, want the element reported as failed", res)
+	}
+	if got := c.dials.Load(); got != 1 {
+		t.Errorf("%d dials, want the retries abandoned once the credential died", got)
+	}
+}
+
+func TestAClientThatCannotSaySoIsAssumedGood(t *testing.T) {
+	var plain Client = &fakeClient{
+		lookup: func(ctx context.Context, eid string) (api.Element, error) {
+			return api.Element{ID: eid}, nil
+		},
+		session: func(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
+			return []ioncli.CommandOutput{{Command: "uptime", Output: "ok"}}, nil
+		},
+	}
+	if credentialDead(plain) {
+		t.Error("credentialDead() = true for a client that cannot report, want it assumed good")
+	}
+	res := Run(context.Background(), plain, testOpts(), []string{"1"})
+	if len(res) != 1 || res[0].Error != "" {
+		t.Errorf("results = %+v, want the run to proceed", res)
 	}
 }

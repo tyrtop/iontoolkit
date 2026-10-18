@@ -12,9 +12,6 @@ import (
 	"testing"
 )
 
-// seedServer answers refresh grants, recording each one and rotating the token
-// when rotate is set. inFlight catches two tenants redeeming at once, which is
-// the failure the Seed exists to prevent.
 func seedServer(t *testing.T, rotate bool) (*httptest.Server, *[]url.Values, *atomic.Int32) {
 	t.Helper()
 	var mu sync.Mutex
@@ -75,9 +72,6 @@ func TestSeedRetiredOnceRotated(t *testing.T) {
 		t.Fatal("the test server did not rotate, so this proves nothing")
 	}
 
-	// The token the first tenant presented will not be accepted again, so the
-	// second must be told there is nothing to redeem rather than sent to spend
-	// a dead credential.
 	if _, tried, _ := seed.redeem(context.Background(), srv.Client(), srv.URL, "2"); tried {
 		t.Error("redeem() tried = true after a rotation, want the spent seed to be skipped")
 	}
@@ -102,8 +96,6 @@ func TestSeedSurvivesAServerThatDoesNotRotate(t *testing.T) {
 	if len(*seen) != 3 {
 		t.Fatalf("%d requests reached the server, want one per tenant", len(*seen))
 	}
-	// Each tenant must have asked for its own scope; a shared seed that leaked
-	// one tenant's scope to another would hand back the wrong tenant's elements.
 	for i, want := range []string{"tsg_id:1", "tsg_id:2", "tsg_id:3"} {
 		if got := (*seen)[i].Get("scope"); !strings.Contains(got, want) {
 			t.Errorf("request %d scope = %q, want it to contain %q", i, got, want)
@@ -118,9 +110,7 @@ func TestSeedRetiredOnlyWhenTheTokenItselfIsRefused(t *testing.T) {
 		wantSpent bool
 	}{
 		{"token rejected", `{"error":"invalid_grant"}`, true},
-		// A scope this account cannot have says nothing about the token, and
-		// retiring it would send every other tenant to the browser for one
-		// tenant's access problem.
+		// A refused scope says nothing about the token.
 		{"scope refused", `{"error":"invalid_scope"}`, false},
 	}
 	for _, tt := range tests {
@@ -185,8 +175,6 @@ func TestLockProfileLetsDifferentProfilesRunAtOnce(t *testing.T) {
 		t.Fatalf("lockProfile() error = %v", err)
 	}
 	defer a()
-	// A second profile must not be made to wait behind the first; only a shared
-	// data directory is a conflict.
 	b, err := lockProfile(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatalf("lockProfile() on a second profile error = %v", err)
@@ -210,8 +198,6 @@ func TestLockProfileGivesUpWithTheContext(t *testing.T) {
 }
 
 func TestLockProfileWithoutAProfileIsFree(t *testing.T) {
-	// No data directory means no shared state to protect, and two sign-ins
-	// must not block each other over nothing.
 	a, err := lockProfile(context.Background(), "")
 	if err != nil {
 		t.Fatalf("lockProfile() error = %v", err)

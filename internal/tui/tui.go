@@ -662,24 +662,32 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.connectWait > 0 {
 			m.connectWait--
 		}
+		var watch tea.Cmd
 		if msg.err != nil {
 			m.tenantErr(msg.tsg, m.tenantName(msg.tsg), msg.err)
 		} else {
 			m.pool.set(msg.tsg, msg.client)
+			// Only the browsed tenant was watched, so a background tenant's
+			// token died unnoticed until a dial came back 401.
+			if msg.fresh {
+				watch = watchToken(msg.client.TokenErrors())
+			}
 		}
 		if m.connectWait > 0 {
-			return m, nil
+			return m, watch
 		}
 		// Everything that was waiting on a connection can go ahead now.
 		if cmds := m.resumeRun; len(cmds) > 0 {
 			m.resumeRun = nil
-			return m.startRun(cmds)
+			next, cmd := m.startRun(cmds)
+			return next, tea.Batch(watch, cmd)
 		}
 		if targets := m.resumeSessions; len(targets) > 0 {
 			m.resumeSessions = nil
-			return m.openSessions(targets)
+			next, cmd := m.openSessions(targets)
+			return next, tea.Batch(watch, cmd)
 		}
-		return m, nil
+		return m, watch
 
 	case tenantElementsMsg:
 		if m.pendingTenants > 0 {

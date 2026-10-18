@@ -8,8 +8,6 @@ import (
 	"github.com/coder/websocket"
 )
 
-// endedSession is a session the device has already hung up on, which is what a
-// shell left with "exit" becomes.
 func endedSession(t *testing.T, m *Manager, eid, name string) *Session {
 	t.Helper()
 	conn := newFakeConn(nil)
@@ -47,7 +45,6 @@ func TestReapDropsOnlyTheSessionsThatEnded(t *testing.T) {
 	if got := m.All()[0]; got != live {
 		t.Errorf("the surviving session is %q, want %q", got.ElementID, live.ElementID)
 	}
-	// Reaping again must not keep finding work to do, or the TUI would churn.
 	if got := m.Reap(); got != 0 {
 		t.Errorf("second Reap() = %d, want 0", got)
 	}
@@ -60,8 +57,6 @@ func TestReapLeavesTheElementReopenable(t *testing.T) {
 	endedSession(t, m, "e1", "ion-a")
 	m.Reap()
 
-	// alt+t has to have something to act on: the shell is gone, so the element
-	// it was on is what gets dialled again.
 	eid, name, ok := m.LastClosed()
 	if !ok {
 		t.Fatal("LastClosed() ok = false after a session ended, want the element remembered")
@@ -104,7 +99,6 @@ func TestReapAlsoClearsDetachedSessionsThatDied(t *testing.T) {
 		t.Fatal("Detach() ok = false, want the session detached")
 	}
 
-	// It ends while nobody is looking at it.
 	conn.Close(websocket.StatusNormalClosure, "")
 	eventually(t, "detached session to end", s.Ended)
 
@@ -130,8 +124,6 @@ func TestReattachSkipsSessionsThatCannotBeResumed(t *testing.T) {
 	}
 	dead.fail(io.ErrUnexpectedEOF)
 
-	// Handing back a failed session would restore a tab showing nothing but how
-	// it broke; alt+t has to fall through to opening a fresh one instead.
 	if s, ok := m.Reattach(); ok {
 		t.Errorf("Reattach() returned session %q, want no usable session", s.ElementID)
 	}

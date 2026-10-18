@@ -103,7 +103,7 @@ func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	// Remembered so a credential failure can replay exactly this request after
 	// signing in.
 	m.lastTargets = targets
-	if m.needsSignIn() {
+	if m.needsSignIn(tsgsOf(targets)) {
 		return m.signInThenSessions(targets)
 	}
 	// Any tenant without a client is authenticated first and the request
@@ -336,6 +336,25 @@ func (m tuiModel) signInThenSessions(targets []sessionTarget) (tea.Model, tea.Cm
 
 // needsSignIn reports whether the credential is already known to be dead, so
 // an action can re-auth before attempting a dial that would only fail.
-func (m tuiModel) needsSignIn() bool {
-	return m.tokenDead != "" && m.tenant.UsesBrowser()
+//
+// It asks the tenants the action touches; the browsed tenant need not be one of
+// them.
+func (m tuiModel) needsSignIn(tsgs []string) bool {
+	if m.tokenDead == "" {
+		return false
+	}
+	if len(tsgs) == 0 {
+		return m.tenant.UsesBrowser()
+	}
+	for _, tsg := range tsgs {
+		if t, ok := m.tenantOf(tsg); ok {
+			if t.UsesBrowser() {
+				return true
+			}
+			continue
+		}
+		// Unrecorded but in the list: only a browser sign-in found it.
+		return true
+	}
+	return false
 }

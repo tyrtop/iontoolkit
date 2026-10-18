@@ -37,5 +37,17 @@ func runShell(ctx context.Context, eid string) error {
 	if err != nil {
 		return err
 	}
+
+	// The handshake is the only authentication, so an open shell outlives its
+	// token; only the next dial breaks.
+	go func() {
+		for err := range client.TokenErrors() {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		if client.RefreshStopped() {
+			fmt.Fprintln(os.Stderr, "sign-in expired — this session continues, but reconnecting needs `iontk login`")
+		}
+	}()
+
 	return interactiveCLI(ctx, client, f.Verbose, eid)
 }

@@ -39,6 +39,15 @@ func (t Target) creds(o Options) (string, string) {
 	return user, pass
 }
 
+type credential interface{ RefreshStopped() bool }
+
+// A spent token fails every remaining element identically, each for a full
+// element timeout, burying the one cause in a report full of 401s.
+func credentialDead(c Client) bool {
+	cd, ok := c.(credential)
+	return ok && cd.RefreshStopped()
+}
+
 // Targets pairs every element with the same client, for a run inside one tenant.
 func Targets(client Client, elements []string) []Target {
 	out := make([]Target, 0, len(elements))
@@ -72,6 +81,8 @@ func RunStream(ctx context.Context, o Options, targets []Target) <-chan Event {
 				var err error
 				if t.Client == nil {
 					err = fmt.Errorf("element %s: no client for its tenant", t.ElementID)
+				} else if credentialDead(t.Client) {
+					err = fmt.Errorf("element %s: sign-in expired before this element was reached", t.ElementID)
 				} else {
 					res, err = runElement(ctx, t.Client, o, t)
 				}

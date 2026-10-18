@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestReportTokenErrorsWritesEachFailureAndStopsWhenClosed(t *testing.T) {
+func TestWatchCredentialWritesEachFailureAndStopsWhenClosed(t *testing.T) {
 	ch := make(chan error, 2)
 	ch <- errors.New("token refresh: first")
 	ch <- errors.New("token refresh: second")
@@ -16,12 +16,16 @@ func TestReportTokenErrorsWritesEachFailureAndStopsWhenClosed(t *testing.T) {
 
 	var buf bytes.Buffer
 	done := make(chan struct{})
-	go func() { reportTokenErrors(ch, &buf); close(done) }()
+	stopped := false
+	go func() {
+		watchCredential(ch, func() bool { return false }, func() { stopped = true }, &buf)
+		close(done)
+	}()
 
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("reportTokenErrors did not return after the channel closed")
+		t.Fatal("watchCredential did not return after the channel closed")
 	}
 
 	out := buf.String()
@@ -29,5 +33,37 @@ func TestReportTokenErrorsWritesEachFailureAndStopsWhenClosed(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output is missing %q:\n%s", want, out)
 		}
+	}
+	if stopped {
+		t.Error("the run was stopped although the credential could still be renewed")
+	}
+}
+
+func TestWatchCredentialStopsTheRunWhenTheCredentialIsSpent(t *testing.T) {
+	ch := make(chan error, 1)
+	ch <- errors.New("token refresh: interactive sign-in required")
+	close(ch)
+
+	var buf bytes.Buffer
+	stopped := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		watchCredential(ch, func() bool { return true }, func() { close(stopped) }, &buf)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("watchCredential did not return")
+	}
+
+	select {
+	case <-stopped:
+	default:
+		t.Error("the run was not stopped although the credential cannot be renewed")
+	}
+	if out := buf.String(); !strings.Contains(out, "sign-in expired") {
+		t.Errorf("output does not say why the run stopped:\n%s", out)
 	}
 }

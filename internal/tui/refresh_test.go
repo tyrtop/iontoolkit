@@ -233,7 +233,7 @@ func TestFreshCacheSkipsTheRefetchOnceAuthenticated(t *testing.T) {
 
 	// This client has no refresh loop, so watchToken contributes nothing and a
 	// non-nil command means a fetch was started.
-	mm, cmd := m.Update(clientReadyMsg{client: &api.Client{}})
+	mm, cmd := m.Update(clientReadyMsg{client: liveClient()})
 	got := mm.(tuiModel)
 	if cmd != nil {
 		t.Error("a fresh cache still triggered a re-fetch")
@@ -250,7 +250,7 @@ func TestFreshCacheSkipsTheRefetchOnceAuthenticated(t *testing.T) {
 		{Name: "Acme Co", TSGID: "1", ClientID: "svc", Added: true},
 	}}
 	m.cacheState = cacheUpdating
-	_, cmd = m.Update(clientReadyMsg{client: &api.Client{}})
+	_, cmd = m.Update(clientReadyMsg{client: liveClient()})
 	if cmd == nil {
 		t.Error("a stale cache did not trigger a fetch")
 	}

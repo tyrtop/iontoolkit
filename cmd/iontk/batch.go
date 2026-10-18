@@ -53,10 +53,15 @@ func runBatch(ctx context.Context) error {
 		return err
 	}
 
+	// So a run that outlives its credential can stop, rather than spend an
+	// element timeout each on everything left.
+	ctx, stopRun := context.WithCancel(ctx)
+	defer stopRun()
+
 	// The api package no longer prints refresh failures itself, so a batch run
 	// has to say them out loud or a token dying mid-run looks like the devices
 	// going quiet.
-	go reportTokenErrors(client.TokenErrors(), os.Stderr)
+	go watchCredential(client.TokenErrors(), client.RefreshStopped, stopRun, os.Stderr)
 
 	// The file is only created once the run is ready to produce something, so a
 	// failure before this point leaves no empty report behind.
@@ -129,10 +134,14 @@ func drainPlain(events <-chan sase.Event, total int, sink output.Sink) (int, int
 	return total, failed, nil
 }
 
-// reportTokenErrors writes refresh failures as they happen. The channel closes
-// when refreshing stops for good, which ends the loop.
-func reportTokenErrors(ch <-chan error, w io.Writer) {
+// dead separates a spent credential from a run that merely finished; both
+// close the channel.
+func watchCredential(ch <-chan error, dead func() bool, stop func(), w io.Writer) {
 	for err := range ch {
 		fmt.Fprintln(w, err)
+	}
+	if dead() {
+		fmt.Fprintln(w, "sign-in expired and could not be renewed — stopping; run `iontk login` and try again")
+		stop()
 	}
 }
