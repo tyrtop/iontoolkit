@@ -100,8 +100,8 @@ func TestSameElementIDInTwoTenantsStaysDistinct(t *testing.T) {
 
 func TestEachElementDialsWithItsOwnTenantsClient(t *testing.T) {
 	m := multiModel(t)
-	first := &api.Client{}
-	second := &api.Client{}
+	first := liveClient()
+	second := liveClient()
 	m.pool.set("111", first)
 	m.pool.set("222", second)
 
@@ -639,14 +639,14 @@ func TestClientPoolIsSharedAcrossModelCopies(t *testing.T) {
 	// The model is copied by value constantly; a pool that was not shared would
 	// silently lose clients between updates.
 	m := multiModel(t)
-	c := &api.Client{}
+	c := liveClient()
 	m.pool.set("111", c)
 
 	copied := m
 	if copied.pool.get("111") != c {
 		t.Error("a copied model lost the pool's clients")
 	}
-	copied.pool.set("222", &api.Client{})
+	copied.pool.set("222", liveClient())
 	if m.pool.get("222") == nil {
 		t.Error("a client added through a copy was not visible to the original")
 	}
@@ -1130,8 +1130,8 @@ func TestPasswordPromptAsksForEveryTenantInTheSelection(t *testing.T) {
 	m := credsModel(t)
 	m.phase = phasePicking
 	m.mode = modeShell
-	setTestClient(&m, &api.Client{})
-	m.pool.set("222", &api.Client{})
+	setTestClient(&m, liveClient())
+	m.pool.set("222", liveClient())
 
 	// Niagara has no stored password, and it is the second tenant in the
 	// selection: checking only the first would sail straight past it.
@@ -1341,8 +1341,8 @@ func TestCrossTenantBatchPairsEachElementWithItsTenantsLogin(t *testing.T) {
 	// it is proven in internal/sase against a stub client.
 	m := credsModel(t)
 	m.mode = modeBatch
-	setTestClient(&m, &api.Client{})
-	m.pool.set("222", &api.Client{})
+	setTestClient(&m, liveClient())
+	m.pool.set("222", liveClient())
 	for _, r := range m.all {
 		m.selected[r.key()] = true
 	}
@@ -1376,8 +1376,8 @@ func TestCrossTenantBatchPairsEachElementWithItsTenantsLogin(t *testing.T) {
 func TestCrossTenantBatchRefusesWhenATenantHasNoLogin(t *testing.T) {
 	m := credsModel(t)
 	m.mode = modeBatch
-	setTestClient(&m, &api.Client{})
-	m.pool.set("222", &api.Client{})
+	setTestClient(&m, liveClient())
+	m.pool.set("222", liveClient())
 	m.cmdInput = newField("", "", false).input
 
 	// Niagara loses its password, so the run must stop and say which tenant.
@@ -1404,8 +1404,8 @@ func TestBatchAcrossTenantsAfterSuppliedPasswords(t *testing.T) {
 	m := credsModel(t)
 	m.mode = modeBatch
 	m.phase = phasePicking
-	setTestClient(&m, &api.Client{})
-	m.pool.set("222", &api.Client{})
+	setTestClient(&m, liveClient())
+	m.pool.set("222", liveClient())
 	m.cmdInput = newField("", "", false).input
 	if err := m.store.Secrets.Delete(config.IONPassKey("222", "nb-ops")); err != nil {
 		t.Fatalf("clear: %v", err)
@@ -1480,7 +1480,7 @@ func TestAConnectedTenantReplaysWhatWasWaiting(t *testing.T) {
 	m.connectWait = 1
 	m.resumeSessions = []sessionTarget{{eid: "a", name: "s0100-rtr-01", tsg: "111"}}
 
-	mm, cmd := m.Update(tenantConnectedMsg{tsg: "111", client: &api.Client{}})
+	mm, cmd := m.Update(tenantConnectedMsg{tsg: "111", client: liveClient()})
 	got := mm.(tuiModel)
 
 	if got.pool.get("111") == nil {
@@ -1512,7 +1512,7 @@ func TestSeveralTenantsAreAwaitedBeforeReplaying(t *testing.T) {
 		{eid: "c", name: "ord-gw-01", tsg: "222"},
 	}
 
-	mm, cmd := m.Update(tenantConnectedMsg{tsg: "111", client: &api.Client{}})
+	mm, cmd := m.Update(tenantConnectedMsg{tsg: "111", client: liveClient()})
 	half := mm.(tuiModel)
 	if cmd != nil {
 		t.Error("replayed with a tenant still connecting")
@@ -1521,7 +1521,7 @@ func TestSeveralTenantsAreAwaitedBeforeReplaying(t *testing.T) {
 		t.Error("the held request was dropped early")
 	}
 
-	mm, cmd = half.Update(tenantConnectedMsg{tsg: "222", client: &api.Client{}})
+	mm, cmd = half.Update(tenantConnectedMsg{tsg: "222", client: liveClient()})
 	done := mm.(tuiModel)
 	if cmd == nil {
 		t.Error("no command returned once every tenant was connected")
@@ -1582,7 +1582,7 @@ func TestBatchWaitsForItsTenantsToConnect(t *testing.T) {
 
 func TestEnsureClientsSkipsWhatIsAlreadyConnected(t *testing.T) {
 	m := credsModel(t)
-	m.pool.set("111", &api.Client{})
+	m.pool.set("111", liveClient())
 
 	cmds := m.ensureClients([]string{"111", "222", "222", ""})
 	if len(cmds) != 1 {
@@ -1648,5 +1648,55 @@ func TestPressingEnterAgainRetriesAFailedTenant(t *testing.T) {
 	}
 	if got.connectWait != 1 {
 		t.Errorf("connectWait = %d, want the tenant connecting again", got.connectWait)
+	}
+}
+
+func liveClient() *api.Client {
+	return api.NewClient(nil, nil, "test-token", false, 1, 1)
+}
+
+// spentClient sits inside the pre-flight window, where a spent token used to
+// go unnoticed until a dial came back 401.
+func spentClient(t *testing.T) *api.Client {
+	t.Helper()
+	c := api.NewClient(nil, nil, "about-to-expire", false, 1, 1)
+	c.SetExpiryForTest(30 * time.Second)
+	return c
+}
+
+func TestEnsureClientsRenewsATokenThatWillNotOutlastTheOperation(t *testing.T) {
+	m := credsModel(t)
+	spent := spentClient(t)
+	m.pool.set("111", spent)
+
+	cmds := m.ensureClients([]string{"111"})
+	if len(cmds) != 1 {
+		t.Fatalf("got %d commands, want the spent token renewed before use", len(cmds))
+	}
+	if got := m.pool.get("111"); got != spent {
+		t.Error("the client was replaced, want its token renewed in place")
+	}
+}
+
+func TestEnsureClientsLeavesAHealthyTokenAlone(t *testing.T) {
+	m := credsModel(t)
+	c := api.NewClient(nil, nil, "good", false, 1, 1)
+	c.SetExpiryForTest(15 * time.Minute)
+	m.pool.set("111", c)
+
+	if cmds := m.ensureClients([]string{"111"}); len(cmds) != 0 {
+		t.Errorf("got %d commands, want none for a token with life left", len(cmds))
+	}
+}
+
+func TestEnsureClientsRenewsOnlyTheTenantsThatNeedIt(t *testing.T) {
+	m := credsModel(t)
+	good := api.NewClient(nil, nil, "good", false, 1, 1)
+	good.SetExpiryForTest(15 * time.Minute)
+	m.pool.set("111", good)
+	m.pool.set("222", spentClient(t))
+
+	if cmds := m.ensureClients([]string{"111", "222"}); len(cmds) != 1 {
+		t.Errorf("got %d commands, want 1 for the one spent tenant", len(cmds))
 	}
 }

@@ -546,29 +546,59 @@ func (m tuiModel) countLabel() string {
 type tenantConnectedMsg struct {
 	tsg    string
 	client *api.Client
-	err    error
+	// Two watchers on one channel would halve the failures each sees.
+	fresh bool
+	err   error
 }
 
 // connectTenant authenticates one tenant without fetching anything.
 func connectTenant(ctx context.Context, f app.Flags, tsg string) tea.Cmd {
 	return func() tea.Msg {
 		c, err := app.NewClient(ctx, f, io.Discard)
-		return tenantConnectedMsg{tsg: tsg, client: c, err: err}
+		return tenantConnectedMsg{tsg: tsg, client: c, fresh: true, err: err}
 	}
 }
 
+// recheckToken reports as a connection so the waiting batch or session replays
+// unchanged.
+func recheckToken(ctx context.Context, c *api.Client, tsg string) tea.Cmd {
+	return func() tea.Msg {
+		if err := c.EnsureToken(ctx, preflightTTL); err != nil {
+			return tenantConnectedMsg{tsg: tsg, err: err}
+		}
+		return tenantConnectedMsg{tsg: tsg, client: c}
+	}
+}
+
+// preflightTTL sits above the refresh margin: inside it the background refresh
+// is due but may not have happened, or may be backing off.
+const preflightTTL = 90 * time.Second
+
 // ensureClients returns the commands needed to authenticate any of these
-// tenants that has no client yet.
+// tenants that has no usable client yet.
 //
 // A tenant only had a client as a side effect of fetching its elements, so a
 // launch that found a fresh cache had none at all: every element then looked
 // like it belonged to a disconnected tenant. Connecting on demand is what makes
 // a cached list usable.
+//
+// A token that will not outlast the operation counts as missing. Both expensive
+// paths come through here, so one exchange now beats a 401 per element later.
 func (m tuiModel) ensureClients(tsgs []string) []tea.Cmd {
 	seen := map[string]bool{}
 	var cmds []tea.Cmd
 	for _, tsg := range tsgs {
-		if tsg == "" || seen[tsg] || m.pool.get(tsg) != nil {
+		if tsg == "" || seen[tsg] {
+			continue
+		}
+		if c := m.pool.get(tsg); c != nil {
+			if c.TokenGood(preflightTTL) {
+				continue
+			}
+			// Renewed in place: rebuilding would abandon this client's
+			// refresh loop and start another.
+			seen[tsg] = true
+			cmds = append(cmds, recheckToken(m.ctx, c, tsg))
 			continue
 		}
 		// A tenant that already failed this round is not tried again: the

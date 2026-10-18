@@ -174,10 +174,8 @@ func (s *Session) markDirty() {
 	}
 }
 
-// cleanHangUp reports whether a read ended because the far end hung up in an
-// orderly way, which is what typing "exit" at the ION prompt looks like from
-// here: the device closes the toolkit socket. Anything else -- a torn
-// connection, a protocol error -- is a failure the user needs to see.
+// cleanHangUp is what typing "exit" looks like from here: the device closes the
+// socket. A torn connection is a failure the user needs to see.
 func cleanHangUp(err error) bool {
 	switch websocket.CloseStatus(err) {
 	case websocket.StatusNormalClosure, websocket.StatusGoingAway, websocket.StatusNoStatusRcvd:
@@ -186,8 +184,8 @@ func cleanHangUp(err error) bool {
 	return errors.Is(err, io.EOF)
 }
 
-// end marks the session finished without an error, so the tab can simply close
-// instead of showing the user a failure they caused on purpose.
+// end records no error, so the tab closes instead of reporting a failure the
+// user caused on purpose.
 func (s *Session) end() {
 	s.mu.Lock()
 	if s.err == nil && !s.closed {
@@ -197,7 +195,6 @@ func (s *Session) end() {
 	s.markDirty()
 }
 
-// Ended reports that the device closed the session of its own accord.
 func (s *Session) Ended() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

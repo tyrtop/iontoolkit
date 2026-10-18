@@ -364,7 +364,7 @@ func searchEnterModel(t *testing.T) tuiModel {
 		{ID: "e2", Name: "s5024-rtr-02", Model: "ion 1200", Connected: true},
 		{ID: "e3", Name: "s0100-rtr-01", Model: "ion 1200", Connected: true},
 	})
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 	m.sessions = ionterm.NewManager()
 	m.spinner = ui.NewSpinner("")
 	m.phase = phasePicking
@@ -796,8 +796,6 @@ func TestHintOffersUndoAfterAClear(t *testing.T) {
 	}
 }
 
-// typeIntoFilter opens the search and sends each rune as a key press, the way
-// the terminal delivers it.
 func typeIntoFilter(t *testing.T, m tuiModel, query string) tuiModel {
 	t.Helper()
 	next, cmd := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}), "/")
@@ -818,8 +816,6 @@ func typeIntoFilter(t *testing.T, m tuiModel, query string) tuiModel {
 
 func TestSearchAcceptsJAndK(t *testing.T) {
 	m := filterModel(t)
-	// j and k moved the table instead of reaching the input, so any ION with a
-	// j or a k in its name could not be searched for at all.
 	m.mergeTenantElements("333", "Kroger", []api.Element{
 		{ID: "e9", Name: "jfk-gw-01", SiteID: "s1", Model: "ion1200"},
 	})
@@ -837,8 +833,6 @@ func TestSearchAcceptsHomeAndEndAsText(t *testing.T) {
 	m := filterModel(t)
 	m = typeIntoFilter(t, m, "100")
 
-	// home and end belong to the text cursor while the query has focus; the
-	// table must not swallow them.
 	cursor := 0
 	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyHome}), "home")
 	m = next.(tuiModel)
@@ -871,7 +865,6 @@ func TestJAndKStillMoveTheListWhenNotSearching(t *testing.T) {
 	if got := m.table.Cursor(); got != start {
 		t.Errorf("table cursor = %d after k, want it back at %d", got, start)
 	}
-	// Typing j must not have leaked into a query that was never opened.
 	if got := m.filter.Value(); got != "" {
 		t.Errorf("filter.Value() = %q, want it untouched", got)
 	}
@@ -881,8 +874,7 @@ func TestArrowsStillMoveTheListWhileSearching(t *testing.T) {
 	m := filterModel(t)
 	m = typeIntoFilter(t, m, "1200")
 
-	// The arrows are not text, so they stay with the table: a narrowed list is
-	// navigable without having to apply the query first.
+	// Arrows are not text, so a narrowed list stays navigable mid-query.
 	m.table.SetCursor(0)
 	start := m.table.Cursor()
 	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}), "down")

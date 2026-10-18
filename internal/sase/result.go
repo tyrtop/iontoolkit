@@ -42,6 +42,10 @@ func runElement(ctx context.Context, client Client, o Options, target Target) (R
 		if o.Verbose {
 			fmt.Fprintf(os.Stderr, "element %s: attempt %d: %v\n", eid, attempt, lastErr)
 		}
+		// Retrying a spent credential only multiplies the wait.
+		if credentialDead(client) {
+			break
+		}
 	}
 	if lastErr != nil {
 		return Result{}, fmt.Errorf("element %s: run: %w", eid, lastErr)

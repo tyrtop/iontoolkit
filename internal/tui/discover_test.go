@@ -248,7 +248,7 @@ func TestSwitchingClearsTheOldTenantsClient(t *testing.T) {
 		config.KnownTenant{TSGID: "222", Name: "Beta Co"},
 	)
 	m.phase = phaseSwitch
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 	m.tokenDead = "sign-in expired"
 	m.switchCursor = 1
 

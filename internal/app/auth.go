@@ -39,13 +39,10 @@ func BrowserSource(f Flags, httpClient *http.Client, st *config.Store) *saseauth
 
 	stored, _ := st.Secrets.Get(config.RefreshTokenKey(f.TSGID))
 	if stored == "" {
-		// A tenant with no credential of its own starts from the account's.
-		// Narrowing that token's scope to this tenant is what makes a new
-		// tenant usable without another trip through the browser.
-		//
-		// It goes in as a shared seed rather than as this tenant's own token:
-		// every tenant that needs it is holding the same string, and redeeming
-		// one refresh token from several tenants at once loses all but one.
+		// Narrowing the account token's scope is what makes a new tenant
+		// usable without another trip through the browser. It goes in as a
+		// shared seed, not this tenant's own: one refresh token redeemed from
+		// several tenants at once loses all but one.
 		if acct, _ := st.Secrets.Get(config.AccountRefreshTokenKey()); acct != "" {
 			opt.Seed = accountSeed(acct)
 		}
@@ -56,11 +53,9 @@ func BrowserSource(f Flags, httpClient *http.Client, st *config.Store) *saseauth
 	return saseauth.NewSource(f.TSGID, stored, opt, save)
 }
 
-// seeds keeps one Seed per account token for the life of the process. A client
-// is built per tenant, each opening its own store, so there is nowhere else for
-// tenants to meet: without this they would each hold a private copy of the one
-// credential and race each other for it. Keying by the token means a fresh
-// sign-in gets a fresh seed.
+// seeds is process-wide because a client is built per tenant, each opening its
+// own store: there is nowhere else for tenants to meet. Keyed by token, so a
+// fresh sign-in gets a fresh seed.
 var seeds sync.Map
 
 func accountSeed(token string) *saseauth.Seed {

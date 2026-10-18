@@ -67,7 +67,7 @@ func TestFrameNeverExceedsTerminalHeight(t *testing.T) {
 
 func TestEnterWithNoSelectionOpensASession(t *testing.T) {
 	m := pickModel(t)
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 
 	mm, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	got := mm.(tuiModel)
@@ -339,7 +339,7 @@ func TestRenderSlashViews(t *testing.T) {
 func TestShellModeEnterOpensOneTabPerSelection(t *testing.T) {
 	m := pickModel(t)
 	m.mode = modeShell
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 
 	for i := 0; i < 2; i++ {
 		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
@@ -417,7 +417,7 @@ func TestFirstLoginAsksForCredentialsThenProceeds(t *testing.T) {
 	m.tenant, m.hasTenant = cfg.Tenants[0], true
 	m.phase = phasePicking
 	m.mode = modeShell
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 	m.setElements([]elementRow{{Element: api.Element{ID: "1", Name: "S0100-RTR-01"}, TSG: "1", Tenant: "Acme Co"}})
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
@@ -554,7 +554,7 @@ func TestReopenWorksFromTheElementsList(t *testing.T) {
 	m := newTUIModel(context.Background(), st, cfg)
 	m.tenant, m.hasTenant = cfg.Tenants[0], true
 	m.ionUser = "u"
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 	m.phase = phasePicking
 	m.setElements([]elementRow{{Element: api.Element{ID: "1", Name: "S0100-RTR-01"}, TSG: "1", Tenant: "Acme Co"}})
 
@@ -613,7 +613,7 @@ func TestReopenWithNothingClosedReports(t *testing.T) {
 
 func TestReopenFocusesAnAlreadyOpenTab(t *testing.T) {
 	m := pickModel(t)
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 
 	for _, eid := range []string{"1", "2"} {
 		if _, err := m.sessions.Open(context.Background(), stubDialer{}, eid, "e"+eid, 200, 50, ionterm.Credentials{}); err != nil {
@@ -925,7 +925,7 @@ func TestSlashTypedWriteCommandIsBlocked(t *testing.T) {
 func TestElementsListAlwaysDialsFresh(t *testing.T) {
 	m := pickModel(t)
 	m.mode = modeShell
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 
 	first, err := m.sessions.Open(context.Background(), stubDialer{}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
 	if err != nil {
@@ -1158,8 +1158,6 @@ func TestInsertedCommandEndsWithASpace(t *testing.T) {
 	t.Fatalf("nothing reached the wire; sent=%q", conn.sent())
 }
 
-// exitConn is a device that has hung up, which is what the toolkit socket does
-// when the user types "exit" at the ION prompt.
 type exitConn struct{}
 
 func (exitConn) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
@@ -1188,7 +1186,7 @@ func waitForSessionEnd(t *testing.T, m tuiModel, eid string) {
 
 func TestExitingAShellClosesItsTab(t *testing.T) {
 	m := pickModel(t)
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 	m.phase = phaseSession
 	m.status = "something stale"
 
@@ -1203,8 +1201,6 @@ func TestExitingAShellClosesItsTab(t *testing.T) {
 	if n := got.sessions.Count(); n != 0 {
 		t.Errorf("Count() = %d, want the exited shell's tab closed", n)
 	}
-	// With no tabs left there is nothing to look at, so the element list is
-	// where the user should land rather than an empty pane.
 	if got.phase != phasePicking {
 		t.Errorf("phase = %v, want phasePicking once the last tab closed", got.phase)
 	}
@@ -1215,7 +1211,7 @@ func TestExitingAShellClosesItsTab(t *testing.T) {
 
 func TestExitingOneOfSeveralShellsLeavesTheOthers(t *testing.T) {
 	m := pickModel(t)
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 	m.phase = phaseSession
 
 	if _, err := m.sessions.Open(context.Background(), stubDialer{}, "2", "e2", 200, 50, ionterm.Credentials{}); err != nil {
@@ -1242,7 +1238,7 @@ func TestExitingOneOfSeveralShellsLeavesTheOthers(t *testing.T) {
 
 func TestReattachingAfterAnExitOpensAFreshSession(t *testing.T) {
 	m := pickModel(t)
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 	m.phase = phaseSession
 
 	if _, err := m.sessions.Open(context.Background(), exitDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
@@ -1252,8 +1248,6 @@ func TestReattachingAfterAnExitOpensAFreshSession(t *testing.T) {
 	mm, _ := m.Update(sessionDirtyMsg("1"))
 	m = mm.(tuiModel)
 
-	// There is nothing to reattach to, so alt+t has to dial the element again
-	// rather than report that it has nothing to do.
 	mm, cmd := m.reopenLastTab()
 	got := mm.(tuiModel)
 	if got.status == "nothing to reattach" {
@@ -1269,7 +1263,7 @@ func TestReattachingAfterAnExitOpensAFreshSession(t *testing.T) {
 
 func TestReattachingToAFailedDetachedSessionOpensAFreshOne(t *testing.T) {
 	m := pickModel(t)
-	setTestClient(&m, &api.Client{})
+	setTestClient(&m, liveClient())
 
 	s, err := m.sessions.Open(context.Background(), stubDialer{}, "1", "e1", 200, 50, ionterm.Credentials{})
 	if err != nil {
@@ -1278,7 +1272,6 @@ func TestReattachingToAFailedDetachedSessionOpensAFreshOne(t *testing.T) {
 	if _, ok := m.sessions.Detach(); !ok {
 		t.Fatal("Detach() ok = false")
 	}
-	// It dies while detached: the socket drops rather than the user leaving.
 	s.Close()
 
 	mm, cmd := m.reopenLastTab()

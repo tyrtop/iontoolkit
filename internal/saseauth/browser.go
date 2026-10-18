@@ -35,8 +35,7 @@ type Options struct {
 	TokenURL     string
 	Client       *http.Client
 
-	// Seed is the account-wide refresh token every tenant without one of its
-	// own starts from. It is shared deliberately: see Seed.
+	// Shared across tenants deliberately; see Seed.
 	Seed *Seed
 }
 
@@ -134,21 +133,13 @@ func stopWaiting(cancel func()) {
 	}
 }
 
-// profileLocks serialises sign-ins that share a browser profile, one channel
-// per data directory.
-//
-// Chrome takes an exclusive lock on a user-data-dir. A second launch against
-// the same one hands its URL to the instance already running and exits, so
-// chromedp is left waiting on a browser that never answers it until the attempt
-// times out. Tenants are loaded in parallel and all share one profile, which
-// made the first tenant win and every other one spend 45 seconds failing to
-// find a session that was sitting right there — then report it as a tenant it
-// could not access.
+// profileLocks serialises sign-ins sharing a browser profile, one channel per
+// data dir. Chrome locks a user-data-dir: a second launch hands its URL to the
+// running instance and exits, leaving chromedp waiting until it times out.
 var profileLocks sync.Map
 
-// lockProfile waits for exclusive use of a browser profile. The wait happens
-// before the attempt's own deadline starts, so a queued tenant still gets a
-// full budget once its turn comes.
+// lockProfile waits outside the attempt's deadline, so a queued tenant still
+// gets a full budget.
 func lockProfile(ctx context.Context, dir string) (func(), error) {
 	if dir == "" {
 		return func() {}, nil

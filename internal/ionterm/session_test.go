@@ -729,8 +729,6 @@ func TestExitClosesTheSessionWithoutAnError(t *testing.T) {
 			defer s.Close()
 
 			eventually(t, "session to report it ended", s.Ended)
-			// Typing "exit" is not a failure, and showing one leaves a tab the
-			// user has to close by hand after asking for it to go.
 			if err := s.Err(); err != nil {
 				t.Errorf("Err() = %v, want nil for a clean hang-up", err)
 			}

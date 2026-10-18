@@ -33,9 +33,50 @@ type Client struct {
 
 	tokenMu sync.RWMutex
 	token   string
+	// Zero means the source never said, not expired.
+	expires        time.Time
+	refreshStopped bool
+
+	// Tests only.
+	profileBase string
 
 	src       TokenSource
 	tokenErrs chan error
+	// Keeps a caller's mint from racing refreshLoop's.
+	mintMu sync.Mutex
+}
+
+// An unknown expiry counts as good: a static SCM_TOKEN has no lifetime to
+// check, and refusing to try would be worse.
+func (s *Client) TokenGood(need time.Duration) bool {
+	s.tokenMu.RLock()
+	defer s.tokenMu.RUnlock()
+	if s.token == "" {
+		return false
+	}
+	if s.refreshStopped {
+		return false
+	}
+	if s.expires.IsZero() {
+		return true
+	}
+	return time.Until(s.expires) >= need
+}
+
+// RefreshStopped means every request from here fails until a human signs in.
+func (s *Client) RefreshStopped() bool {
+	s.tokenMu.RLock()
+	defer s.tokenMu.RUnlock()
+	return s.refreshStopped
+}
+
+func (s *Client) TokenLeft() (time.Duration, bool) {
+	s.tokenMu.RLock()
+	defer s.tokenMu.RUnlock()
+	if s.expires.IsZero() {
+		return 0, false
+	}
+	return time.Until(s.expires), true
 }
 
 func NewClient(client, wsClient *http.Client, token string, verbose bool, rps float64, burst int) *Client {
@@ -108,6 +149,26 @@ func (s *Client) getToken() string {
 func (s *Client) setToken(t string) {
 	s.tokenMu.Lock()
 	s.token = t
+	s.tokenMu.Unlock()
+}
+
+func (s *Client) setExpiry(ttl time.Duration) {
+	s.tokenMu.Lock()
+	if ttl > 0 {
+		s.expires = time.Now().Add(ttl)
+	} else {
+		s.expires = time.Time{}
+	}
+	s.tokenMu.Unlock()
+}
+
+// SetExpiryForTest exists because the fields are unexported and other
+// packages' tests need a near-dead token.
+func (s *Client) SetExpiryForTest(ttl time.Duration) { s.setExpiry(ttl) }
+
+func (s *Client) stopRefreshing() {
+	s.tokenMu.Lock()
+	s.refreshStopped = true
 	s.tokenMu.Unlock()
 }
 

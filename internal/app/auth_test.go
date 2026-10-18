@@ -174,9 +174,6 @@ func TestAccountSeedIsSharedBetweenTenants(t *testing.T) {
 		t.Fatalf("seed account token: %v", err)
 	}
 
-	// Two tenants, neither with a credential of its own, must end up holding
-	// the same Seed: a private copy each is the race that left every tenant but
-	// one unable to list its elements.
 	a := BrowserSource(Flags{TSGID: "1", BrowserAuth: true}, nil, st)
 	b := BrowserSource(Flags{TSGID: "2", BrowserAuth: true}, nil, st)
 	if a.Seed() == nil {
@@ -185,8 +182,6 @@ func TestAccountSeedIsSharedBetweenTenants(t *testing.T) {
 	if a.Seed() != b.Seed() {
 		t.Error("each tenant got its own Seed, want one shared across the account")
 	}
-	// The account token must not become the tenant's own, or saving a rotation
-	// would overwrite one tenant's credential with another's.
 	if got := a.RefreshToken(); got != "" {
 		t.Errorf("RefreshToken() = %q, want the account token held only as a seed", got)
 	}

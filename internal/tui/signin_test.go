@@ -133,7 +133,7 @@ func TestSignedInLandsOnAConfirmation(t *testing.T) {
 
 	// An explicit sign-in has nothing to replay, so the result is shown.
 	mm, cmd := m.Update(signedInMsg{
-		client: &api.Client{},
+		client: liveClient(),
 		ident:  saseauth.Identity{Name: "Ben Hall", Email: "ben@example.test", TSG: "1"},
 		ttl:    899 * time.Second,
 	})
@@ -163,7 +163,7 @@ func TestSignInInTheMiddleOfAnActionSkipsTheConfirmation(t *testing.T) {
 		m.spinner = ui.NewSpinner("")
 		m.selected = map[string]bool{}
 
-		mm, _ := m.Update(signedInMsg{client: &api.Client{}})
+		mm, _ := m.Update(signedInMsg{client: liveClient()})
 		got := mm.(tuiModel)
 		if got.phase == phaseSignedIn {
 			t.Error("a mid-action sign-in stopped to show a confirmation")
@@ -180,9 +180,9 @@ func TestSignInInTheMiddleOfAnActionSkipsTheConfirmation(t *testing.T) {
 		m.selected = map[string]bool{}
 		m.sessions = ionterm.NewManager()
 		m.resumeSessions = []sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}}
-		setTestClient(&m, &api.Client{})
+		setTestClient(&m, liveClient())
 
-		mm, cmd := m.Update(signedInMsg{client: &api.Client{}})
+		mm, cmd := m.Update(signedInMsg{client: liveClient()})
 		got := mm.(tuiModel)
 		if got.phase == phaseSignedIn {
 			t.Error("a mid-action sign-in stopped to show a confirmation")
@@ -503,7 +503,7 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 		m.spinner = ui.NewSpinner("")
 		m.selected = map[string]bool{}
 		m.sessions = ionterm.NewManager()
-		setTestClient(&m, &api.Client{})
+		setTestClient(&m, liveClient())
 		m.tokenDead = "sign-in expired"
 
 		mm, cmd := m.openSessions([]sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}})
@@ -528,7 +528,7 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 		m.spinner = ui.NewSpinner("")
 		m.selected = map[string]bool{}
 		m.sessions = ionterm.NewManager()
-		setTestClient(&m, &api.Client{})
+		setTestClient(&m, liveClient())
 		m.tokenDead = "sign-in expired"
 
 		mm, _ := m.openSessions([]sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}})

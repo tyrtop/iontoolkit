@@ -151,8 +151,7 @@ func TestSourceFallsBackToTheSharedSeed(t *testing.T) {
 	if got := form.Get("scope"); got != "openid profile email tsg_id:123" {
 		t.Errorf("sent scope = %q, want it narrowed to this tenant", got)
 	}
-	// What came back is this tenant's own credential from now on, so the next
-	// run does not have to touch the shared seed at all.
+	// This tenant's own credential now, so the next run skips the seed.
 	if got, _ := saved.Load().(string); got != "tenant-rt" {
 		t.Errorf("saved refresh token = %q, want %q", got, "tenant-rt")
 	}
@@ -175,17 +174,14 @@ func TestSourcePrefersItsOwnTokenOverTheSeed(t *testing.T) {
 	if got := form.Get("refresh_token"); got != "tenant-rt" {
 		t.Errorf("sent refresh_token = %q, want the tenant's own %q", got, "tenant-rt")
 	}
-	// Spending the shared seed when this tenant had a credential of its own
-	// would retire it for every tenant that still needs it.
 	if _, tried, _ := seed.redeem(context.Background(), srv.Client(), srv.URL, "9"); !tried {
 		t.Error("the shared seed was spent by a tenant that did not need it")
 	}
 }
 
 func TestConcurrentTenantsEachGetTheirOwnTokenFromOneSeed(t *testing.T) {
-	// The real failure this guards: several tenants loading at once, none with
-	// a credential of its own, all starting from one account refresh token. A
-	// server that rotates leaves every tenant but the first with invalid_grant.
+	// The real failure: tenants loading at once from one account token, a
+	// rotating server leaving all but the first with invalid_grant.
 	var mu sync.Mutex
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -212,8 +208,7 @@ func TestConcurrentTenantsEachGetTheirOwnTokenFromOneSeed(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// No DataDir, so a tenant the seed cannot serve has no silent
-			// browser attempt to fall back on and reports as much.
+			// No DataDir, so there is no silent browser to fall back on.
 			_, _, err := NewSource(tsg, "", opt, nil).Token(context.Background())
 			switch {
 			case err == nil:
@@ -227,8 +222,7 @@ func TestConcurrentTenantsEachGetTheirOwnTokenFromOneSeed(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Exactly one tenant can be served by a rotating server; the rest must come
-	// back asking for a browser, not reporting a rejected grant.
+	// The rest must ask for a browser, not report a rejected grant.
 	if got := ok.Load(); got != 1 {
 		t.Errorf("%d tenants got a token from the seed, want 1 from a rotating server", got)
 	}

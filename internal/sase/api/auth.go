@@ -71,6 +71,12 @@ func MintToken(ctx context.Context, client *http.Client, id, secret, tsg string)
 }
 
 func (s *Client) mint(ctx context.Context) (time.Duration, error) {
+	s.mintMu.Lock()
+	defer s.mintMu.Unlock()
+	return s.mintLocked(ctx)
+}
+
+func (s *Client) mintLocked(ctx context.Context) (time.Duration, error) {
 	tok, ttl, err := s.src.Token(ctx)
 	if err != nil {
 		return 0, err
@@ -79,7 +85,25 @@ func (s *Client) mint(ctx context.Context) (time.Duration, error) {
 	if err := s.activate(ctx); err != nil {
 		return 0, err
 	}
+	s.setExpiry(ttl)
 	return ttl, nil
+}
+
+// So an expensive operation fails here once rather than on every element.
+func (s *Client) EnsureToken(ctx context.Context, need time.Duration) error {
+	if s.src == nil || s.TokenGood(need) {
+		return nil
+	}
+	s.mintMu.Lock()
+	defer s.mintMu.Unlock()
+	// A batch spanning tenants arrives here at once; one renewal serves all.
+	if s.TokenGood(need) {
+		return nil
+	}
+	if _, err := s.mintLocked(ctx); err != nil {
+		return fmt.Errorf("token check: %w", err)
+	}
+	return nil
 }
 
 // retryAfterFailure is how long to wait before trying again after a refresh
@@ -135,6 +159,7 @@ func (s *Client) refreshLoop(ctx context.Context, ttl, margin time.Duration) {
 				// start working on its own, so stop instead of spinning. Signing
 				// in again builds a new client with a new loop.
 				if !retryable(err) {
+					s.stopRefreshing()
 					return
 				}
 				timer.Reset(retryAfterFailure)
@@ -144,6 +169,7 @@ func (s *Client) refreshLoop(ctx context.Context, ttl, margin time.Duration) {
 			wait := ttl - margin
 			if wait <= 0 {
 				s.reportTokenError(fmt.Errorf("token lifetime %s is shorter than the refresh margin %s, so refreshing stopped", ttl, margin))
+				s.stopRefreshing()
 				return
 			}
 			timer.Reset(wait)
@@ -151,9 +177,14 @@ func (s *Client) refreshLoop(ctx context.Context, ttl, margin time.Duration) {
 	}
 }
 
+const profileURL = "https://api.sase.paloaltonetworks.com/sdwan/v2.1/api/profile"
+
 // Palo Alto requires an extra call to prime the token. Without this call, subsequent calls return 403 errors.
 func (s *Client) activate(ctx context.Context) error {
-	url := "https://api.sase.paloaltonetworks.com/sdwan/v2.1/api/profile"
+	url := profileURL
+	if s.profileBase != "" {
+		url = s.profileBase
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
