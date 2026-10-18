@@ -25,6 +25,10 @@ type Options struct {
 	DataDir string
 	// Timeout bounds an interactive sign-in, including however long the human takes.
 	Timeout time.Duration
+	// NoSandbox starts the browser with its sandbox off. Hardened Linux images
+	// forbid the unprivileged user namespaces Chrome needs and it cannot start
+	// there at all; anything that can sandbox keeps the sandbox.
+	NoSandbox bool
 
 	AuthorizeURL string
 	TokenURL     string
@@ -109,6 +113,22 @@ func loginToken(ctx context.Context, tsg string, opt Options, silent bool) (*Tok
 	return ExchangeCode(ctx, opt.httpClient(), opt.token(), code, p.verifier)
 }
 
+// cleanUpGrace is how long a browser gets to shut down before it is abandoned.
+var cleanUpGrace = 5 * time.Second
+
+// stopWaiting runs one of chromedp's cancel functions and gives up on it after
+// cleanUpGrace. Each of them ends by waiting for the browser process to be
+// reaped, on a channel nothing closes when the browser never started, so a
+// browser that died on launch would otherwise hang the sign-in for good.
+func stopWaiting(cancel func()) {
+	done := make(chan struct{})
+	go func() { cancel(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(cleanUpGrace):
+	}
+}
+
 // codeFromBrowser drives the browser through the authorization page and watches
 // the network for the redirect back to RedirectURI. That redirect is never
 // fetched for its content: it only carries the code in its query string, so
@@ -131,17 +151,20 @@ func codeFromBrowser(ctx context.Context, authorizeURL, state string, opt Option
 	if opt.DataDir != "" {
 		allocOpts = append(allocOpts, chromedp.UserDataDir(opt.DataDir))
 	}
+	if opt.NoSandbox {
+		allocOpts = append(allocOpts, chromedp.NoSandbox)
+	}
 
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, allocOpts...)
-	defer cancelAlloc()
+	defer stopWaiting(cancelAlloc)
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	defer cancelBrowser()
+	defer stopWaiting(cancelBrowser)
 	// Close the profile cleanly so a following attempt can reuse the data dir.
-	defer func() {
+	defer stopWaiting(func() {
 		shutdown, stop := context.WithTimeout(context.WithoutCancel(browserCtx), 5*time.Second)
 		defer stop()
 		chromedp.Cancel(shutdown)
-	}()
+	})
 
 	events := chromedp.Events(browserCtx, network.RequestWillBeSent)
 

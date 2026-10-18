@@ -13,7 +13,9 @@ import (
 )
 
 // findChrome locates a browser for the integration tests, which are skipped
-// when the machine has none.
+// when the machine has none. The tests run it without its sandbox: they drive
+// a throwaway profile against a fake server, and CI images forbid the user
+// namespaces Chrome would need.
 func findChrome(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
@@ -57,6 +59,7 @@ func TestLoginCapturesCodeFromRedirect(t *testing.T) {
 
 	opt := Options{
 		Chrome:       chrome,
+		NoSandbox:    true,
 		AuthorizeURL: srv.URL + "/authorize",
 		TokenURL:     srv.URL + "/token",
 		Client:       srv.Client(),
@@ -95,6 +98,7 @@ func TestLoginRejectsMismatchedState(t *testing.T) {
 
 	_, err := login(ctx, "123", Options{
 		Chrome:       chrome,
+		NoSandbox:    true,
 		AuthorizeURL: srv.URL + "/authorize",
 		TokenURL:     srv.URL + "/token",
 		Client:       srv.Client(),
@@ -119,6 +123,7 @@ func TestLoginSurfacesAuthorizationServerError(t *testing.T) {
 
 	_, err := login(ctx, "123", Options{
 		Chrome:       chrome,
+		NoSandbox:    true,
 		AuthorizeURL: srv.URL + "/authorize",
 		TokenURL:     srv.URL + "/token",
 		Client:       srv.Client(),
@@ -174,6 +179,7 @@ func TestSignInSurvivesRestart(t *testing.T) {
 
 	first := NewSource("1984021017", "", Options{
 		Chrome:       chrome,
+		NoSandbox:    true,
 		DataDir:      profile,
 		AuthorizeURL: srv.URL + "/authorize",
 		TokenURL:     srv.URL + "/token",
@@ -259,6 +265,7 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 	profile := t.TempDir()
 	opt := Options{
 		Chrome:       chrome,
+		NoSandbox:    true,
 		DataDir:      profile,
 		AuthorizeURL: srv.URL + "/authorize",
 		TokenURL:     srv.URL + "/token",
@@ -311,5 +318,25 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 	}
 	if !strings.Contains(scopes[2], "tsg_id:1538107912") {
 		t.Errorf("third scope = %q, want the other tenant", scopes[2])
+	}
+}
+
+func TestCleanUpDoesNotWaitForABrowserThatWillNeverExit(t *testing.T) {
+	// chromedp's cancel functions end by waiting for the browser process on a
+	// channel that stays open when the browser never started. Without a bound,
+	// a failed launch wedges the sign-in until the caller is killed.
+	defer func(d time.Duration) { cleanUpGrace = d }(cleanUpGrace)
+	cleanUpGrace = 50 * time.Millisecond
+
+	done := make(chan struct{})
+	go func() {
+		stopWaiting(func() { <-make(chan struct{}) })
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stopWaiting() never returned for a cancel that blocks forever")
 	}
 }
