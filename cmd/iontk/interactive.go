@@ -18,7 +18,12 @@ func interactiveCLI(ctx context.Context, client *api.Client, verbose bool, eid s
 	}
 	fmt.Fprintf(os.Stderr, "%s, %s %s %s connected=%v\n", el.Name, el.HWID, el.Model, el.Software, el.Connected)
 
-	conn, err := client.DialToolkit(ctx, eid)
+	cols, rows, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || cols <= 0 || rows <= 0 {
+		cols, rows = 200, 24
+	}
+
+	conn, err := client.DialToolkit(ctx, eid, cols, rows)
 	if err != nil {
 		return fmt.Errorf("element %s: dial: %w", eid, err)
 	}

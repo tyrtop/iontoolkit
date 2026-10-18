@@ -40,3 +40,30 @@ func loadElements(path string) ([]string, error) {
 
 	return elements, nil
 }
+
+func gatherElements(element, path string) ([]string, error) {
+	var elements []string
+	if element != "" {
+		elements = append(elements, element)
+	}
+	if path != "" {
+		loaded, err := loadElements(path)
+		if err != nil {
+			return nil, err
+		}
+		elements = append(elements, loaded...)
+	}
+	return elements, nil
+}
+
+func splitCommands(raw []string) []string {
+	var commands []string
+	for _, entry := range raw {
+		for _, c := range strings.Split(entry, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				commands = append(commands, c)
+			}
+		}
+	}
+	return commands
+}

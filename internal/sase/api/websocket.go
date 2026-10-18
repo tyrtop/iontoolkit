@@ -8,8 +8,8 @@ import (
 	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
-func (s *Client) DialToolkit(ctx context.Context, eid string) (*websocket.Conn, error) {
-	url := fmt.Sprintf("wss://api.sase.paloaltonetworks.com/sdwan/v2.0/api/elements/%s/ws/toolkitsessions?cols=200&rows=24", eid)
+func (s *Client) DialToolkit(ctx context.Context, eid string, cols, rows int) (*websocket.Conn, error) {
+	url := fmt.Sprintf("wss://api.sase.paloaltonetworks.com/sdwan/v2.0/api/elements/%s/ws/toolkitsessions?cols=%d&rows=%d", eid, cols, rows)
 	c, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
 		HTTPClient:   s.wsClient,
 		Subprotocols: []string{"Bearer", s.getToken()},
@@ -24,7 +24,7 @@ func (s *Client) DialToolkit(ctx context.Context, eid string) (*websocket.Conn, 
 }
 
 func (s *Client) ToolkitSession(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
-	conn, err := s.DialToolkit(ctx, eid)
+	conn, err := s.DialToolkit(ctx, eid, 200, 24)
 	if err != nil {
 		return nil, fmt.Errorf("dial: %w", err)
 	}
