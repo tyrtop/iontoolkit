@@ -259,6 +259,14 @@ type tuiModel struct {
 
 	sessions   *ionterm.Manager
 	connecting string
+	// Per-element dial progress, and the channel the clients report it on.
+	dialing     map[string]dialState
+	dialReports chan dialProgressMsg
+	// The element a failed connection is asking about, empty when nothing is.
+	// askRetryNo is which answer is highlighted; the zero value picks yes,
+	// since that is what someone who hit enter almost certainly meant.
+	askRetry   sessionTarget
+	askRetryNo bool
 
 	mode        pickMode
 	userCursor  int
@@ -330,6 +338,8 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 		filter:      fi,
 		cmdInput:    ci,
 		table:       newElementTable(),
+		dialing:     map[string]dialState{},
+		dialReports: newDialReports(),
 		progress:    progress.New(progress.WithDefaultBlend(), progress.WithWidth(30), progress.WithoutPercentage()),
 		resFilter:   newResultsFilter(),
 		resTable:    newResultsTable(),
@@ -369,6 +379,7 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 func newElementTable() table.Model {
 	return table.New(
 		table.WithColumns([]table.Column{
+			{Title: "", Width: 3},
 			{Title: "", Width: 3},
 			{Title: "element", Width: 26},
 			{Title: "site", Width: 22},
@@ -736,19 +747,33 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.progress, cmd = m.progress.Update(msg)
 		return m, cmd
 
+	case dialProgressMsg:
+		m.noteDial(msg)
+		m.rebuildRows()
+		return m, tea.Batch(waitForDial(m.dialReports), m.spinner.Tick)
+
 	case sessionOpenedMsg:
 		m.connecting = ""
+		m.dialDone(string(msg))
+		m.rebuildRows()
 		return m, waitForSession(m.sessions.Dirty())
 
 	case sessionErrMsg:
 		m.connecting = ""
-		if app.IsAuthFailure(string(msg)) {
+		if app.IsAuthFailure(msg.err) {
+			m.dialDone(msg.target.eid)
 			m.tokenDead = "sign-in expired"
 			return m.signInThenSessions(m.lastTargets)
 		}
-		m.status = string(msg)
-		// With no tab to show the failure against, the session page would be an
-		// empty pane; the element list carries the message better.
+		m.dialFailed(msg.target.eid, msg.err)
+		m.status = msg.err
+		m.rebuildRows()
+		// Every dial has already been retried, so the only thing left to offer
+		// is trying the whole thing again.
+		if msg.target.eid != "" {
+			m.askRetry = msg.target
+			return m, nil
+		}
 		if m.sessions.Count() == 0 && m.phase == phaseSession {
 			m.phase = phasePicking
 		}
@@ -840,7 +865,7 @@ func (m tuiModel) wantsSpinner() bool {
 		// repainted several times a second for nothing.
 		return m.cacheState == cacheUpdating
 	case phaseSession:
-		return m.connecting != ""
+		return m.connectingAny()
 	}
 	return false
 }
@@ -897,6 +922,7 @@ func (m *tuiModel) rebuildRows() {
 		}
 		row := table.Row{
 			mark,
+			m.rowStatus(el),
 			ui.Truncate(name, 26),
 			ui.Truncate(m.siteName(el), 22),
 			ui.Truncate(el.Model, 11),
@@ -910,15 +936,16 @@ func (m *tuiModel) rebuildRows() {
 
 	cols := []table.Column{
 		{Title: "", Width: 3},
+		{Title: "", Width: 3},
 		{Title: "element", Width: 26},
 		{Title: "site", Width: 22},
 		{Title: "model", Width: 11},
 		{Title: "state", Width: 9},
 	}
-	width := 78
+	width := 86
 	if tenants {
 		cols = append(cols, table.Column{Title: "tenant", Width: 20})
-		width = 100
+		width = 108
 	}
 	// Columns and rows have to agree at every moment: the table re-renders
 	// inside each setter, so changing the column count while the old rows are
@@ -984,6 +1011,10 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if key == "ctrl+c" && m.phase != phaseSession {
 		return m, tea.Quit
+	}
+
+	if m.askRetry.eid != "" {
+		return m.onRetryKey(key)
 	}
 
 	switch m.phase {
@@ -1572,6 +1603,9 @@ func (m tuiModel) View() tea.View {
 		content, cur := m.renderSession()
 		v = tea.NewView(content)
 		v.Cursor = cur
+	}
+	if m.askRetry.eid != "" {
+		v = tea.NewView(m.overlayRetry(v.Content))
 	}
 	v.Content = ui.ClipFrame(v.Content, m.height)
 	v.AltScreen = true

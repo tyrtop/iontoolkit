@@ -357,14 +357,19 @@ func TestShellModeEnterOpensOneTabPerSelection(t *testing.T) {
 
 	mm, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	got := mm.(tuiModel)
-	if got.phase != phaseSession {
-		t.Errorf("phase = %v, want phaseSession in shell mode", got.phase)
-	}
 	if cmd == nil {
 		t.Error("want dial commands")
 	}
-	if got.connecting != "2 sessions" {
-		t.Errorf("connecting = %q, want 2 sessions", got.connecting)
+	// Opening several stays on the list: jumping to whichever tab finished
+	// last hid the others, and there was nothing to watch them by.
+	if got.phase != phasePicking {
+		t.Errorf("phase = %v, want to stay on the element list", got.phase)
+	}
+	if len(got.dialing) != 2 {
+		t.Errorf("dialing = %v, want both elements marked as connecting", got.dialing)
+	}
+	if !got.connectingAny() {
+		t.Error("connectingAny() = false, want the spinner ticking while dials are in flight")
 	}
 }
 

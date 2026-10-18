@@ -25,6 +25,31 @@ type DialPolicy struct {
 
 var DefaultDialPolicy = DialPolicy{Attempts: 3, Timeout: 10 * time.Second, Backoff: time.Second}
 
+// DialAttempt is one try, reported as it begins. Err is what the previous try
+// failed with, so a caller can show both which attempt is running and why the
+// last one did not take.
+type DialAttempt struct {
+	ElementID string
+	Attempt   int
+	Of        int
+	Err       error
+}
+
+// SetDialReporter watches the dial without disturbing the policy. It is how a
+// UI shows a retry as it happens; dialling is otherwise silent until it either
+// works or runs out.
+func (s *Client) SetDialReporter(f func(DialAttempt)) {
+	s.dialMu.Lock()
+	s.onDial = f
+	s.dialMu.Unlock()
+}
+
+func (s *Client) dialReporter() func(DialAttempt) {
+	s.dialMu.RLock()
+	defer s.dialMu.RUnlock()
+	return s.onDial
+}
+
 func (p DialPolicy) withDefaults() DialPolicy {
 	d := DefaultDialPolicy
 	if p.Attempts > 0 {
@@ -61,8 +86,13 @@ func (s *Client) DialToolkit(ctx context.Context, eid string, cols, rows int) (*
 func (s *Client) dialURL(ctx context.Context, url, eid string) (*websocket.Conn, error) {
 	p := s.dialPolicy()
 
+	report := s.dialReporter()
+
 	var err error
 	for attempt := 1; ; attempt++ {
+		if report != nil {
+			report(DialAttempt{ElementID: eid, Attempt: attempt, Of: p.Attempts, Err: err})
+		}
 		var conn *websocket.Conn
 		conn, err = s.dialOnce(ctx, url, p.Timeout)
 		if err == nil {

@@ -36,7 +36,11 @@ func (d toolkitDialer) DialToolkit(ctx context.Context, eid string, cols, rows i
 
 type sessionDirtyMsg string
 type sessionOpenedMsg string
-type sessionErrMsg string
+
+type sessionErrMsg struct {
+	target sessionTarget
+	err    string
+}
 
 func waitForSession(ch <-chan string) tea.Cmd {
 	return func() tea.Msg {
@@ -48,10 +52,13 @@ func waitForSession(ch <-chan string) tea.Cmd {
 	}
 }
 
-func openSessionCmd(ctx context.Context, mgr *ionterm.Manager, d ionterm.Dialer, eid, name string, cols, rows int, creds ionterm.Credentials) tea.Cmd {
+func openSessionCmd(ctx context.Context, mgr *ionterm.Manager, d ionterm.Dialer, eid, name, tsg string, cols, rows int, creds ionterm.Credentials) tea.Cmd {
 	return func() tea.Msg {
 		if _, err := mgr.Open(ctx, d, eid, name, cols, rows, creds); err != nil {
-			return sessionErrMsg(err.Error())
+			return sessionErrMsg{
+				target: sessionTarget{eid: eid, name: name, tsg: tsg},
+				err:    err.Error(),
+			}
 		}
 		return sessionOpenedMsg(eid)
 	}
@@ -69,7 +76,7 @@ func (m tuiModel) sessionGeometry() (int, int) {
 }
 
 func (m tuiModel) paneSize() (int, int) {
-	return max(20, m.width), max(3, m.height-4-m.slashHeight())
+	return max(20, m.width), max(3, m.height-5-m.slashHeight())
 }
 
 func (m tuiModel) openSession(eid, name, tsg string) (tea.Model, tea.Cmd) {
@@ -90,9 +97,12 @@ func (m tuiModel) openOneSession(t sessionTarget) (tea.Model, tea.Cmd) {
 	m.connecting = t.name
 	m.status = ""
 	m.phase = phaseSession
+	reportDialsTo(c, m.dialReports)
+	m.markDialing(t.eid)
 	return m, tea.Batch(
 		m.spinner.Tick,
-		openSessionCmd(m.ctx, m.sessions, toolkitDialer{c}, t.eid, t.name, cols, rows, m.credsFor(t.tsg)),
+		waitForDial(m.dialReports),
+		openSessionCmd(m.ctx, m.sessions, toolkitDialer{c}, t.eid, t.name, t.tsg, cols, rows, m.credsFor(t.tsg)),
 	)
 }
 
@@ -127,7 +137,7 @@ func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 
 	cols, rows := m.sessionGeometry()
 
-	cmds := []tea.Cmd{m.spinner.Tick}
+	cmds := []tea.Cmd{m.spinner.Tick, waitForDial(m.dialReports)}
 	var unreachable []string
 	for _, t := range targets {
 		c := m.tenantClient(t.tsg)
@@ -135,10 +145,12 @@ func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 			unreachable = append(unreachable, t.name)
 			continue
 		}
+		reportDialsTo(c, m.dialReports)
+		m.markDialing(t.eid)
 		cmds = append(cmds, openSessionCmd(m.ctx, m.sessions, toolkitDialer{c},
-			t.eid, t.name, cols, rows, m.credsFor(t.tsg)))
+			t.eid, t.name, t.tsg, cols, rows, m.credsFor(t.tsg)))
 	}
-	if len(cmds) == 1 {
+	if len(cmds) == 2 {
 		m.status = "could not reach " + strings.Join(unreachable, ", ")
 		return m, nil
 	}
@@ -146,11 +158,10 @@ func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 		m.status = "skipped " + strings.Join(unreachable, ", ") + ": tenant unreachable"
 	}
 
-	m.connecting = fmt.Sprintf("%d sessions", len(targets)-len(unreachable))
-	if len(targets) == 1 {
-		m.connecting = targets[0].name
-	}
-	m.phase = phaseSession
+	// Opening several at once stays on the list: the tabs fill in behind, and
+	// jumping to whichever finished last hid the rest of them.
+	m.connecting = ""
+	m.rebuildRows()
 	return m, tea.Batch(cmds...)
 }
 
@@ -308,6 +319,7 @@ func (m tuiModel) tabBar() string {
 func (m tuiModel) renderSession() (string, *tea.Cursor) {
 	var b strings.Builder
 	b.WriteString(m.tabBar() + "\n")
+	b.WriteString(m.connectBar() + "\n")
 
 	s := m.sessions.Active()
 	if s == nil {
@@ -346,7 +358,7 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 	}
 
 	b.WriteString(ui.Footer(m.status, hint))
-	return b.String(), tea.NewCursor(view.CursorX, view.CursorY+1)
+	return b.String(), tea.NewCursor(view.CursorX, view.CursorY+2)
 }
 
 func (m tuiModel) viewSession() string {

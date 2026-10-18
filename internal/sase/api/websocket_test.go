@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -142,5 +143,55 @@ func TestRetryableDial(t *testing.T) {
 				t.Errorf("retryableDial(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDialReporterSeesEachAttemptAsItStarts(t *testing.T) {
+	srv, _ := wsServer(t, http.StatusBadGateway, 0)
+	c := testClient(t, DialPolicy{Attempts: 3, Timeout: time.Second, Backoff: time.Millisecond})
+
+	var mu sync.Mutex
+	var seen []DialAttempt
+	c.SetDialReporter(func(a DialAttempt) {
+		mu.Lock()
+		seen = append(seen, a)
+		mu.Unlock()
+	})
+
+	_, _ = c.dialURL(context.Background(), strings.Replace(srv.URL, "http://", "ws://", 1), "e1")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 3 {
+		t.Fatalf("%d attempts reported, want 3", len(seen))
+	}
+	// Reported as each begins, so a UI can show the retry while it runs rather
+	// than only once dialling has given up.
+	for i, a := range seen {
+		if a.Attempt != i+1 || a.Of != 3 {
+			t.Errorf("attempt %d reported as %d/%d, want %d/3", i, a.Attempt, a.Of, i+1)
+		}
+		if a.ElementID != "e1" {
+			t.Errorf("attempt %d element = %q, want %q", i, a.ElementID, "e1")
+		}
+	}
+	if seen[0].Err != nil {
+		t.Errorf("first attempt carried err %v, want nil", seen[0].Err)
+	}
+	// Each later attempt carries why the one before it did not take.
+	for i, a := range seen[1:] {
+		if a.Err == nil {
+			t.Errorf("attempt %d carried no previous error", i+2)
+		}
+	}
+}
+
+func TestDialWithoutAReporterStillWorks(t *testing.T) {
+	srv, tries := wsServer(t, http.StatusBadGateway, 2)
+	c := testClient(t, DialPolicy{Attempts: 3, Timeout: time.Second, Backoff: time.Millisecond})
+
+	_, _ = c.dialURL(context.Background(), strings.Replace(srv.URL, "http://", "ws://", 1), "e1")
+	if got := tries.Load(); got != 2 {
+		t.Errorf("%d attempts, want the dial unaffected by having no reporter", got)
 	}
 }
