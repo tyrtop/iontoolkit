@@ -255,6 +255,17 @@ func (s *Session) markHung() {
 	s.markDirty()
 }
 
+// Answered reports whether the device has sent anything at all. The socket
+// coming up proves nothing about the appliance: the SASE side accepts a
+// toolkit websocket for an element that is not there, and such a session sits
+// mute until the handshake deadline fails it. The first byte is the only
+// evidence there is an ION on the other end.
+func (s *Session) Answered() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gotData
+}
+
 // Hung is a session whose connection stopped answering pings.
 func (s *Session) Hung() bool {
 	s.mu.Lock()

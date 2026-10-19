@@ -77,7 +77,7 @@ func TestRichDataModeLoadsEveryViewOntoOnePage(t *testing.T) {
 		"Overview", "Device", "ion 1200", "SPOKE", // the record
 		"Controller", "Rebooted", "2026-10-01", // status, through the utc helper
 		"HA", "Cluster", // gated on the element being clustered, which it is
-		"Interfaces", "PORT", "STATE", "CIRCUIT", // the per-row fetch
+		"Interfaces", "PORT", "STATE", "MAC", "CIRCUIT", // the per-row fetch
 		"Circuits", "LABEL", "NETWORK", "ISP 1", // the circuits view
 	} {
 		if !strings.Contains(page, want) {
@@ -98,6 +98,34 @@ func TestRichDataModeLoadsEveryViewOntoOnePage(t *testing.T) {
 		if pane.err != "" {
 			t.Errorf("view %s failed: %s", pane.view, pane.err)
 		}
+	}
+}
+
+// The MAC comes off the interface status, since the interface record carries
+// the field and leaves it null on every real element.
+func TestInterfacesShowTheMACFromTheStatus(t *testing.T) {
+	m, set := fixtureTUIWith(t, haFixtureYAML)
+	m.phase = phasePicking
+	m.mode = modeData
+	m.rebuildRows()
+
+	el := set.Tenants[0].Elements[0]
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	m = runDataLoads(t, next.(tuiModel), cmd)
+
+	port := tableRow(t, paneFor(t, m.data[0], "Interfaces"), "1")
+	joined := strings.Join(port, " | ")
+	mac := ""
+	for _, cell := range port {
+		if strings.Count(cell, ":") == 5 {
+			mac = cell
+		}
+	}
+	if mac == "" {
+		t.Fatalf("no MAC on the port row: %s", joined)
+	}
+	if len(mac) != len("ec:b9:07:09:cb:e9") {
+		t.Errorf("MAC = %q, want the shape a real status answers with", mac)
 	}
 }
 
@@ -317,7 +345,7 @@ func TestDataTabsJoinTheTabRing(t *testing.T) {
 	}
 
 	bar := plain(m.tabBar())
-	for _, want := range []string{"1 elements", "2 S0100-RTR-01"} {
+	for _, want := range []string{"elements", "S0100-RTR-01 · data"} {
 		if !strings.Contains(bar, want) {
 			t.Errorf("tab bar missing %q: %q", want, bar)
 		}

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -754,5 +755,134 @@ func TestArrowsStillMoveTheListWhileSearching(t *testing.T) {
 	}
 	if got := m.filter.Value(); got != "1200" {
 		t.Errorf("filter.Value() = %q, want the query intact", got)
+	}
+}
+
+// Deleting the last character of a query leaves the filter. An empty query
+// with the cursor still in it is a list where j and k type letters.
+func TestDeletingTheQueryLeavesTheFilter(t *testing.T) {
+	m := pickModel(t)
+	m.phase = phasePicking
+
+	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
+	m = typeString(t, next.(tuiModel), "s0")
+	if !m.filterOn {
+		t.Fatal("/ did not open the filter")
+	}
+
+	for range "s0" {
+		next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+		m = next.(tuiModel)
+	}
+	if m.filterOn {
+		t.Error("the filter is still open with an empty query")
+	}
+	if m.filter.Value() != "" {
+		t.Errorf("query = %q, want it cleared", m.filter.Value())
+	}
+	// The whole list is back, and the keys move the cursor again.
+	if len(m.matches) != len(m.all) {
+		t.Errorf("%d matches, want the whole list of %d", len(m.matches), len(m.all))
+	}
+	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+	if got := next.(tuiModel).table.Cursor(); got != 1 {
+		t.Errorf("cursor = %d after j, want the key to move the list again", got)
+	}
+}
+
+// The same rule on the macro page, which has a filter of its own.
+func TestDeletingTheMacroQueryLeavesTheFilter(t *testing.T) {
+	m := macroModel(t)
+
+	next, _ := m.onMacroKey(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}), "/")
+	m = typeString(t, next.(tuiModel), "ha")
+	if !m.macroFilterOn || len(m.macroRows()) != 1 {
+		t.Fatalf("filter on = %v, rows = %d, want a narrowed list", m.macroFilterOn, len(m.macroRows()))
+	}
+
+	for range "ha" {
+		next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+		m = next.(tuiModel)
+	}
+	if m.macroFilterOn {
+		t.Error("the macro filter is still open with an empty query")
+	}
+	if len(m.macroRows()) != 2 {
+		t.Errorf("%d rows, want every macro back", len(m.macroRows()))
+	}
+}
+
+// The widget's own MoveUp scrolls its viewport away from the cursor, so a held
+// k used to walk the highlight off the top of the window and the list stopped
+// appearing to move. Both directions go through moveCursorTo now.
+func TestHoldingKWalksBackUpTheList(t *testing.T) {
+	m := pickModel(t)
+	m.phase = phasePicking
+	m.height = 12
+	// More rows than the window, which is when the viewport arithmetic
+	// mattered.
+	els := make([]api.Element, 40)
+	for i := range els {
+		els[i] = api.Element{ID: fmt.Sprint(i), Name: fmt.Sprintf("S%04d-RTR-01", i), Connected: true}
+	}
+	setTestElements(&m, els)
+
+	for i := 0; i < 30; i++ {
+		next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+		m = next.(tuiModel)
+	}
+	if got := m.table.Cursor(); got != 30 {
+		t.Fatalf("cursor = %d after 30 j, want 30", got)
+	}
+	if !strings.Contains(plain(m.table.View()), m.all[30].Name) {
+		t.Errorf("the row the cursor is on is not in the window:\n%s", plain(m.table.View()))
+	}
+
+	// Back up one at a time: the cursor and the window move together the
+	// whole way.
+	for i := 29; i >= 0; i-- {
+		next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
+		m = next.(tuiModel)
+		if got := m.table.Cursor(); got != i {
+			t.Fatalf("cursor = %d after k, want %d", got, i)
+		}
+		if view := plain(m.table.View()); !strings.Contains(view, m.all[i].Name) {
+			t.Fatalf("row %d is highlighted but not in the window:\n%s", i, view)
+		}
+	}
+}
+
+// alt+j and alt+k jump by the page step, like alt+↓ and alt+↑.
+func TestAltJAndAltKJumpTheList(t *testing.T) {
+	m := pickModel(t)
+	m.cfg.PageStep = 2
+	m.table.SetCursor(0)
+
+	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Mod: tea.ModAlt}))
+	m = next.(tuiModel)
+	if got := m.table.Cursor(); got != 2 {
+		t.Errorf("cursor = %d after alt+j with a step of 2, want 2", got)
+	}
+	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Mod: tea.ModAlt}))
+	if got := next.(tuiModel).table.Cursor(); got != 0 {
+		t.Errorf("cursor = %d after alt+k, want back at 0", got)
+	}
+}
+
+// alt+h and alt+l walk the tab ring, like alt+← and alt+→.
+func TestAltHAndAltLSwitchTabs(t *testing.T) {
+	m := pickModel(t)
+	m.data = []dataTab{{eid: "1", name: "S0100-RTR-01", tsg: "1"}}
+	m.dataActive = 0
+	m.phase = phasePicking
+
+	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'l', Mod: tea.ModAlt}))
+	m = next.(tuiModel)
+	if m.phase != phaseData {
+		t.Fatalf("phase = %v after alt+l, want the data tab", m.phase)
+	}
+	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'h', Mod: tea.ModAlt}))
+	if got := next.(tuiModel).phase; got != phasePicking {
+		t.Errorf("phase = %v after alt+h, want back on the list", got)
 	}
 }

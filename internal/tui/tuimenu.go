@@ -21,6 +21,7 @@ const (
 	actSignIn
 	actRefreshToken
 	actSwitch
+	actMacros
 	actSettings
 	actQuit
 )
@@ -57,6 +58,7 @@ func (m tuiModel) menuEntries() []menuEntry {
 	}
 
 	e = append(e,
+		menuEntry{"macros", actMacros},
 		menuEntry{"Settings", actSettings},
 		menuEntry{"Quit", actQuit},
 	)
@@ -135,6 +137,16 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 		}
 		switch entries[m.menuCursor].action {
 		case actElements:
+			// Macro mode is only reachable by picking a macro, so the list
+			// opened from here is never in it: it would otherwise still be
+			// holding one from earlier in the session.
+			if m.mode == modeMacro {
+				m.mode = modeShell
+				if saved, ok := parseMode(m.cfg.DefaultMode); ok {
+					m.mode = saved
+				}
+			}
+			m.armedMacro = ""
 			return m.startContinue()
 		case actSwitch:
 			m.switchCursor = 0
@@ -153,6 +165,8 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.startDiscover()
+		case actMacros:
+			return m.openMacros()
 		case actSettings:
 			m.setCursor = 0
 			m.phase = phaseSettings
@@ -332,6 +346,12 @@ func (m tuiModel) onFormKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		return m, nil
 
 	case "tab", "down":
+		// A macro is as many commands as it takes, so tab on the last line
+		// adds the next one. Only with something on that line: growing on
+		// every tab would leave empty lines behind to walk through.
+		if m.formKind == formMacro && m.formCursor == len(m.form)-1 && m.formValue(m.formCursor) != "" {
+			return m.addMacroCommand()
+		}
 		m.form[m.formCursor].input.Blur()
 		m.formCursor = (m.formCursor + 1) % len(m.form)
 		return m, m.form[m.formCursor].input.Focus()
@@ -343,6 +363,14 @@ func (m tuiModel) onFormKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 
 	case "enter":
 		return m.submitForm()
+
+	case "backspace":
+		// On an empty command line, the key that would have emptied it takes
+		// the line out instead. The last one stays: the form always has
+		// somewhere to type.
+		if m.formKind == formMacro && m.formCursor >= 1 && len(m.form) > 2 && m.formValue(m.formCursor) == "" {
+			return m.removeMacroCommand()
+		}
 	}
 
 	var cmd tea.Cmd
@@ -551,6 +579,12 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 		m.phase = m.formReturn
 		return m, nil
 
+	case formFavourite:
+		return m.submitFavourite()
+
+	case formMacro:
+		return m.submitMacro()
+
 	case formGeometry:
 		n, err := strconv.Atoi(m.formValue(0))
 		if err != nil {
@@ -751,12 +785,22 @@ func (m tuiModel) viewForm() string {
 		b.WriteString("  " + label + f.input.View() + "\n")
 	}
 
+	// The macro form grows, and the row that says so is the only thing that
+	// tells you tab will add one.
+	if m.formKind == formMacro {
+		b.WriteString("  " + strings.Repeat(" ", 16) + ui.StyleGhost.Render("+ another command") + "\n")
+	}
+
 	if w := m.plaintextWarning(); w != "" {
 		b.WriteString("\n  " + w + "\n")
 	}
 
 	b.WriteString("\n")
-	b.WriteString(ui.Footer(m.status, "tab next · enter save · esc cancel"))
+	hint := "tab next · enter save · esc cancel"
+	if m.formKind == formMacro {
+		hint = "tab next/add · backspace on an empty line removes it · enter save · esc cancel"
+	}
+	b.WriteString(ui.Footer(m.status, hint))
 	return b.String()
 }
 

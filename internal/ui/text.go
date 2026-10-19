@@ -16,6 +16,10 @@ func Label(s string) string { return StyleDim.Render(fmt.Sprintf("%-*s", LabelWi
 // Width is the printed width of a string, ignoring its escape codes.
 func Width(s string) int { return ansi.StringWidth(s) }
 
+// Plain is text with its styling taken off, for a line that is about to be
+// restyled: wrapping a highlight around escapes ends it at the inner reset.
+func Plain(s string) string { return ansi.Strip(s) }
+
 func Truncate(s string, n int) string {
 	if n <= 0 {
 		return ""

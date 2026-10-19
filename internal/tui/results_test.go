@@ -95,23 +95,61 @@ func TestResultsEnterExpandsInlineNotANewTab(t *testing.T) {
 	}
 }
 
-func TestResultsScrollingDownClosesTheExpansion(t *testing.T) {
+// An open result scrolls on the keys the list moves on, with the highlight on
+// the line it is scrolled to. It used to close on the first ↑↓, which made
+// reading a screen of output a matter of pgdn and hope.
+func TestAnOpenResultScrollsWithAHighlight(t *testing.T) {
 	m := resultsModel(t)
+	m.height = 20
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	open := mm.(tuiModel)
 	if !open.resOpen {
 		t.Fatal("expected an open row")
 	}
+	if open.resLine != 0 {
+		t.Errorf("resLine = %d, want the top of the output", open.resLine)
+	}
 
 	mm, _ = open.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
 	moved := mm.(tuiModel)
-
-	if moved.resOpen {
-		t.Error("moving down should close the expansion")
+	if !moved.resOpen {
+		t.Error("↓ closed the output instead of scrolling it")
 	}
-	if moved.resTable.Cursor() != 1 {
-		t.Errorf("cursor = %d, want it to have moved to 1", moved.resTable.Cursor())
+	if moved.resLine != 1 {
+		t.Errorf("resLine = %d, want the highlight moved down one", moved.resLine)
+	}
+	if moved.resTable.Cursor() != 0 {
+		t.Errorf("cursor = %d, want the list left where it was", moved.resTable.Cursor())
+	}
+	// j and k do the same, and the highlight is drawn on the line.
+	mm, _ = moved.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+	moved = mm.(tuiModel)
+	if moved.resLine != 2 {
+		t.Errorf("resLine = %d after j, want 2", moved.resLine)
+	}
+	mm, _ = moved.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
+	moved = mm.(tuiModel)
+	if moved.resLine != 1 {
+		t.Errorf("resLine = %d after k, want it back at 1", moved.resLine)
+	}
+	if got := moved.viewResults(); !strings.Contains(got, ui.StyleRow.Render("")[:4]) {
+		t.Error("no highlight anywhere in the open output")
+	}
+	// The footer says where in the output the highlight is.
+	if got := plain(moved.viewResults()); !strings.Contains(got, "line 2 of") {
+		t.Errorf("the footer does not say where the highlight is:\n%s", got)
+	}
+
+	// Closing hands the keys back to the list.
+	mm, _ = moved.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	closed := mm.(tuiModel)
+	if closed.resOpen {
+		t.Fatal("esc did not close the output")
+	}
+	mm, _ = closed.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	if got := mm.(tuiModel).resTable.Cursor(); got != 1 {
+		t.Errorf("cursor = %d once the output is closed, want it to move", got)
 	}
 }
 

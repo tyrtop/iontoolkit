@@ -143,9 +143,10 @@ func TestSessionEscapeHatches(t *testing.T) {
 func TestTabBarAlwaysHasElementsTab(t *testing.T) {
 	m := pickModel(t)
 
+	// No number on it: alt+N is a favourite command now, not a tab.
 	got := plain(m.tabBar())
-	if !strings.Contains(got, "1 elements") {
-		t.Errorf("tabBar = %q, want an elements tab", got)
+	if !strings.Contains(got, "elements") || strings.Contains(got, "1 elements") {
+		t.Errorf("tabBar = %q, want an unnumbered elements tab", got)
 	}
 	if m.currentTab() != 0 {
 		t.Errorf("currentTab() = %d in the picker, want 0", m.currentTab())
@@ -174,7 +175,7 @@ func TestNilManagerBehavesAsEmpty(t *testing.T) {
 	if m.tabCount() != 1 {
 		t.Errorf("tabCount() = %d with a nil manager, want 1", m.tabCount())
 	}
-	if got := plain(m.tabBar()); !strings.Contains(got, "1 elements") {
+	if got := plain(m.tabBar()); !strings.Contains(got, "elements") {
 		t.Errorf("tabBar = %q", got)
 	}
 	m.sessions.CloseAll()
@@ -685,10 +686,20 @@ type recConn struct {
 	mu      sync.Mutex
 	written []byte
 	done    chan struct{}
-	once    sync.Once
+	// data is what the device says. A socket with nothing on it is a real
+	// state -- the SASE side accepts one for an element that is not there --
+	// so a test has to be able to leave it mute.
+	data chan []byte
+	once sync.Once
 }
 
-func newRecConn() *recConn { return &recConn{done: make(chan struct{})} }
+func newRecConn() *recConn {
+	return &recConn{done: make(chan struct{}), data: make(chan []byte, 8)}
+}
+
+// feed is the device speaking, which is what tells a session there is an ION
+// on the other end.
+func (c *recConn) feed(s string) { c.data <- []byte(s) }
 
 func (c *recConn) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
 	select {
@@ -696,6 +707,8 @@ func (c *recConn) Read(ctx context.Context) (websocket.MessageType, []byte, erro
 		return 0, nil, ctx.Err()
 	case <-c.done:
 		return 0, nil, context.Canceled
+	case b := <-c.data:
+		return websocket.MessageText, b, nil
 	}
 }
 
@@ -1396,12 +1409,40 @@ func TestAltROnAHungSessionOpensAFreshOne(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("alt+r produced no command, want it to dial the element again")
 	}
-	// The hung tab goes: a redial is a new CLI session, not a resumption.
-	if s := got.sessions.Find("1"); s == hung {
-		t.Error("the hung session was kept, want it replaced")
+	// The hung tab stays while the dial runs, and says so: it is the only
+	// record of what the session said, and a tab that vanishes on the
+	// keypress makes a 30-second dial look like nothing happened.
+	if s := got.sessions.Find("1"); s != hung {
+		t.Error("the hung tab went before its replacement was up")
+	}
+	if got.redialing != "1" {
+		t.Errorf("redialing = %q, want the element being dialled", got.redialing)
+	}
+	if !strings.Contains(got.status, "redialling") {
+		t.Errorf("status = %q, want it to say a dial is running", got.status)
+	}
+	// The footer says the redial rather than re-offering the key that started
+	// it, and the bar does not either.
+	pane := plain(got.viewSession())
+	if !strings.Contains(pane, "redialling e1") || strings.Contains(pane, "alt+r retry") {
+		t.Errorf("the pane still offers the key it is already running:\n%s", pane)
+	}
+	if bar := plain(got.connectBar()); !strings.Contains(bar, "redial") {
+		t.Errorf("connect bar = %q, want the redial on it", bar)
 	}
 	if got.phase != phaseSession {
 		t.Errorf("phase = %v, want phaseSession while the new session connects", got.phase)
+	}
+
+	// The swap happens when the new session is actually up, which is the
+	// message the runtime delivers.
+	next, _ := got.Update(sessionOpenedMsg("1"))
+	after := next.(tuiModel)
+	if after.redialing != "" {
+		t.Errorf("redialing = %q once the session opened, want it cleared", after.redialing)
+	}
+	if s := after.sessions.Find("1"); s == hung {
+		t.Error("the hung tab survived the swap")
 	}
 }
 
@@ -1419,8 +1460,144 @@ func TestAltRIsIgnoredWhileASessionIsHealthy(t *testing.T) {
 	if got.sessions.Count() != 1 {
 		t.Fatalf("Count() = %d, want the session untouched", got.sessions.Count())
 	}
-	// alt+r reaches the shell as an ordinary keystroke when nothing is wrong.
+	// The key is swallowed rather than sent on: the footer offers it, so the
+	// one thing it must not do is reach the device as an escape sequence.
 	if got.sessions.Find("1") == nil {
 		t.Error("the healthy session was replaced by alt+r")
+	}
+}
+
+// alt+r used to be gated on a session having gone quiet, so a tab whose
+// connection tore -- the usual way to lose one -- ate the key and did
+// nothing at all.
+func TestAltRRedialsAFailedSession(t *testing.T) {
+	m, set := fixtureTUI(t)
+	m.phase = phaseSession
+	t.Cleanup(m.sessions.CloseAll)
+
+	el := set.Tenants[0].Elements[0]
+	next, cmd := m.openSession(el.ID, el.Name, m.tenant.TSGID)
+	m = next.(tuiModel)
+	runCmd(t, cmd)
+	waitForTUI(t, func() bool { return m.sessions.Find(el.ID) != nil })
+
+	s := m.sessions.Find(el.ID)
+	waitForTUI(t, func() bool { return strings.Contains(s.Render(), el.Name+"#") })
+
+	// Kill it the way the device does, by being told to exit: the tab is dead
+	// and the only way back to that ION is a new session.
+	s.SendText("exit\r")
+	waitForTUI(t, func() bool { return s.Ended() || s.Err() != nil })
+	m.sessions.Select(m.sessions.IndexOf(el.ID))
+
+	next, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
+	m = next.(tuiModel)
+	if cmd == nil {
+		t.Fatal("alt+r on a dead session queued nothing")
+	}
+	// While it dials, the dead tab is still there to read and the pane says
+	// what is going on.
+	if m.sessions.Find(el.ID) != s {
+		t.Error("the dead tab went before its replacement was up")
+	}
+	if got := plain(m.viewSession()); !strings.Contains(got, "redial") {
+		t.Errorf("nothing on screen says a redial is running:\n%s", got)
+	}
+
+	m = deliverSessionOpened(t, m, cmd)
+	if m.sessions.Count() != 1 {
+		t.Fatalf("%d tabs after the redial, want the dead one replaced", m.sessions.Count())
+	}
+	again := m.sessions.Find(el.ID)
+	if again == nil || again == s {
+		t.Fatal("the live session did not take the dead tab's place")
+	}
+	waitForTUI(t, func() bool { return strings.Contains(again.Render(), el.Name+"#") })
+}
+
+// openSessionCmd reports through the runtime; a test has to deliver that
+// message itself, and it is what finishes a redial.
+func deliverSessionOpened(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
+	t.Helper()
+	msgs := make(chan tea.Msg, 8)
+	cmds := []tea.Cmd{cmd}
+	if batch, ok := cmd().(tea.BatchMsg); ok {
+		cmds = batch
+	}
+	for _, c := range cmds {
+		go func(c tea.Cmd) {
+			if msg := c(); msg != nil {
+				select {
+				case msgs <- msg:
+				default:
+				}
+			}
+		}(c)
+	}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case msg := <-msgs:
+			if opened, ok := msg.(sessionOpenedMsg); ok {
+				next, _ := m.Update(opened)
+				return next.(tuiModel)
+			}
+		case <-deadline:
+			t.Fatal("no session opened")
+		}
+	}
+}
+
+// A redial that cannot start must not also take away the tab that was there
+// to read: it is the only record of what the session said.
+func TestAFailedRedialKeepsTheTab(t *testing.T) {
+	m := pickModel(t) // no client in the pool, so nothing can be dialled
+	m.phase = phaseSession
+	t.Cleanup(m.sessions.CloseAll)
+
+	conn := newRecConn()
+	s, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close(websocket.StatusAbnormalClosure, "torn")
+	waitForTUI(t, func() bool { return s.Err() != nil })
+
+	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
+	after := next.(tuiModel)
+	if cmd != nil {
+		t.Fatal("a redial started with no client to dial with")
+	}
+	if after.sessions.Count() != 1 {
+		t.Errorf("%d tabs after a redial that could not start, want the dead one kept", after.sessions.Count())
+	}
+	if !strings.Contains(after.status, "could not reach") {
+		t.Errorf("status = %q, want it to say why nothing happened", after.status)
+	}
+}
+
+// alt+r on a session that is still answering says so rather than sending the
+// chord to the device, which the footer's own hint would otherwise do.
+func TestAltROnALiveSessionSaysSo(t *testing.T) {
+	m := pickModel(t)
+	m.phase = phaseSession
+	t.Cleanup(m.sessions.CloseAll)
+
+	conn := newRecConn()
+	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
+		t.Fatal(err)
+	}
+
+	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
+	after := next.(tuiModel)
+	if cmd != nil || after.sessions.Count() != 1 {
+		t.Error("alt+r redialled a session that was still answering")
+	}
+	if !strings.Contains(after.status, "still answering") {
+		t.Errorf("status = %q, want it to say why nothing happened", after.status)
+	}
+	if strings.Contains(conn.sent(), "\x1b") {
+		t.Errorf("alt+r reached the device as an escape sequence: %q", conn.sent())
 	}
 }

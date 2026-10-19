@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // savedStore is a store with something in every place a reset has to reach.
@@ -33,6 +34,14 @@ func savedStore(t *testing.T) (*Store, *Config) {
 		}
 	}
 	if err := st.SaveCache(&ElementCache{TSGID: "111"}); err != nil {
+		t.Fatal(err)
+	}
+	cmds := &CommandStore{}
+	cmds.Record("dump device status", "ion 1200", time.Now())
+	if err := cmds.SetFavourite(1, "dump interface status all", "ion 1200"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveCommands(cmds); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.SaveTenantCache(&TenantCache{Account: "someone"}); err != nil {
@@ -77,6 +86,9 @@ func TestResetLeavesNothingBehind(t *testing.T) {
 		st.configPath(),
 		st.tenantsPath(),
 		st.cacheDir(),
+		// History and favourites name the commands someone runs on their
+		// fleet, so a factory reset takes them too.
+		st.commandsPath(),
 		// Keeping this would leave the identity provider's session cookie, so
 		// the reset would not have signed anyone out.
 		st.BrowserDir(),

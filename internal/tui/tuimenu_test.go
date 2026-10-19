@@ -20,9 +20,9 @@ var testANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 func plain(s string) string { return testANSI.ReplaceAllString(s, "") }
 
 func TestMenuEntries(t *testing.T) {
-	// The menu is now the same four entries whatever is configured: the element
-	// list, the way in to a browser account, settings, quit.
-	want := []string{"elements", "sign in with browser", "Settings", "Quit"}
+	// The menu is the same entries whatever is configured: the element list,
+	// the way in to a browser account, macros, settings, quit.
+	want := []string{"elements", "sign in with browser", "macros", "Settings", "Quit"}
 
 	cases := map[string]struct {
 		cfg       *config.Config

@@ -543,7 +543,7 @@ func (m tuiModel) viewData() string {
 		}
 		status = scrolled + status
 	}
-	hint := "alt+↑↓ next heading · ↑↓ scroll · r refresh · c CLI check · alt+←/→ tab · alt+k close · ctrl+] elements"
+	hint := "alt+↑↓ next heading · ↑↓ scroll · r refresh · c CLI check · alt+←→/hl tab · alt+k close · ctrl+] elements"
 	width := max(10, m.width-1)
 	b.WriteString(ui.Footer(ui.Truncate(status, width), ui.Truncate(hint, width)))
 	return b.String()

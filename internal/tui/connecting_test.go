@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/coder/websocket"
 
 	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/sase/api"
@@ -380,5 +382,100 @@ func TestThePromptSaysWhatThePortalThinks(t *testing.T) {
 	// the line that says whether retrying is worth anything.
 	if got := plain(m.retryPrompt()); !strings.Contains(got, "offline in the portal") {
 		t.Errorf("prompt = %q, want it to say what the portal thinks", got)
+	}
+}
+
+// "connected · offline" read as a contradiction when it is two facts about
+// different things: whether the dial came up, and what the portal last said
+// about the appliance. Both halves say which they are about now.
+func TestTheConnectBarNamesBothHalves(t *testing.T) {
+	tests := []struct {
+		name      string
+		connected bool
+		dialing   bool
+		kill      bool
+		// answered is the device having sent something, which is the only
+		// evidence there is an ION on the other end of the socket.
+		answered bool
+		want     []string
+	}{
+		{
+			name:      "answering, on an ion the portal agrees about",
+			connected: true,
+			answered:  true,
+			want:      []string{"successfully dialed", "ion online"},
+		},
+		{
+			name:     "answering, on an ion the portal still calls offline",
+			answered: true,
+			want:     []string{"successfully dialed", "ion offline"},
+		},
+		{
+			// What dialling an element that is not there looks like: the SASE
+			// side gives you a socket and nothing ever comes down it.
+			name: "socket up and the ion has said nothing",
+			want: []string{"waiting for the ion", "ion offline"},
+		},
+		{
+			name:      "dialling, where the portal is the only evidence",
+			connected: true,
+			dialing:   true,
+			want:      []string{"dial 2/3", "ion online"},
+		},
+		{
+			name: "failed, where it says why a retry will not help",
+			kill: true,
+			want: []string{"failed", "ion offline", "alt+r retry"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := pickModel(t)
+			setTestElements(&m, []api.Element{
+				{ID: "1", Name: "S0100-RTR-01", Model: "ion 1200", Connected: tt.connected},
+			})
+			m.phase = phaseSession
+			t.Cleanup(m.sessions.CloseAll)
+
+			conn := newRecConn()
+			s, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.answered {
+				conn.feed("S0100-RTR-01# ")
+				waitForTUI(t, s.Answered)
+			}
+			if tt.dialing {
+				m.dialing = map[string]dialState{"1": {attempt: 2, of: 3}}
+			}
+			if tt.kill {
+				conn.Close(websocket.StatusAbnormalClosure, "torn")
+				waitForTUI(t, func() bool { return s.Err() != nil })
+			}
+
+			bar := plain(m.connectBar())
+			for _, want := range tt.want {
+				if !strings.Contains(bar, want) {
+					t.Errorf("bar = %q, want it to say %q", bar, want)
+				}
+			}
+		})
+	}
+}
+
+// An element the list has not got says so rather than claiming either way.
+func TestTheConnectBarSaysUnknownForAnUntrackedElement(t *testing.T) {
+	m := pickModel(t)
+	setTestElements(&m, []api.Element{{ID: "9", Name: "elsewhere"}})
+	m.phase = phaseSession
+	t.Cleanup(m.sessions.CloseAll)
+
+	conn := newRecConn()
+	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
+		t.Fatal(err)
+	}
+	if bar := plain(m.connectBar()); !strings.Contains(bar, "ion unknown") {
+		t.Errorf("bar = %q, want it to admit it does not know", bar)
 	}
 }

@@ -176,6 +176,57 @@ func (m *Manager) CloseActive() {
 	m.notify(s.ElementID)
 }
 
+// CloseDeadOn closes any session on this element that has already failed,
+// ended or stopped answering, keeping the live ones. It is how a redial
+// replaces the tab it was asked from, once the new session is actually up:
+// the dead tab is the only record of what the session said, so it stays on
+// screen until there is something to put in its place.
+func (m *Manager) CloseDeadOn(eid string) int {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	var gone []*Session
+	kept := m.sessions[:0:0]
+	for _, s := range m.sessions {
+		if s.ElementID == eid && (s.Err() != nil || s.Ended() || s.Hung()) {
+			m.lastEID, m.lastName, m.hasLast = s.ElementID, s.Name, true
+			gone = append(gone, s)
+			continue
+		}
+		kept = append(kept, s)
+	}
+	m.sessions = kept
+	// The survivor on that element is what the redial was for, so land on it
+	// rather than wherever the indices happen to leave the cursor.
+	m.active = clampActive(len(m.sessions), m.active)
+	for i, s := range m.sessions {
+		if s.ElementID == eid {
+			m.active = i
+			break
+		}
+	}
+	m.mu.Unlock()
+
+	for _, s := range gone {
+		s.Close()
+	}
+	if len(gone) > 0 {
+		m.notify(eid)
+	}
+	return len(gone)
+}
+
+func clampActive(n, at int) int {
+	if at >= n {
+		at = n - 1
+	}
+	if at < 0 {
+		at = 0
+	}
+	return at
+}
+
 // Reap records the element as it goes, so alt+t can reopen it.
 func (m *Manager) Reap() int {
 	if m == nil {

@@ -34,7 +34,8 @@ func (s *Store) Reset() error {
 
 	// The whole directory rather than each tenant's file: a cache left behind
 	// for a tenant that is no longer in the config would survive the reset.
-	errs = append(errs, removePath(s.cacheDir()), removePath(s.tenantsPath()))
+	errs = append(errs, removePath(s.cacheDir()), removePath(s.tenantsPath()),
+		removePath(s.commandsPath()))
 
 	// Keys this store does not know about are still in the fallback file, and a
 	// factory reset has to take them too.

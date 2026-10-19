@@ -114,13 +114,20 @@ views:
             width: 24
           - header: TYPE
             value: "{{ .item.type }}"
-            width: 13
+            width: 12
           - header: USED FOR
             value: "{{ .item.used_for }}"
             width: 8
           - header: STATE
             value: "{{ (unwrap .st).operational_state }}{{ with (unwrap .st).extended_state }} ({{ . }}){{ end }}"
-            width: 22
+            width: 18
+          # From the status, not the record: the interface record has a
+          # mac_address field and it is null on every interface a real element
+          # answered with. A subinterface reports its parent's, and each half
+          # of a bypass pair reports its own.
+          - header: MAC
+            value: "{{ dash (unwrap .st).mac_address }}"
+            width: 17
           - header: ADDRESS
             value: "{{ dash (first (unwrap .st).ipv4_addresses) }}"
             width: 18
@@ -131,7 +138,7 @@ views:
           # site_wan_interface_ids back to the site's circuit list.
           - header: CIRCUIT
             value: "{{ range .item.site_wan_interface_ids }}{{ with lookup $.wans.items \"id\" . }}{{ .name }} {{ end }}{{ end }}"
-            width: 26
+            width: 20
 
   # Circuits are the site's, not the element's, so a hub pair shares them.
   # This is the other direction of the same join: each circuit says which of

@@ -43,6 +43,10 @@ func TestQClosesThePageLikeEsc(t *testing.T) {
 			m.phase = phaseRunning
 			return m
 		}, phaseResults},
+		{"macros", func(t *testing.T) tuiModel {
+			next, _ := pickModel(t).openMacros()
+			return next.(tuiModel)
+		}, phaseMenu},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

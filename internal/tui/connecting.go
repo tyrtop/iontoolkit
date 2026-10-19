@@ -96,6 +96,11 @@ func (m *tuiModel) dialFailed(eid, reason string) {
 	st.failed = true
 	st.lastErr = reason
 	m.setDial(eid, st)
+	// A redial that failed leaves the tab it was asked from exactly where it
+	// was, with its own error back in the bar.
+	if m.redialing == eid {
+		m.redialing = ""
+	}
 }
 
 // connectingAny reports whether anything is mid-dial, which is what gates the
@@ -131,7 +136,7 @@ func (m tuiModel) retryPrompt() string {
 		lines = append(lines, ui.StyleDim.Render(reason))
 	}
 	lines = append(lines,
-		m.onlineLabel(m.askRetry.eid)+ui.StyleDim.Render(" in the portal"),
+		m.ionLabel(m.askRetry.eid)+ui.StyleDim.Render(" in the portal"),
 		"",
 		"try again",
 		m.retryChoices(),
@@ -240,8 +245,14 @@ func (m tuiModel) connectBar() string {
 	var parts []string
 
 	if st, ok := m.dialing[s.ElementID]; ok && !st.failed {
+		// Said on the dead tab itself, which is the one being looked at while
+		// its replacement is dialled.
+		what := "dial"
+		if m.redialing == s.ElementID {
+			what = "redial"
+		}
 		parts = append(parts, m.spinner.View()+" "+
-			ui.StyleWarn.Render(fmt.Sprintf("dial %d/%d", st.attempt, st.of)))
+			ui.StyleWarn.Render(fmt.Sprintf("%s %d/%d", what, st.attempt, st.of)))
 		if st.lastErr != "" {
 			parts = append(parts, ui.StyleDim.Render("last: "+ui.Truncate(shortDialErr(st.lastErr), 40)))
 		}
@@ -251,33 +262,55 @@ func (m tuiModel) connectBar() string {
 			parts = append(parts, ui.StyleErr.Render(ui.MarkCross.String()+" failed"))
 		case s.Hung():
 			parts = append(parts, ui.StyleWarn.Render("~ not answering"))
+		case !s.Answered():
+			// The socket is up and the appliance has said nothing. That is
+			// what dialling an element that is not there looks like, and it
+			// used to read as "successfully dialed" until the handshake
+			// deadline failed it twenty seconds later.
+			parts = append(parts, m.spinner.View()+" "+ui.StyleWarn.Render("waiting for the ion"))
 		default:
-			parts = append(parts, ui.StyleOK.Render(ui.MarkCheck.String()+" connected"))
+			// What this half is about is the dial, not the appliance: the two
+			// read as a contradiction while the session half said "connected",
+			// and naming the socket it runs over only moved the confusion.
+			// "successfully dialed · ion offline" is a state that happens and
+			// now says so.
+			parts = append(parts, ui.StyleOK.Render(ui.MarkCheck.String()+" successfully dialed"))
 		}
 	}
 
-	parts = append(parts, m.onlineLabel(s.ElementID))
+	parts = append(parts, m.ionLabel(s.ElementID))
 
-	if s.Hung() || s.Err() != nil {
+	// Not while one is already in flight: the bar says "redial n/m" there, and
+	// offering the key again reads as though nothing is happening.
+	if (s.Hung() || s.Err() != nil) && m.redialing != s.ElementID {
 		parts = append(parts, ui.StyleDim.Render("alt+r retry"))
 	}
 	return "  " + strings.Join(parts, ui.StyleDim.Render(" · "))
 }
 
-// onlineLabel is what the portal last said about the element, which is worth
-// showing next to a failed dial: an offline ION will not answer however many
-// times it is tried.
-func (m tuiModel) onlineLabel(eid string) string {
+// awaitingDevice is a live session that has not heard from its appliance yet,
+// which is the state the spinner has to keep ticking for.
+func (m tuiModel) awaitingDevice() bool {
+	s := m.sessions.Active()
+	return s != nil && s.Err() == nil && !s.Hung() && !s.Ended() && !s.Answered()
+}
+
+// ionLabel is what the portal last said about the appliance, said as such.
+// Next to a dial it is the only evidence there is -- an offline ION will not
+// come up however many times it is tried -- and next to a live session it is
+// the disagreement that matters: a stale cached list, or a box that has lost
+// its controller channel while its CLI is perfectly well.
+func (m tuiModel) ionLabel(eid string) string {
 	for _, r := range m.all {
 		if r.ID != eid {
 			continue
 		}
 		if r.Connected {
-			return ui.StyleOK.Render("online")
+			return ui.StyleOK.Render("ion online")
 		}
-		return ui.StyleErr.Render("offline")
+		return ui.StyleWarn.Render("ion offline")
 	}
-	return ui.StyleDim.Render("unknown")
+	return ui.StyleDim.Render("ion unknown")
 }
 
 // shortDialErr trims the layers a failed handshake arrives wrapped in.
