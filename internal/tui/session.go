@@ -194,6 +194,7 @@ func (m tuiModel) selectTab(i int) tuiModel {
 	}
 	m.sessions.Select(i - 1)
 	m.phase = phaseSession
+	m.sesScroll = 0
 	return m
 }
 
@@ -267,8 +268,38 @@ func (m tuiModel) onSessionKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		return m.openSlash()
 	}
 
+	if next, handled := m.onScrollKey(s, key); handled {
+		return next, nil
+	}
+
+	// Anything typed belongs at the live bottom: the device is about to answer
+	// it, and a pane held above that would not show what it said.
+	m.sesScroll = 0
 	s.Type(uv.KeyPressEvent(uv.Key(tea.Key(msg))))
 	return m, nil
+}
+
+// onScrollKey holds the pane above its live bottom. The device has no
+// scrollback of its own, so these are iontk's keys and have to be ones a CLI
+// would not want: shift and alt chords, never a bare key.
+func (m tuiModel) onScrollKey(s *ionterm.Session, key string) (tuiModel, bool) {
+	_, rows := m.paneSize()
+	switch key {
+	case "shift+pgup":
+		m.sesScroll += max(1, rows-1)
+	case "shift+pgdown":
+		m.sesScroll = max(0, m.sesScroll-max(1, rows-1))
+	case "alt+up":
+		m.sesScroll++
+	case "alt+down":
+		m.sesScroll = max(0, m.sesScroll-1)
+	case "alt+end":
+		m.sesScroll = 0
+	default:
+		return m, false
+	}
+	m.sesScroll = min(m.sesScroll, s.MaxScroll(rows))
+	return m, true
 }
 
 // reopenLastTab brings back the most recent tab: the detached session itself
@@ -347,7 +378,7 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 	}
 
 	cols, rows := m.paneSize()
-	view := s.View(cols, rows)
+	view := s.ScrolledView(cols, rows, m.sesScroll)
 	b.WriteString(view.Content + "\n")
 
 	// Above the palette as well as above the footer, so the frame keeps its
@@ -361,20 +392,37 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 		return b.String(), nil
 	}
 
-	const hint = "ctrl+] elements · alt+←/→ tab · alt+w detach · alt+t reattach · alt+k close"
+	const hint = "ctrl+] elements · alt+←/→ tab · alt+w detach · alt+t reattach · alt+k close · shift+pgup scroll"
 
-	if err := s.Err(); err != nil {
-		b.WriteString(ui.Footer(err.Error(), hint))
-		return b.String(), nil
-	}
-	if s.Hung() {
-		b.WriteString(ui.Footer(
-			ui.StyleWarn.Render("connection stopped answering — alt+r opens a new session on this ION"),
-			hint))
-		return b.String(), nil
+	status := m.status
+	switch {
+	case s.Err() != nil:
+		status = s.Err().Error()
+	case s.Hung():
+		status = "connection stopped answering — alt+r opens a new session on this ION"
 	}
 
-	b.WriteString(ui.Footer(m.status, hint))
+	// The marker goes in front of whatever else the footer was saying, and
+	// does not replace it: a hung session is still worth reading while someone
+	// is scrolled back through what it last said.
+	if view.Offset > 0 {
+		marker := fmt.Sprintf("scrolled back %d of %d lines — alt+end for live", view.Offset, view.Total)
+		if status != "" {
+			marker += " · "
+		}
+		status = marker + status
+	}
+
+	// Truncated plain, before the footer styles it: a status or hint that takes
+	// a second row moves the whole frame.
+	width := max(10, m.width-1)
+	b.WriteString(ui.Footer(ui.Truncate(status, width), ui.Truncate(hint, width)))
+
+	// No cursor unless the pane is live. Pointing it at frozen output, or at a
+	// session that has stopped answering, says something is being typed there.
+	if view.Offset > 0 || s.Err() != nil || s.Hung() {
+		return b.String(), nil
+	}
 	return b.String(), tea.NewCursor(view.CursorX, view.CursorY+2)
 }
 

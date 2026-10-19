@@ -121,8 +121,8 @@ func TestRenderBatchSettings(t *testing.T) {
 	}
 	m.spinner = ui.NewSpinner("")
 
-	if got := m.sectionRows(); got != 3 {
-		t.Errorf("sectionRows() = %d, want 3", got)
+	if got := m.sectionRows(); got != 4 {
+		t.Errorf("sectionRows() = %d, want 4", got)
 	}
 	out := m.viewSettings()
 	for _, want := range []string{"Batch", "jsonl", "file", "ion-reports"} {
@@ -159,8 +159,21 @@ func TestBatchSettingsCycleAndToggle(t *testing.T) {
 		t.Errorf("saved BatchFormat = %q, want it persisted", saved.BatchFormat)
 	}
 
-	// Row 1 toggles the destination.
+	// Row 1 cycles the row orientation.
 	m.setCursor = 1
+	mm, _ = m.onBatchKey("enter")
+	m = mm.(tuiModel)
+	if m.cfg.BatchOrient != output.OrientCommand {
+		t.Errorf("BatchOrient = %q, want %q after one cycle from the default", m.cfg.BatchOrient, output.OrientCommand)
+	}
+	if saved, err := st.Config(); err != nil {
+		t.Errorf("Config() error = %v", err)
+	} else if saved.BatchOrient != output.OrientCommand {
+		t.Errorf("saved BatchOrient = %q, want it persisted", saved.BatchOrient)
+	}
+
+	// Row 2 toggles the destination.
+	m.setCursor = 2
 	mm, _ = m.onBatchKey("enter")
 	m = mm.(tuiModel)
 	if !m.cfg.BatchToFile {
@@ -172,8 +185,8 @@ func TestBatchSettingsCycleAndToggle(t *testing.T) {
 		t.Error("BatchToFile = true, want the toggle to go back to stdout")
 	}
 
-	// Row 2 opens the folder form.
-	m.setCursor = 2
+	// Row 3 opens the folder form.
+	m.setCursor = 3
 	mm, _ = m.onBatchKey("enter")
 	m = mm.(tuiModel)
 	if m.formKind != formBatchDir {

@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -121,7 +122,12 @@ func (m tuiModel) currentResult() (int, bool) {
 
 func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
 	switch key {
-	case "esc":
+	// Only the main menu's q quits: a key that leaves a page on one screen and
+	// kills the run on the next is one nobody can press with confidence.
+	case "esc", "q":
+		if key == "q" && m.resFilterOn {
+			break // a letter while the filter is being typed
+		}
 		switch {
 		case m.resOpen:
 			m.resOpen = false
@@ -136,11 +142,6 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 			m.phase = phasePicking
 		}
 		return m, nil
-
-	case "q":
-		if !m.resFilterOn {
-			return m, tea.Quit
-		}
 
 	case "up", "down", "home", "end":
 		if m.resOpen {
@@ -171,6 +172,11 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		}
 		return m, nil
 
+	case "f", "o", "s":
+		if !m.resFilterOn {
+			return m.onResultsOutputKey(key)
+		}
+
 	case "/":
 		if !m.resFilterOn {
 			m.resFilterOn = true
@@ -190,6 +196,41 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 	var cmd tea.Cmd
 	m.resTable, cmd = m.resTable.Update(msg)
 	return m, cmd
+}
+
+// onResultsOutputKey carries the save controls, because changing the format in
+// settings means leaving the results to go and find it. Changing the format
+// writes nothing by itself -- the run was already saved in the old one -- so
+// each of these says that s is what writes a file.
+func (m tuiModel) onResultsOutputKey(key string) (tea.Model, tea.Cmd) {
+	if key == "s" {
+		m.status = m.saveBatchResults()
+		if m.status == "" {
+			m.status = "no folder for batch output — set one in settings"
+		}
+		return m, nil
+	}
+
+	switch key {
+	case "f":
+		m.cfg.BatchFormat = output.NextFormat(m.batchFormat())
+	case "o":
+		m.cfg.BatchOrient = output.NextOrientation(m.batchOrient())
+	}
+	if err := m.store.SaveConfig(m.cfg); err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+
+	m.status = "format " + m.batchFormat()
+	switch {
+	case output.Tabular(m.batchFormat()):
+		m.status += " · " + output.OrientationLabel(m.batchOrient())
+	case key == "o":
+		m.status += " · " + output.OrientationLabel(m.batchOrient()) + ", which only table and csv sort by"
+	}
+	m.status += " · s saves"
+	return m, nil
 }
 
 func (m tuiModel) resultDetail(idx int) []string {
@@ -224,7 +265,14 @@ func (m tuiModel) viewResults() string {
 	if m.failed > 0 {
 		header += ui.StyleErr.Render(fmt.Sprintf("  %d failed", m.failed))
 	}
-	b.WriteString(header + "\n")
+	// The save format belongs on the page it is toggled from; f and o are
+	// otherwise keys with nothing on screen to show they did anything.
+	tag := m.batchFormat()
+	if output.Tabular(m.batchFormat()) {
+		tag += " · " + output.OrientationLabel(m.batchOrient())
+	}
+	header += ui.StyleDim.Render("   " + tag)
+	b.WriteString(ui.Truncate(header, max(10, m.width-1)) + "\n")
 
 	if m.resFilterOn || m.resFilter.Value() != "" {
 		line := m.resFilter.View()
@@ -273,11 +321,13 @@ func (m tuiModel) viewResults() string {
 		body += "\n" + m.statsPane()
 	}
 
-	hint := "↑↓ move · / filter · enter open · esc back · q quit"
+	hint := "↑↓ move · / filter · enter open · f/o format · s save · esc/q back"
 	if m.resOpen {
-		hint = "↑↓ close and move · pgup/pgdn scroll · esc close · q quit"
+		hint = "↑↓ close and move · pgup/pgdn scroll · esc/q close"
 	}
-	return body + "\n" + ui.Footer(m.status, hint)
+	// Truncated rather than wrapped: a hint that takes two rows on a narrow
+	// terminal moves the whole frame.
+	return body + "\n" + ui.Footer(m.status, ui.Truncate(hint, max(10, m.width-1)))
 }
 
 func (m tuiModel) seedResultsForTest(rs []sase.Result, el []time.Duration) tuiModel {

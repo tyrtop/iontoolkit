@@ -38,7 +38,7 @@ func (m tuiModel) sectionRows() int {
 	case secGeneral:
 		return 4
 	case secBatch:
-		return 3
+		return 4
 	case secTenants:
 		return len(m.cfg.Tenants)
 	case secUsers:
@@ -359,9 +359,18 @@ func (m tuiModel) sectionContent() []string {
 		if m.cfg.BatchDir != "" {
 			folder = ui.StyleDim.Render(ui.Truncate(m.cfg.BatchDir, 44))
 		}
+		// The row stays whether the format sorts rows or not: a section that
+		// gains and loses a row as the format cycles moves everything under it.
+		order := ui.StyleElement.Render(output.OrientationLabel(m.batchOrient())) +
+			ui.StyleDim.Render("  "+output.OrientationHelp(m.batchOrient()))
+		if !output.Tabular(m.batchFormat()) {
+			order = ui.StyleDim.Render(output.OrientationLabel(m.batchOrient()) +
+				"  only table and csv have rows to sort")
+		}
 		out = append(out,
 			ui.Label("format")+ui.StyleElement.Render(m.batchFormat())+
 				ui.StyleDim.Render("  "+output.FormatHelp(m.batchFormat())),
+			ui.Label("rows")+order,
 			ui.Label("output")+dest,
 			ui.Label("folder")+folder,
 		)
@@ -577,6 +586,16 @@ func (m tuiModel) batchFormat() string {
 	return f
 }
 
+// batchOrient is the saved row orientation, normalized the same way as the
+// format so a stale value still displays as something real.
+func (m tuiModel) batchOrient() string {
+	o, err := output.NormalizeOrientation(m.cfg.BatchOrient)
+	if err != nil {
+		return output.OrientION
+	}
+	return o
+}
+
 func (m tuiModel) onBatchKey(key string) (tea.Model, tea.Cmd) {
 	switch m.setCursor {
 	case 0:
@@ -588,8 +607,13 @@ func (m tuiModel) onBatchKey(key string) (tea.Model, tea.Cmd) {
 		if key != "enter" && key != " " && key != "space" {
 			return m, nil
 		}
-		m.cfg.BatchToFile = !m.cfg.BatchToFile
+		m.cfg.BatchOrient = output.NextOrientation(m.batchOrient())
 	case 2:
+		if key != "enter" && key != " " && key != "space" {
+			return m, nil
+		}
+		m.cfg.BatchToFile = !m.cfg.BatchToFile
+	case 3:
 		if key != "enter" {
 			return m, nil
 		}

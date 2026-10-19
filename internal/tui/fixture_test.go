@@ -35,8 +35,13 @@ tenants:
 // client over the fixture transport, and the tenant load the TUI itself runs.
 func fixtureTUI(t *testing.T) (tuiModel, *fixture.Set) {
 	t.Helper()
+	return fixtureTUIWith(t, fixtureYAML)
+}
+
+func fixtureTUIWith(t *testing.T, yaml string) (tuiModel, *fixture.Set) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "fixtures.yaml")
-	if err := os.WriteFile(path, []byte(fixtureYAML), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	set, err := fixture.Load(path)

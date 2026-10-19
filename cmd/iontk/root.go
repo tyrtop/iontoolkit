@@ -15,6 +15,7 @@ var (
 	flagCommands     []string
 	flagNoProgress   bool
 	flagFormat       string
+	flagOrient       string
 	flagOut          string
 	flagTenant       string
 	flagFixtures     string
@@ -108,7 +109,10 @@ func init() {
 	pf.BoolVar(&app.Debug, "debug", false, "run against a throwaway config with no saved tenants and secrets held only in memory")
 	pf.StringVar(&flagFixtures, "fixtures", "", "YAML file of fake tenants, elements and CLI responses to run against instead of real hardware")
 	pf.StringVar(&app.Defaults.TSGID, "tsg", "", "tenant service group ID (overrides SCM_TSG_ID)")
-	pf.StringVar(&flagFormat, "format", "", `batch output format: "json", "jsonl", or "text" (default from settings, else json)`)
+	pf.StringVar(&flagFormat, "format", "", `batch output format: "json", "jsonl", "text", "table" or "csv" (default from settings, else json)`)
+	// Only the tabular formats have rows to sort, but the flag is accepted
+	// whatever the format so a saved orientation is not a reason to re-run.
+	pf.StringVar(&flagOrient, "orientation", "", `row order for "table" and "csv": "ion" groups each element's commands, "command" puts one command across the fleet together (default from settings, else ion)`)
 	pf.StringVar(&flagOut, "out", "", `write batch output to this file ("-" is stdout; default from settings)`)
 
 	rootCmd.AddCommand(runCmd, shellCmd, versionCmd, genFlagDocsCmd)

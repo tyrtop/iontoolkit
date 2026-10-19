@@ -35,6 +35,12 @@ type Session struct {
 	emu  *vt.SafeEmulator
 	conn Conn
 
+	// SafeEmulator locks each of its own methods, but Scrollback() hands back
+	// the buffer itself and the lock is gone by the time its lines are read.
+	// This covers a write against the reads that walk them, which is all that
+	// is needed: ionterm owns every emulator call site.
+	emuMu sync.Mutex
+
 	keys   chan uv.KeyEvent
 	text   chan string
 	auto   *autologin
@@ -125,7 +131,10 @@ func (s *Session) pumpOutput(ctx context.Context) {
 		if len(data) == 0 {
 			continue
 		}
-		if _, err := s.emu.Write(data); err != nil {
+		s.emuMu.Lock()
+		_, err = s.emu.Write(data)
+		s.emuMu.Unlock()
+		if err != nil {
 			s.fail(err)
 			return
 		}

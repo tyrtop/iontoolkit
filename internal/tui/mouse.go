@@ -8,11 +8,11 @@ import (
 const wheelRows = 3
 
 // mouseMode is on only where something scrolls. Mouse reporting takes
-// click-to-select away from the terminal, and a session pane has no scroll
-// offset to move until scrollback lands.
+// click-to-select away from the terminal, which is why the pages that scroll
+// nothing leave it off.
 func (m tuiModel) mouseMode() tea.MouseMode {
 	switch m.phase {
-	case phasePicking, phaseResults:
+	case phasePicking, phaseResults, phaseSession:
 		return tea.MouseModeCellMotion
 	}
 	return tea.MouseModeNone
@@ -47,6 +47,18 @@ func (m tuiModel) onWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 			m.resTable.MoveUp(wheelRows)
 		} else {
 			m.resTable.MoveDown(wheelRows)
+		}
+
+	case phaseSession:
+		s := m.sessions.Active()
+		if s == nil {
+			return m, nil
+		}
+		_, rows := m.paneSize()
+		if up {
+			m.sesScroll = min(m.sesScroll+wheelRows, s.MaxScroll(rows))
+		} else {
+			m.sesScroll = max(0, m.sesScroll-wheelRows)
 		}
 	}
 	return m, nil

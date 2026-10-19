@@ -46,7 +46,7 @@ func runBatch(ctx context.Context) error {
 		return err
 	}
 
-	format, dest, err := batchOutput()
+	format, orient, dest, err := batchOutput()
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,15 @@ func runBatch(ctx context.Context) error {
 	if where != "stdout" {
 		fmt.Fprintln(os.Stderr, "writing", format, "results to", where)
 	}
-	sink := output.NewSink(out, format)
+	sinkOpts := []output.Option{output.WithOrientation(orient)}
+	// A table only has to fit when it is being read on the way past. A file
+	// holds the only copy of what it is given, so nothing is trimmed into one.
+	if where == "stdout" {
+		if cols, _, serr := term.GetSize(int(os.Stdout.Fd())); serr == nil && cols > 0 {
+			sinkOpts = append(sinkOpts, output.WithWidth(cols))
+		}
+	}
+	sink := output.NewSink(out, format, sinkOpts...)
 
 	// Fixture mode swaps the client only here: the lookup and the session come
 	// from the playback device, and everything either side of them is the real
@@ -112,20 +120,28 @@ func runBatch(ctx context.Context) error {
 	return nil
 }
 
-// batchOutput resolves the format and destination folder, with flags winning
-// over the saved settings.
-func batchOutput() (format, dir string, err error) {
-	format, dir = output.FormatJSON, ""
+// batchOutput resolves the format, row orientation and destination folder,
+// with flags winning over the saved settings.
+func batchOutput() (format, orient, dir string, err error) {
+	format, orient, dir = output.FormatJSON, output.OrientION, ""
 	if st := app.OpenStore(); st != nil {
 		if cfg, cerr := st.Config(); cerr == nil {
-			format, dir = cfg.BatchFormat, cfg.BatchOutDir()
+			format, orient, dir = cfg.BatchFormat, cfg.BatchOrient, cfg.BatchOutDir()
 		}
 	}
 	if flagFormat != "" {
 		format = flagFormat
 	}
-	format, err = output.NormalizeFormat(format)
-	return format, dir, err
+	if flagOrient != "" {
+		orient = flagOrient
+	}
+	if format, err = output.NormalizeFormat(format); err != nil {
+		return "", "", "", err
+	}
+	if orient, err = output.NormalizeOrientation(orient); err != nil {
+		return "", "", "", err
+	}
+	return format, orient, dir, nil
 }
 
 func drainPlain(events <-chan sase.Event, total int, sink output.Sink) (int, int, error) {

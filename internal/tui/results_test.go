@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/ioncli"
 	"tyrtop.com/iontk/internal/ui"
@@ -186,4 +189,111 @@ func TestRenderResults(t *testing.T) {
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	t.Log("\n--- expanded ---\n" + mm.(tuiModel).viewResults())
+}
+
+func TestResultsFormatKeysCycleAndPersist(t *testing.T) {
+	m := resultsModel(t)
+
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'f', Text: "f"}))
+	m = mm.(tuiModel)
+	if m.cfg.BatchFormat != output.FormatJSONL {
+		t.Errorf("BatchFormat = %q, want %q after one cycle from the default", m.cfg.BatchFormat, output.FormatJSONL)
+	}
+	if !strings.Contains(m.status, "s saves") {
+		t.Errorf("status = %q, want it to say what still has to be pressed", m.status)
+	}
+
+	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'o', Text: "o"}))
+	m = mm.(tuiModel)
+	if m.cfg.BatchOrient != output.OrientCommand {
+		t.Errorf("BatchOrient = %q, want %q", m.cfg.BatchOrient, output.OrientCommand)
+	}
+
+	saved, err := m.store.Config()
+	if err != nil {
+		t.Fatalf("Config() error = %v", err)
+	}
+	if saved.BatchFormat != output.FormatJSONL || saved.BatchOrient != output.OrientCommand {
+		t.Errorf("saved format %q orientation %q, want both persisted", saved.BatchFormat, saved.BatchOrient)
+	}
+}
+
+func TestResultsFormatKeysStayOutOfTheFilter(t *testing.T) {
+	m := resultsModel(t)
+
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
+	m = mm.(tuiModel)
+	for _, k := range []rune{'f', 'o', 's'} {
+		mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: k, Text: string(k)}))
+		m = mm.(tuiModel)
+	}
+
+	if m.cfg.BatchFormat != "" || m.cfg.BatchOrient != "" {
+		t.Errorf("typing in the filter changed the save format to %q/%q", m.cfg.BatchFormat, m.cfg.BatchOrient)
+	}
+	if got := m.resFilter.Value(); got != "fos" {
+		t.Errorf("filter = %q, want the letters typed into it", got)
+	}
+}
+
+func TestResultsSaveKeyWritesTheCurrentFormat(t *testing.T) {
+	dir := t.TempDir()
+	m := resultsModel(t)
+	m.cfg.BatchToFile, m.cfg.BatchDir, m.cfg.BatchFormat = true, dir, output.FormatCSV
+
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 's', Text: "s"}))
+	m = mm.(tuiModel)
+	if !strings.HasPrefix(m.status, "saved to ") {
+		t.Fatalf("status = %q, want it to report where the file went", m.status)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("wrote %d files, want 1", len(entries))
+	}
+	if !strings.HasSuffix(entries[0].Name(), ".csv") {
+		t.Errorf("wrote %q, want the extension to follow the format", entries[0].Name())
+	}
+	body, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	for _, want := range []string{"element_id", "S0100-RTR-01", "hung session"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("saved csv is missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestResultsSaveKeySaysWhenThereIsNoFolder(t *testing.T) {
+	m := resultsModel(t)
+
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 's', Text: "s"}))
+	m = mm.(tuiModel)
+	if !strings.Contains(m.status, "settings") {
+		t.Errorf("status = %q, want it to say where to turn file output on", m.status)
+	}
+}
+
+func TestResultsHeaderNamesTheSaveFormat(t *testing.T) {
+	m := resultsModel(t)
+
+	m.cfg.BatchFormat, m.cfg.BatchOrient = output.FormatCSV, output.OrientCommand
+	if got := plain(m.viewResults()); !strings.Contains(got, "csv · command-first") {
+		t.Errorf("results header does not name the format and orientation:\n%s", got)
+	}
+
+	// json has no rows to sort, so naming an orientation would claim something
+	// the save does not do.
+	m.cfg.BatchFormat = output.FormatJSON
+	got := plain(m.viewResults())
+	if !strings.Contains(got, "json") {
+		t.Errorf("results header does not name the format:\n%s", got)
+	}
+	if strings.Contains(got, "command-first") {
+		t.Errorf("results header claims an orientation json does not use:\n%s", got)
+	}
 }

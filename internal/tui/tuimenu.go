@@ -656,9 +656,9 @@ func (m tuiModel) viewMenu() string {
 	}
 
 	b.WriteString("\n")
-	hint := "↑↓ move · enter select · alt+m/alt+a service account or browser · alt+w quit"
+	hint := "↑↓ move · enter select · alt+m/alt+a service account or browser · q/alt+w quit"
 	if m.sessions.DetachedCount() > 0 || m.sessions.Count() > 0 {
-		hint = "↑↓ move · enter select · alt+m/alt+a service account or browser · alt+t reattach · alt+w quit"
+		hint = "↑↓ move · enter select · alt+m/alt+a service account or browser · alt+t reattach · q/alt+w quit"
 	}
 	b.WriteString(ui.Footer(m.status, hint))
 	return b.String()

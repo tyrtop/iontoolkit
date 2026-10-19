@@ -41,8 +41,12 @@ func TestNormalizeFormat(t *testing.T) {
 		{"text", FormatText, false},
 		{"txt", FormatText, false},
 		{"plain", FormatText, false},
+		{"table", FormatTable, false},
+		{"tbl", FormatTable, false},
+		{"csv", FormatCSV, false},
+		{"CSV", FormatCSV, false},
 		{"yaml", "", true},
-		{"csv", "", true},
+		{"xml", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -89,6 +93,8 @@ func TestFormatExt(t *testing.T) {
 		FormatJSON:  "json",
 		FormatJSONL: "jsonl",
 		FormatText:  "txt",
+		FormatTable: "txt",
+		FormatCSV:   "csv",
 		"nonsense":  "json",
 	}
 	for in, want := range tests {

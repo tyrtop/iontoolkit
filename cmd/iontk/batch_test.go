@@ -6,6 +6,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/output"
 )
 
 func TestWatchCredentialWritesEachFailureAndStopsWhenClosed(t *testing.T) {
@@ -65,5 +69,50 @@ func TestWatchCredentialStopsTheRunWhenTheCredentialIsSpent(t *testing.T) {
 	}
 	if out := buf.String(); !strings.Contains(out, "sign-in expired") {
 		t.Errorf("output does not say why the run stopped:\n%s", out)
+	}
+}
+
+// The CLI and the TUI read the same settings, so a flag has to be the only
+// thing that moves one of them off what the other would have done.
+func TestBatchOutputPrefersFlagsOverSettings(t *testing.T) {
+	app.Debug = true
+	t.Cleanup(func() {
+		app.Debug = false
+		flagFormat, flagOrient = "", ""
+	})
+
+	st := app.OpenStore()
+	if st == nil {
+		t.Fatal("OpenStore() = nil, want the debug store")
+	}
+	if err := st.SaveConfig(&config.Config{
+		BatchFormat: output.FormatCSV,
+		BatchOrient: output.OrientCommand,
+	}); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	format, orient, _, err := batchOutput()
+	if err != nil {
+		t.Fatalf("batchOutput() error = %v", err)
+	}
+	if format != output.FormatCSV || orient != output.OrientCommand {
+		t.Errorf("batchOutput() = %q/%q, want the saved settings", format, orient)
+	}
+
+	flagFormat, flagOrient = "table", "ion"
+	format, orient, _, err = batchOutput()
+	if err != nil {
+		t.Fatalf("batchOutput() error = %v", err)
+	}
+	if format != output.FormatTable || orient != output.OrientION {
+		t.Errorf("batchOutput() = %q/%q, want the flags to win", format, orient)
+	}
+
+	// A typo is an error before the run starts, not a silent fall back to the
+	// default -- a fleet written out the wrong way round is a re-run.
+	flagOrient = "sideways"
+	if _, _, _, err := batchOutput(); err == nil {
+		t.Error("batchOutput() error = nil, want an unknown orientation to fail")
 	}
 }

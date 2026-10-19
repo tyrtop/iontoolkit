@@ -79,6 +79,7 @@ type Config struct {
 	SessionCols int      `json:"session_cols,omitempty"`
 	SessionRows int      `json:"session_rows,omitempty"`
 	BatchFormat string   `json:"batch_format,omitempty"`
+	BatchOrient string   `json:"batch_orient,omitempty"`
 	BatchToFile bool     `json:"batch_to_file,omitempty"`
 	BatchDir    string   `json:"batch_dir,omitempty"`
 	Tenants     []Tenant `json:"tenants,omitempty"`

@@ -69,8 +69,8 @@ var flagGroups = []struct {
 	{"Throughput", "Rate limits are the API's, not the device's.", []string{
 		"concurrency", "rps", "burst",
 	}},
-	{"Output", "", []string{
-		"format", "out", "no-progress", "verbose",
+	{"Output", "`--orientation` is read by `table` and `csv` only; the other formats have no rows to sort.", []string{
+		"format", "orientation", "out", "no-progress", "verbose",
 	}},
 	{"Testing", "Running without touching saved state. `--debug` redirects the config root and keeps secrets in memory; `--fixtures` does the same and seeds fake tenants, elements and CLI sessions from a YAML file.", []string{
 		"debug", "fixtures",

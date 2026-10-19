@@ -83,9 +83,10 @@ func TestMouseReportingIsOffWhereNothingScrolls(t *testing.T) {
 	cases := map[tuiPhase]tea.MouseMode{
 		phasePicking: tea.MouseModeCellMotion,
 		phaseResults: tea.MouseModeCellMotion,
-		// Reporting here would cost the pane click-to-select and buy nothing
-		// until scrollback lands.
-		phaseSession: tea.MouseModeNone,
+		// On since the pane gained a scrollback to move; it costs the terminal's
+		// own click-to-select, which is why the pages that scroll nothing are
+		// still off.
+		phaseSession: tea.MouseModeCellMotion,
 		phaseMenu:    tea.MouseModeNone,
 	}
 	for phase, want := range cases {

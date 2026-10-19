@@ -259,7 +259,10 @@ type tuiModel struct {
 	resScroll   int
 	elapsed     []time.Duration
 
-	sessions   *ionterm.Manager
+	sessions *ionterm.Manager
+	// How far the session pane is held above its live bottom. Reset on a tab
+	// switch: an offset into one session's output means nothing in another's.
+	sesScroll  int
 	connecting string
 	// Per-element dial progress, and the channel the clients report it on.
 	dialing     map[string]dialState
@@ -1105,10 +1108,10 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case phaseCommand:
 		return m.onCommandKey(msg, key)
 	case phaseRunning:
+		// q used to quit here, which made the key that leaves every other page
+		// the one that abandons a run mid-flight. ctrl+c does that now.
 		switch key {
-		case "q":
-			return m, tea.Quit
-		case "esc", "tab", "/":
+		case "esc", "q", "tab", "/":
 			if m.completedCount() > 0 {
 				m.phase = phaseResults
 				m.applyResultFilter()
@@ -1124,7 +1127,10 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
 	switch key {
-	case "esc":
+	case "esc", "q":
+		if key == "q" && m.filterOn {
+			break // a letter while the filter is being typed
+		}
 		if m.filterOn || m.filter.Value() != "" {
 			m.filterOn = false
 			m.filter.SetValue("")
@@ -1311,8 +1317,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 			m.phase = phaseSession
 		}
 		return m, nil
-	case "q":
-		return m, tea.Quit
 	}
 
 	var cmd tea.Cmd
@@ -1697,9 +1701,9 @@ func (m tuiModel) viewPicking() string {
 		if len(m.lastCleared) > 0 {
 			clear = "alt+z undo clear"
 		}
-		hint := fmt.Sprintf("↑↓/jk move · / filter · space select · alt+s selected · %s · alt+r refresh · alt+m mode · alt+u user · %s · esc/alt+w menu", clear, act)
+		hint := fmt.Sprintf("↑↓/jk move · / filter · space select · alt+s selected · %s · alt+r refresh · alt+m mode · alt+u user · %s · esc/q/alt+w menu", clear, act)
 		if m.showSelected {
-			hint = fmt.Sprintf("↑↓/jk move · alt+s all · alt+c clear · space unselect · %s · esc/alt+w menu", act)
+			hint = fmt.Sprintf("↑↓/jk move · alt+s all · alt+c clear · space unselect · %s · esc/q/alt+w menu", act)
 		}
 		if m.filterOn {
 			// With one match left, enter does the thing rather than just
