@@ -192,11 +192,11 @@ func TestGeneralSectionRowsAreAllReachable(t *testing.T) {
 	m.width, m.height = 110, 30
 	m.spinner = ui.NewSpinner("")
 
-	if got := m.sectionRows(); got != 4 {
-		t.Fatalf("sectionRows() = %d, want 4", got)
+	if got := m.sectionRows(); got != 5 {
+		t.Fatalf("sectionRows() = %d, want 5", got)
 	}
 	out := plain(m.viewSettings())
-	for _, want := range []string{"spinner", "commands", "mode", "elements"} {
+	for _, want := range []string{"spinner", "commands", "mode", "jump", "elements", "views"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the General section is missing %q:\n%s", want, out)
 		}

@@ -49,6 +49,9 @@ type Element struct {
 	Software  string `yaml:"software"`
 	Site      string `yaml:"site"`
 	Connected bool   `yaml:"connected"`
+	// HA puts the element in a spoke HA cluster with the site's other HA
+	// elements, so the cluster status endpoint has something to answer.
+	HA bool `yaml:"ha"`
 	// Pages makes long output stop on a pager prompt and wait for a space,
 	// which is the one device behaviour that cost a hardware round trip. The
 	// prompt is the one an ion 1200-s running 6.3.4-b2 printed.
@@ -240,16 +243,34 @@ func (e Element) apiElement() api.Element {
 	if e.Connected {
 		state = "bound"
 	}
-	return api.Element{
-		ID:        e.ID,
-		Name:      e.Name,
-		HWID:      e.HWID,
-		Model:     e.Model,
-		Software:  e.Software,
-		SiteID:    e.siteID(),
-		Connected: e.Connected,
-		State:     state,
+	el := api.Element{
+		ID:           e.ID,
+		Name:         e.Name,
+		HWID:         e.HWID,
+		Model:        e.Model,
+		Software:     e.Software,
+		SiteID:       e.siteID(),
+		Connected:    e.Connected,
+		State:        state,
+		Role:         "SPOKE",
+		AllowedRoles: []string{"HUB", "SPOKE"},
+		Serial:       "FAKE" + syntheticID("serial/"+e.ID, 10),
+		FIPSMode:     "non_fips",
 	}
+	if e.HA {
+		// A real clustered spoke left the record's own cluster_id null and
+		// carried the cluster here, so the fixture does the same.
+		el.SpokeHA = &api.SpokeHA{
+			ClusterID:       e.clusterID(),
+			Enable:          true,
+			Priority:        160,
+			SourceInterface: e.interfaceID(3),
+			Track: &api.HATrack{
+				Interfaces: []api.HATrackItem{{InterfaceID: e.interfaceID(1), ReducePriority: 100}},
+			},
+		}
+	}
+	return el
 }
 
 // siteID is derived from the site name, because the portal gives elements a

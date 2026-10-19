@@ -75,6 +75,9 @@ var flagGroups = []struct {
 	{"Testing", "Running without touching saved state. `--debug` redirects the config root and keeps secrets in memory; `--fixtures` does the same and seeds fake tenants, elements and CLI sessions from a YAML file.", []string{
 		"debug", "fixtures",
 	}},
+	{"Rich data", "The TUI's third element mode reads the portal instead of opening a session. Its panes are defined in YAML: `--views` points at a file instead of `views.yaml` in the config directory, which is also how a `--fixtures` run gets views of its own.", []string{
+		"views",
+	}},
 }
 
 func writeFlagDocs(w io.Writer, root *cobra.Command) error {

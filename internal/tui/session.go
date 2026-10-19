@@ -176,13 +176,19 @@ func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m tuiModel) tabCount() int { return 1 + m.sessions.Count() }
+// The tab ring is the element list, then the shells, then the data panes.
+// Sessions keep their numbers as data tabs come and go, which they would not
+// if the two kinds interleaved by the order they were opened.
+func (m tuiModel) tabCount() int { return 1 + m.sessions.Count() + len(m.data) }
 
 func (m tuiModel) currentTab() int {
-	if m.phase != phaseSession {
-		return 0
+	switch m.phase {
+	case phaseSession:
+		return 1 + m.sessions.ActiveIndex()
+	case phaseData:
+		return 1 + m.sessions.Count() + m.dataActive
 	}
-	return 1 + m.sessions.ActiveIndex()
+	return 0
 }
 
 func (m tuiModel) selectTab(i int) tuiModel {
@@ -192,9 +198,14 @@ func (m tuiModel) selectTab(i int) tuiModel {
 		m.phase = phasePicking
 		return m
 	}
-	m.sessions.Select(i - 1)
-	m.phase = phaseSession
-	m.sesScroll = 0
+	if i <= m.sessions.Count() {
+		m.sessions.Select(i - 1)
+		m.phase = phaseSession
+		m.sesScroll = 0
+		return m
+	}
+	m.dataActive = i - 1 - m.sessions.Count()
+	m.phase = phaseData
 	return m
 }
 
@@ -204,22 +215,21 @@ func (m tuiModel) onTabKey(key string) (tuiModel, bool) {
 		return m.selectTab(m.currentTab() + 1), true
 	case "alt+left":
 		return m.selectTab(m.currentTab() - 1), true
-	case "alt+w":
+	case "alt+w", "alt+k":
+		// A data pane has no connection to detach, so both keys close it.
+		if m.phase == phaseData {
+			return m.closeDataTab(), true
+		}
 		if m.sessions.Count() == 0 {
 			return m, true
 		}
-		if s, ok := m.sessions.Detach(); ok {
-			m.status = "detached " + s.Name + " — alt+t to reattach"
+		if key == "alt+w" {
+			if s, ok := m.sessions.Detach(); ok {
+				m.status = "detached " + s.Name + " — alt+t to reattach"
+			}
+		} else {
+			m.sessions.CloseActive()
 		}
-		if m.sessions.Count() == 0 {
-			m.phase = phasePicking
-		}
-		return m, true
-	case "alt+k":
-		if m.sessions.Count() == 0 {
-			return m, true
-		}
-		m.sessions.CloseActive()
 		if m.sessions.Count() == 0 {
 			m.phase = phasePicking
 		}
@@ -350,6 +360,14 @@ func (m tuiModel) tabBar() string {
 			mark = "~ "
 		}
 		parts = append(parts, render(i+1, fmt.Sprintf(" %d %s%s ", i+2, mark, s.Name)))
+	}
+	for i, t := range m.data {
+		n := 1 + m.sessions.Count() + i
+		mark := ""
+		if t.failed() {
+			mark = ui.MarkCross.String() + " "
+		}
+		parts = append(parts, render(n, fmt.Sprintf(" %d %s%s · data ", n+1, mark, t.name)))
 	}
 	bar := strings.Join(parts, " ")
 	if n := m.sessions.DetachedCount(); n > 0 {

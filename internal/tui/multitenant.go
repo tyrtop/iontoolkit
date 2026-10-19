@@ -337,6 +337,17 @@ func (m tuiModel) ionUserFor(t config.Tenant) string {
 // tsgForElement finds which tenant an element belongs to. Sessions and the
 // reattach list only carry an element ID, so the tenant has to be recovered
 // from the loaded list; the active tenant is the fallback.
+// elementByKey is the loaded row for a tenant's element, which is where a
+// data tab gets the site and cluster ids its views are written against.
+func (m tuiModel) elementByKey(key string) (elementRow, bool) {
+	for _, r := range m.all {
+		if r.key() == key {
+			return r, true
+		}
+	}
+	return elementRow{}, false
+}
+
 func (m tuiModel) tsgForElement(eid string) string {
 	for _, r := range m.all {
 		if r.ID == eid {

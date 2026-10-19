@@ -71,13 +71,15 @@ func (t Tenant) AuthLabel() string {
 }
 
 type Config struct {
-	LastTenant  string   `json:"last_tenant,omitempty"`
-	Spinner     string   `json:"spinner,omitempty"`
-	DefaultMode string   `json:"default_mode,omitempty"`
-	AuthMode    string   `json:"auth_mode,omitempty"`
-	AllowWrites bool     `json:"allow_writes,omitempty"`
-	SessionCols int      `json:"session_cols,omitempty"`
-	SessionRows int      `json:"session_rows,omitempty"`
+	LastTenant  string `json:"last_tenant,omitempty"`
+	Spinner     string `json:"spinner,omitempty"`
+	DefaultMode string `json:"default_mode,omitempty"`
+	AuthMode    string `json:"auth_mode,omitempty"`
+	AllowWrites bool   `json:"allow_writes,omitempty"`
+	SessionCols int    `json:"session_cols,omitempty"`
+	SessionRows int    `json:"session_rows,omitempty"`
+	// PageStep is how far alt+up and alt+down move through the element list.
+	PageStep    int      `json:"page_step,omitempty"`
 	BatchFormat string   `json:"batch_format,omitempty"`
 	BatchOrient string   `json:"batch_orient,omitempty"`
 	BatchToFile bool     `json:"batch_to_file,omitempty"`

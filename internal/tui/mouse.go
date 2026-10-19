@@ -12,7 +12,7 @@ const wheelRows = 3
 // nothing leave it off.
 func (m tuiModel) mouseMode() tea.MouseMode {
 	switch m.phase {
-	case phasePicking, phaseResults, phaseSession:
+	case phasePicking, phaseResults, phaseSession, phaseData:
 		return tea.MouseModeCellMotion
 	}
 	return tea.MouseModeNone
@@ -60,6 +60,22 @@ func (m tuiModel) onWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.sesScroll = max(0, m.sesScroll-wheelRows)
 		}
+
+	// A data pane scrolls down the page, not back through history, so up
+	// means up here where a session's wheel means the other way.
+	case phaseData:
+		tab, ok := m.activeData()
+		if !ok {
+			return m, nil
+		}
+		_, rows := m.dataPaneSize()
+		if up {
+			tab.scroll -= wheelRows
+		} else {
+			tab.scroll += wheelRows
+		}
+		tab.scroll = clampScroll(tab.scroll, len(m.dataPage(tab).lines), rows)
+		m.data[m.dataActive] = tab
 	}
 	return m, nil
 }

@@ -23,6 +23,7 @@ var (
 	flagRefresh      bool
 	flagNoValidate   bool
 	flagNoLogin      bool
+	flagViews        string
 )
 
 var rootCmd = &cobra.Command{
@@ -84,6 +85,7 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
 		default:
 			tui.Version = buildVersion()
 			tui.Tenant = flagTenant
+			tui.Views = flagViews
 			return tui.Run(cmd.Context())
 		}
 	},
@@ -127,6 +129,7 @@ func init() {
 	pf.StringVar(&flagTenant, "tenant", "", "saved tenant to run as, by name (overrides the environment)")
 	pf.BoolVar(&app.Debug, "debug", false, "run against a throwaway config with no saved tenants and secrets held only in memory")
 	pf.StringVar(&flagFixtures, "fixtures", "", "YAML file of fake tenants, elements and CLI responses to run against instead of real hardware")
+	pf.StringVar(&flagViews, "views", "", "YAML file of rich-data views to use instead of views.yaml in the config directory")
 	pf.StringVar(&app.Defaults.TSGID, "tsg", "", "tenant service group ID (overrides SCM_TSG_ID)")
 	pf.StringVar(&flagFormat, "format", "", `batch output format: "json", "jsonl", "text", "table" or "csv" (default from settings, else json)`)
 	// Only the tabular formats have rows to sort, but the flag is accepted
@@ -134,5 +137,7 @@ func init() {
 	pf.StringVar(&flagOrient, "orientation", "", `row order for "table" and "csv": "ion" groups each element's commands, "command" puts one command across the fleet together (default from settings, else ion)`)
 	pf.StringVar(&flagOut, "out", "", `write batch output to this file ("-" is stdout; default from settings)`)
 
-	rootCmd.AddCommand(runCmd, shellCmd, loginCmd, versionCmd, genFlagDocsCmd)
+	inspectCmd.Flags().BoolVar(&flagInspectRaw, "raw", false, "print each response body as it arrived, keyed by URL")
+
+	rootCmd.AddCommand(runCmd, shellCmd, inspectCmd, loginCmd, versionCmd, genFlagDocsCmd)
 }

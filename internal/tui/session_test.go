@@ -373,21 +373,21 @@ func TestShellModeEnterOpensOneTabPerSelection(t *testing.T) {
 	}
 }
 
-func TestModeToggle(t *testing.T) {
+// alt+m walks every mode in pickModes and comes back round, so a third mode
+// is not a mode you can only leave by restarting.
+func TestModeCycle(t *testing.T) {
 	m := pickModel(t)
 	if m.mode != modeShell {
 		t.Fatalf("default mode = %v, want shell", m.mode)
 	}
 
-	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModAlt}))
-	m2 := mm.(tuiModel)
-	if m2.mode != modeBatch {
-		t.Errorf("after alt+m mode = %v, want batch", m2.mode)
-	}
-
-	mm, _ = m2.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModAlt}))
-	if got := mm.(tuiModel).mode; got != modeShell {
-		t.Errorf("toggling back gave %v, want shell", got)
+	want := append(pickModes[1:], pickModes[0])
+	cur := tea.Model(m)
+	for i, expect := range want {
+		cur, _ = cur.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModAlt}))
+		if got := cur.(tuiModel).mode; got != expect {
+			t.Fatalf("alt+m %d times gave %v, want %v", i+1, got, expect)
+		}
 	}
 }
 

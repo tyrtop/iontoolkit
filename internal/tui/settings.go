@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -36,7 +37,7 @@ const (
 func (m tuiModel) sectionRows() int {
 	switch m.setSection {
 	case secGeneral:
-		return 4
+		return 5
 	case secBatch:
 		return 4
 	case secTenants:
@@ -180,12 +181,14 @@ func (m tuiModel) onGeneralKey(key string) (tea.Model, tea.Cmd) {
 	if key != "enter" && key != " " && key != "space" {
 		return m, nil
 	}
-	if m.setCursor == 3 {
+	if m.setCursor == 4 {
 		return m.refreshNow()
 	}
 	switch m.setCursor {
 	case 2:
 		return m.cycleDefaultMode()
+	case 3:
+		return m.cyclePageStep()
 	case 0:
 		next := ui.NextSpinnerName(m.spinnerName)
 		m.cfg.Spinner = next
@@ -388,7 +391,10 @@ func (m tuiModel) sectionContent() []string {
 			ui.Label("commands")+guard,
 			ui.Label("mode")+ui.StyleElement.Render(m.defaultMode().String())+
 				ui.StyleDim.Render("  what the element list opens in"),
+			ui.Label("jump")+ui.StyleElement.Render(fmt.Sprintf("%d rows", m.pageStep()))+
+				ui.StyleDim.Render("  how far alt+↑/↓ moves in the element list"),
 			ui.Label("elements")+m.cacheLine(),
+			ui.Label("views")+m.viewsLine(),
 			"",
 			ui.Label("secrets")+m.secretsLine(),
 		)
@@ -650,6 +656,54 @@ func shortenPath(p string, n int) string {
 		return p
 	}
 	return "…" + string(r[len(r)-(n-1):])
+}
+
+// pageSteps is what the setting cycles through. Bounded at both ends: one row
+// is what the arrows already do, and a step past a screen is what pgdn is.
+var pageSteps = []int{5, 10, 20, 25, 50}
+
+// DefaultPageStep is how far alt+up and alt+down move with nothing saved.
+const DefaultPageStep = 10
+
+func (m tuiModel) pageStep() int {
+	if m.cfg != nil && m.cfg.PageStep > 0 {
+		return m.cfg.PageStep
+	}
+	return DefaultPageStep
+}
+
+func (m tuiModel) cyclePageStep() (tea.Model, tea.Cmd) {
+	next := pageSteps[0]
+	for i, n := range pageSteps {
+		if n == m.pageStep() {
+			next = pageSteps[(i+1)%len(pageSteps)]
+			break
+		}
+	}
+	m.cfg.PageStep = next
+	if err := m.store.SaveConfig(m.cfg); err != nil {
+		m.status = err.Error()
+	}
+	return m, nil
+}
+
+// viewsLine says what rich-data mode has to show and where a view of one's own
+// would go. A configurable feature nobody can find the file for is not
+// configurable.
+func (m tuiModel) viewsLine() string {
+	n := len(m.viewNames())
+	line := ui.StyleElement.Render(fmt.Sprintf("%d", n)) + ui.StyleDim.Render(" for rich-data mode")
+	if m.viewsErr != "" {
+		return line + "  " + ui.StyleErr.Render(ui.Truncate(m.viewsErr, 46))
+	}
+	path := ViewsPath(m.store)
+	if path == "" {
+		return line
+	}
+	if _, err := os.Stat(path); err != nil {
+		return line + ui.StyleDim.Render("  add "+shortenPath(path, 40))
+	}
+	return line + ui.StyleDim.Render("  from "+shortenPath(path, 40))
 }
 
 // defaultMode is the saved mode the element list opens in.

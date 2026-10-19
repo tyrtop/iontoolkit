@@ -20,6 +20,7 @@ import (
 	"golang.org/x/term"
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/dataview"
 	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/api"
@@ -49,6 +50,7 @@ const (
 	phaseSignedIn
 	phaseDiscover
 	phaseTenantPick
+	phaseData
 )
 
 type pickMode int
@@ -56,14 +58,18 @@ type pickMode int
 const (
 	modeShell pickMode = iota
 	modeBatch
+	modeData
 )
 
 // pickModes is the cycle alt+m walks. Adding a mode means adding it here.
-var pickModes = []pickMode{modeShell, modeBatch}
+var pickModes = []pickMode{modeShell, modeBatch, modeData}
 
 func (p pickMode) String() string {
-	if p == modeBatch {
+	switch p {
+	case modeBatch:
 		return "batch"
+	case modeData:
+		return "rich data"
 	}
 	return "shell"
 }
@@ -274,7 +280,17 @@ type tuiModel struct {
 	stats        bool
 	statsTicking bool
 
-	mode        pickMode
+	mode pickMode
+	// The rich-data views and the panes open on them. viewsErr is a broken
+	// views.yaml, reported where the mode is used rather than at startup.
+	views      *dataview.Set
+	viewsErr   string
+	data       []dataTab
+	dataActive int
+	// What to reopen once a tenant connection or sign-in finishes, the way
+	// resumeSessions does for shells.
+	resumeData []sessionTarget
+
 	userCursor  int
 	slash       slashMode
 	slashInput  textinput.Model
@@ -368,6 +384,16 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 	if mode, ok := parseMode(cfg.DefaultMode); ok {
 		m.mode = mode
 	}
+
+	// The views load here rather than when the mode is first used: a broken
+	// views.yaml should be reported once, at the start, and never leave the
+	// mode with nothing to show. Load returns the built-ins even when the
+	// user's file is the thing that failed.
+	views, err := dataview.Load(ViewsPath(store))
+	if err != nil {
+		m.viewsErr = err.Error()
+	}
+	m.views = views
 	if am, ok := parseAuthMode(cfg.AuthMode); ok {
 		m.authMode = am
 	} else if t, ok := app.ResolveTenant(cfg, Tenant); ok && !t.UsesBrowser() {
@@ -628,6 +654,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			next, cmd := m.openSessions(targets)
 			return next, tea.Batch(watch, cmd)
 		}
+		if targets := m.resumeData; len(targets) > 0 {
+			m.resumeData = nil
+			next, cmd := m.openDataTabs(targets)
+			return next, tea.Batch(watch, cmd)
+		}
 		if m.signInResume {
 			m.signInResume = false
 			next, cmd := m.startContinue()
@@ -696,6 +727,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if targets := m.resumeSessions; len(targets) > 0 {
 			m.resumeSessions = nil
 			next, cmd := m.openSessions(targets)
+			return next, tea.Batch(watch, cmd)
+		}
+		if targets := m.resumeData; len(targets) > 0 {
+			m.resumeData = nil
+			next, cmd := m.openDataTabs(targets)
 			return next, tea.Batch(watch, cmd)
 		}
 		return m, watch
@@ -817,6 +853,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// nothing, and must not reach the focused input.
 		return m, nil
 
+	case dataLoadedMsg:
+		return m.onDataLoaded(msg)
+
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
 
@@ -881,6 +920,13 @@ func (m tuiModel) wantsSpinner() bool {
 		return m.cacheState == cacheUpdating
 	case phaseSession:
 		return m.connectingAny()
+	case phaseData:
+		// Only while a pane is actually reading, or it repaints for nothing.
+		for _, t := range m.data {
+			if t.loading() {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -1041,6 +1087,8 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch m.phase {
 	case phaseSession:
 		return m.onSessionKey(msg, key)
+	case phaseData:
+		return m.onDataKey(key)
 	case phaseMenu:
 		return m.onMenuKey(key)
 	case phaseSwitch:
@@ -1125,6 +1173,16 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
 		return m, cmd
+
+	// A jump through a long list, between one row and a whole page. The step
+	// is a setting because the right size depends on the list: ten is a lot
+	// in a lab and nothing in a fleet of thousands.
+	case "alt+up":
+		m.table.MoveUp(m.pageStep())
+		return m, nil
+	case "alt+down":
+		m.table.MoveDown(m.pageStep())
+		return m, nil
 
 	case "k", "j", "home", "end":
 		// These move the cursor only when the query is not being typed. A
@@ -1212,11 +1270,7 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		return m, nil
 
 	case "alt+m":
-		if m.mode == modeShell {
-			m.mode = modeBatch
-		} else {
-			m.mode = modeShell
-		}
+		m.mode = m.mode.next()
 		m.status = ""
 		return m, nil
 
@@ -1340,6 +1394,13 @@ func (m tuiModel) onPickTargets(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	// stops blocking the tenants it affected.
 	for _, want := range targets {
 		delete(m.tenantIssues, want.tsg)
+	}
+
+	// Rich-data mode reads the portal and never opens a session, so it comes
+	// before the device-login gate: asking for an ION password to look at
+	// portal data would be asking for a credential the answer does not need.
+	if m.mode == modeData {
+		return m.openDataTabs(targets)
 	}
 
 	// A selection can span tenants, and each keeps its own device login, so
@@ -1541,6 +1602,8 @@ func (m tuiModel) View() tea.View {
 		content, cur := m.renderSession()
 		v = tea.NewView(content)
 		v.Cursor = cur
+	case phaseData:
+		v = tea.NewView(m.viewData())
 	}
 	if m.askRetry.eid != "" {
 		v = tea.NewView(m.overlayRetry(v.Content))
@@ -1588,8 +1651,11 @@ func (m tuiModel) viewPicking() string {
 		if n != 1 {
 			act += "s"
 		}
-		if m.mode == modeBatch {
+		switch m.mode {
+		case modeBatch:
 			act = fmt.Sprintf("enter command on %d", n)
+		case modeData:
+			act = fmt.Sprintf("enter data on %d", n)
 		}
 		// While typing a query the only keys that matter are the ones that end
 		// it, so the hint says just those.
