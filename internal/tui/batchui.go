@@ -11,7 +11,6 @@ import (
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
 	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/sase"
@@ -74,7 +73,7 @@ type streamClosedMsg struct{}
 
 func newBatchModel(events <-chan sase.Event, commands []string, total int, sink output.Sink) batchModel {
 	s := spinner.New()
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	s.Style = ui.StyleSpinner
 	return batchModel{
 		events:   events,
 		commands: commands,

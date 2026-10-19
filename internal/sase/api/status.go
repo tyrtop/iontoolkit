@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -381,25 +383,67 @@ func (s *Client) GetJSON(ctx context.Context, path string) ([]byte, error) {
 // endpoints are modelled from the portal's own field names rather than from a
 // published schema, so a snapshot can show what was actually sent.
 func (s *Client) get(ctx context.Context, what, url string) ([]byte, error) {
+	return s.do(ctx, what, http.MethodGet, url, nil)
+}
+
+// post is the same path for the query_* endpoints, which are POSTs carrying a
+// filter rather than GETs with it in the path.
+func (s *Client) post(ctx context.Context, what, url string, body []byte) ([]byte, error) {
+	return s.do(ctx, what, http.MethodPost, url, body)
+}
+
+// the limiter is our guess; Retry-After is the server's own answer
+const rateRetries = 2
+
+// a Retry-After of a minute is longer than anyone will wait
+const rateWaitCap = 5 * time.Second
+
+func (s *Client) do(ctx context.Context, what, method, url string, body []byte) ([]byte, error) {
+	for attempt := 0; ; attempt++ {
+		answer, wait, err := s.attempt(ctx, what, method, url, body)
+		if wait <= 0 || attempt >= rateRetries {
+			return answer, err
+		}
+		if s.verbose {
+			fmt.Fprintf(os.Stderr, "%s: rate limited, waiting %s\n", what, wait)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%s: %w", what, ctx.Err())
+		case <-time.After(wait):
+		}
+	}
+}
+
+// attempt is one request. A non-zero wait means the server asked for one and
+// the call is worth repeating; everything else is the answer or the error.
+func (s *Client) attempt(ctx context.Context, what, method, url string, body []byte) ([]byte, time.Duration, error) {
 	if err := s.limiter.Wait(ctx); err != nil {
-		return nil, fmt.Errorf("%s: rate limit wait: %w", what, err)
+		return nil, 0, fmt.Errorf("%s: rate limit wait: %w", what, err)
 	}
 
 	if s.verbose {
-		fmt.Fprintln(os.Stderr, "GET", url)
+		fmt.Fprintln(os.Stderr, method, url)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	var rdr io.Reader
+	if body != nil {
+		rdr = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, rdr)
 	if err != nil {
-		return nil, fmt.Errorf("%s: build request: %w", what, err)
+		return nil, 0, fmt.Errorf("%s: build request: %w", what, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+s.getToken())
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", browserUA)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s: response: %w", what, err)
+		return nil, 0, fmt.Errorf("%s: response: %w", what, err)
 	}
 
 	// The rate limit is the thing a fleet-wide run hits first, and the headers
@@ -417,12 +461,106 @@ func (s *Client) get(ctx context.Context, what, url string) ([]byte, error) {
 		resp.Body.Close()
 	}()
 
-	body, err := io.ReadAll(resp.Body)
+	answer, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("%s: read body: %w", what, err)
+		return nil, 0, fmt.Errorf("%s: read body: %w", what, err)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, retryAfter(resp), fmt.Errorf("%s: status %s: %s", what, resp.Status, answer)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: status %s: %s", what, resp.Status, body)
+		return nil, 0, fmt.Errorf("%s: status %s: %s", what, resp.Status, answer)
 	}
-	return body, nil
+	return answer, 0, nil
+}
+
+// seconds only; a bad header means a short wait, not no retry
+func retryAfter(resp *http.Response) time.Duration {
+	wait := time.Second
+	if v := resp.Header.Get("Retry-After"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			wait = time.Duration(n) * time.Second
+		}
+	}
+	return min(wait, rateWaitCap)
+}
+
+// The envelope the portal's query_* POSTs take, from its own calls.
+// dest_page counts from one, not zero.
+func queryBody(filter string, limit, page int) []byte {
+	return []byte(fmt.Sprintf(
+		`{"query_params":%s,"dest_page":%d,"limit":%d,"getDeleted":false,`+
+			`"retrieved_fields_mask":false,"retrieved_fields":[]}`, filter, page, limit))
+}
+
+// query_params as the portal sends it for the element-id queries
+func elementFilter(ids []string) string {
+	quoted := make([]string, 0, len(ids))
+	for _, id := range ids {
+		quoted = append(quoted, `"`+id+`"`)
+	}
+	return `{"element_id":{"in":[` + strings.Join(quoted, ",") + `]}}`
+}
+
+// 200 is what the portal asks for
+const ClusterQueryLimit = 200
+
+// a server that ignores dest_page cannot spin here
+const clusterQueryPages = 20
+
+// One element's place in its cluster, from the tenant-wide query. Unlike the
+// per-cluster endpoint it names the second node: "backup".
+type ClusterMemberStatus struct {
+	ID        string `json:"id"`
+	SiteID    string `json:"site_id"`
+	ClusterID string `json:"spoke_cluster_id"`
+	ElementID string `json:"element_id"`
+	Status    string `json:"status"`
+	Priority  int    `json:"priority"`
+	// UpdatedAt is milliseconds, like the other cluster timestamps.
+	UpdatedAt int64 `json:"last_status_update_ts"`
+}
+
+// The HA state of the elements named, in one call, which is what the portal
+// does. More than ClusterQueryLimit of them means asking again.
+func (s *Client) SpokeClusterStatuses(ctx context.Context, elementIDs []string) ([]ClusterMemberStatus, error) {
+	if len(elementIDs) == 0 {
+		return nil, fmt.Errorf("spoke cluster status query: no elements to ask about")
+	}
+
+	out, err := s.clusterQuery(ctx, elementFilter(elementIDs))
+	if err != nil {
+		return nil, err
+	}
+	for _, st := range out {
+		if st.ElementID != "" {
+			return out, nil
+		}
+	}
+	// Either none of these elements is in a cluster or the shape has moved.
+	// They are indistinguishable here, and only one of them is safe to act on.
+	return nil, fmt.Errorf("spoke cluster status query: no members in %d item(s)", len(out))
+}
+
+func (s *Client) clusterQuery(ctx context.Context, filter string) ([]ClusterMemberStatus, error) {
+	var out []ClusterMemberStatus
+	for page := 1; page <= clusterQueryPages; page++ {
+		body, err := s.post(ctx, "spoke cluster status query", clusterQueryURL(),
+			queryBody(filter, ClusterQueryLimit, page))
+		if err != nil {
+			return nil, err
+		}
+		var env struct {
+			Count int                   `json:"count"`
+			Items []ClusterMemberStatus `json:"items"`
+		}
+		if err := json.Unmarshal(body, &env); err != nil {
+			return nil, fmt.Errorf("spoke cluster status query: json decode: %w", err)
+		}
+		out = append(out, env.Items...)
+		if len(env.Items) < ClusterQueryLimit {
+			break
+		}
+	}
+	return out, nil
 }

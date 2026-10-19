@@ -407,19 +407,19 @@ func TestTemplateHelpers(t *testing.T) {
 			name: "utc reads 100ns ticks",
 			tmpl: "{{ utc .n }}",
 			ctx:  map[string]any{"n": float64(17923299413050015)},
-			want: "2026-10-18 13:25",
+			want: "2026-10-18 13:25 UTC",
 		},
 		{
 			name: "utc reads milliseconds",
 			tmpl: "{{ utc .n }}",
 			ctx:  map[string]any{"n": float64(1792307867657)},
-			want: "2026-10-18 07:17",
+			want: "2026-10-18 07:17 UTC",
 		},
 		{
 			name: "utc reads seconds",
 			tmpl: "{{ utc .n }}",
 			ctx:  map[string]any{"n": float64(1784373284)},
-			want: "2026-07-18 11:14",
+			want: "2026-07-18 11:14 UTC",
 		},
 		{
 			name: "a field that was never set is blank, not a date",

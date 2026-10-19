@@ -492,7 +492,7 @@ func TestThePageStepSettingCycles(t *testing.T) {
 	m.phase = phaseSettings
 	m.setSection = secGeneral
 	m.setFocus = focusContent
-	m.setCursor = 3
+	m.setCursor = jumpRow
 
 	first := m.pageStep()
 	next, _ := m.onGeneralKey("enter")
@@ -517,5 +517,133 @@ func TestThePageStepSettingCycles(t *testing.T) {
 	}
 	if got := m.pageStep(); got != first {
 		t.Errorf("pageStep() = %d after a full cycle, want %d", got, first)
+	}
+}
+
+// The security zone a port is in, joined through two fetches: the element's
+// bindings hold the interface ids, and the tenant's zone list has the names.
+// The join is the same one the circuit column uses.
+func TestInterfacesShowTheSecurityZone(t *testing.T) {
+	m, set := fixtureTUIWith(t, haFixtureYAML)
+	m.phase = phasePicking
+	m.mode = modeData
+	m.rebuildRows()
+
+	el := set.Tenants[0].Elements[0]
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	m = runDataLoads(t, next.(tuiModel), cmd)
+
+	pane := paneFor(t, m.data[0], "Interfaces")
+	if pane.err != "" {
+		t.Fatalf("the Interfaces view failed: %s", pane.err)
+	}
+	// The zone fetches must not have failed either: a broken one shows as a
+	// warn line rather than taking the view down.
+	for _, e := range pane.rendered.Errs {
+		t.Errorf("a fetch failed: %s", e)
+	}
+
+	var headers []string
+	for _, sec := range pane.rendered.Sections {
+		if len(sec.Headers) > 0 {
+			headers = sec.Headers
+		}
+	}
+	var zoneAt = -1
+	for i, h := range headers {
+		if h == "ZONE" {
+			zoneAt = i
+		}
+	}
+	if zoneAt < 0 {
+		t.Fatalf("no ZONE column in %v", headers)
+	}
+
+	// The zone hangs off the vlan interface, which is where a real element
+	// carries it: in interface.har every vlan row has a zone and every port,
+	// switch_port and bypasspair row has none.
+	vlan := tableRow(t, pane, "vlan1")
+	if got := vlan[zoneAt]; got != "Store - LAN" {
+		t.Errorf("vlan1 zone = %q, want the zone name", got)
+	}
+	for _, port := range []string{"1", "3"} {
+		if got := tableRow(t, pane, port)[zoneAt]; got != "" {
+			t.Errorf("port %s zone = %q, want nothing: zones are on the vlans", port, got)
+		}
+	}
+}
+
+// The data page is long -- four views, a 27-row interface table on a real
+// element -- so `/` narrows it to the lines that match, keeping each line's
+// view heading and its table header so a row is still readable.
+func TestTheDataPageCanBeFiltered(t *testing.T) {
+	m, set := fixtureTUIWith(t, haFixtureYAML)
+	m.phase, m.mode = phasePicking, modeData
+	m.width, m.height = 120, 30
+	m.rebuildRows()
+
+	el := set.Tenants[0].Elements[0]
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	m = runDataLoads(t, next.(tuiModel), cmd)
+
+	whole := len(m.dataPage(m.data[0]).lines)
+	if whole < 20 {
+		t.Fatalf("the page is %d lines, want a long one to filter", whole)
+	}
+
+	// / opens it and typing narrows the page.
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
+	m = mm.(tuiModel)
+	if !m.dataFilterOn {
+		t.Fatal("/ did not open the data filter")
+	}
+	for _, r := range "vlan1" {
+		mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
+		m = mm.(tuiModel)
+	}
+	if got := m.dataFilter.Value(); got != "vlan1" {
+		t.Fatalf("query = %q, want the typing to reach the input", got)
+	}
+
+	page := m.visiblePage(m.data[0])
+	if len(page.lines) >= whole {
+		t.Errorf("%d lines of %d after filtering, want fewer", len(page.lines), whole)
+	}
+	text := plain(page.String())
+	if !strings.Contains(text, "vlan1") {
+		t.Errorf("the filtered page lost its match:\n%s", text)
+	}
+	// The view heading and the table's header come with it, or the row is a
+	// line of unlabelled columns.
+	for _, want := range []string{"Interfaces", "PORT"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the filtered page is missing %q:\n%s", want, text)
+		}
+	}
+	// And nothing from the other views is left.
+	if strings.Contains(text, "Rebooted") {
+		t.Errorf("the filtered page kept lines that do not match:\n%s", text)
+	}
+
+	// The pane says how much matched.
+	if got := plain(m.viewData()); !strings.Contains(got, "of") || !strings.Contains(got, "lines") {
+		t.Errorf("the pane does not say how much matched:\n%s", got)
+	}
+
+	// Backspacing to nothing keeps the filter open; one more closes it.
+	for range "vlan1" {
+		mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+		m = mm.(tuiModel)
+	}
+	if !m.dataFilterOn {
+		t.Error("the filter closed on the press that emptied the query")
+	}
+	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+	if mm.(tuiModel).dataFilterOn {
+		t.Error("the filter is still open after backspacing the empty query")
+	}
+	// The whole page is back.
+	if got := len(m.visiblePage(m.data[0]).lines); got != whole {
+		t.Errorf("%d lines with an empty query, want the whole page of %d", got, whole)
 	}
 }

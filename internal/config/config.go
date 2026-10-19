@@ -79,7 +79,11 @@ type Config struct {
 	SessionCols int    `json:"session_cols,omitempty"`
 	SessionRows int    `json:"session_rows,omitempty"`
 	// PageStep is how far alt+up and alt+down move through the element list.
-	PageStep    int      `json:"page_step,omitempty"`
+	PageStep int `json:"page_step,omitempty"`
+	// Theme names the colour scheme; Zone is the IANA zone every printed time
+	// is read in, or "local", or empty for UTC.
+	Theme       string   `json:"theme,omitempty"`
+	Zone        string   `json:"zone,omitempty"`
 	BatchFormat string   `json:"batch_format,omitempty"`
 	BatchOrient string   `json:"batch_orient,omitempty"`
 	BatchToFile bool     `json:"batch_to_file,omitempty"`

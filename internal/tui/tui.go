@@ -19,6 +19,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/dataview"
 	"tyrtop.com/iontk/internal/ionterm"
@@ -123,6 +124,8 @@ const (
 	formGeometry
 	formFavourite
 	formMacro
+	formZone
+	formColour
 )
 
 const cacheTTL = time.Hour
@@ -179,8 +182,7 @@ type tuiModel struct {
 	phase  tuiPhase
 	status string
 
-	spinner     spinner.Model
-	spinnerName string
+	spinner spinner.Model
 
 	cacheState cacheState
 	cacheAt    time.Time
@@ -236,14 +238,48 @@ type tuiModel struct {
 
 	setSection int
 	setFocus   int
+	// The theme editor, which is the Theme section with a scheme open rather
+	// than a page of its own: the preview under it has to stay visible.
+	themeEdit  bool
+	themeRow   int
+	themeDraft ui.Theme
+	// Which role the colour form is typing into.
+	formThemeRole string
+	// The last IANA zone typed in, so the times row can cycle back to it
+	// rather than only between UTC and local.
+	typedZone string
 	// The factory reset asks twice, and this is whether it has been asked once.
 	resetArmed bool
 
 	all   []elementRow
 	sites map[string]string
 	// HA state per element, keyed tsg/eid, filled in behind the list: it is a
-	// request per cluster and the list must not wait on it.
-	ha map[string]string
+	// request per cluster and the list must not wait on it. haCluster is the
+	// per-cluster side, keyed tsg/cluster: "ok" for one that answered, the
+	// reason for one that refused, absent for one still in flight -- which is
+	// what tells a row that will never resolve from one that is loading.
+	ha        map[string]string
+	haCluster map[string]string
+	haFailed  int
+	haErr     string
+	// How far through the sweep we are, so the list can say. It is one
+	// request per cluster at the client's five a second, which on a fleet of
+	// HA pairs is long enough that "nothing yet" needs to be told apart from
+	// "stuck".
+	haTotal int
+	haDone  int
+	// The background fill's queue per tenant, and which tenants have a
+	// request out. The queue is paced so an interactive ask -- the rows
+	// someone just searched for -- is not stuck behind the fleet.
+	haQueue    map[string][]string
+	haInFlight map[string]bool
+	// The last sweep's states, read from the element cache at launch and
+	// shown with an asterisk until this run's sweep replaces them.
+	haCached map[string]string
+	// What the tenant-wide query did, for the Debug section: the aggregate is
+	// unverified against hardware, so which path filled the column is the
+	// first thing worth knowing about it.
+	haBulk string
 
 	matches  []int
 	selected map[string]bool
@@ -255,6 +291,12 @@ type tuiModel struct {
 	table          table.Model
 	filter         textinput.Model
 	filterOn       bool
+	// The element list as rebuildRows last worked it out: which columns are
+	// in it, their widths, and every row's plain values. Kept so a cursor
+	// move can repaint one row instead of rebuilding the fleet.
+	listKeep   []int
+	listWidths []int
+	listValues [][]string
 
 	cmdInput textinput.Model
 
@@ -312,6 +354,9 @@ type tuiModel struct {
 	viewsErr   string
 	data       []dataTab
 	dataActive int
+	// The data pane's own filter, which narrows the page to matching lines.
+	dataFilter   textinput.Model
+	dataFilterOn bool
 	// What to reopen once a tenant connection or sign-in finishes, the way
 	// resumeSessions does for shells.
 	resumeData []sessionTarget
@@ -385,11 +430,15 @@ func Run(ctx context.Context) error {
 }
 
 func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) tuiModel {
-	spinnerPick := cfg.Spinner
-	if spinnerPick == "" {
-		spinnerPick = ui.DefaultSpinner
-	}
-	s := ui.NewSpinner(spinnerPick)
+	// Appearance and the display zone are process-wide, and this is where the
+	// saved settings first exist. None of it can fail the launch: a zone that
+	// will not load reports itself on the settings page and the times stay
+	// UTC, a themes.yaml that will not parse leaves the built-ins, and an
+	// unknown theme name opens in the default.
+	app.ApplyDisplaySettings(store, cfg)
+
+	// The shape as well as the colour: the theme owns both.
+	s := ui.NewSpinner(ui.CurrentTheme().Spinner)
 
 	fi := textinput.New()
 	fi.Prompt = "/"
@@ -405,12 +454,12 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 	ci.SetWidth(60)
 
 	m := tuiModel{
-		ctx:         ctx,
-		store:       store,
-		cfg:         cfg,
-		phase:       phaseMenu,
-		spinner:     s,
-		spinnerName: ui.SpinnerName(spinnerPick),
+		ctx:     ctx,
+		store:   store,
+		cfg:     cfg,
+		phase:   phaseMenu,
+		spinner: s,
+
 		selected:    map[string]bool{},
 		filter:      fi,
 		cmdInput:    ci,
@@ -428,6 +477,9 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 	if mode, ok := parseMode(cfg.DefaultMode); ok {
 		m.mode = mode
 	}
+	if z := cfg.Zone; z != "" && !strings.EqualFold(z, clock.UTC) && !strings.EqualFold(z, clock.Local) {
+		m.typedZone = z
+	}
 
 	// The views load here rather than when the mode is first used: a broken
 	// views.yaml should be reported once, at the start, and never leave the
@@ -440,6 +492,7 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 	m.views = views
 
 	// Nil in a test that only renders: ViewsPath guards the same way.
+	m.dataFilter = newDataFilter()
 	m.cmds = &config.CommandStore{}
 	if store != nil {
 		cmds, err := store.Commands()
@@ -473,8 +526,9 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 	return m
 }
 
-// tableStyles is the widget's own, with the selected row replaced: its
-// default is a 256-colour pink, and only 0-15 survives a terminal theme.
+// tableStyles is the widget's own, with the selected row replaced: its default
+// is a 256-colour pink that no theme of ours and no terminal's own palette has
+// anything to do with.
 func tableStyles() table.Styles {
 	s := table.DefaultStyles()
 	s.Selected = ui.StyleRow
@@ -511,8 +565,12 @@ func (m *tuiModel) moveCursorTo(n int) {
 		return
 	}
 	n = max(0, min(n, len(rows)-1))
-	if at := m.table.Cursor(); n >= at {
-		m.table.MoveDown(n - at)
+	prev := m.table.Cursor()
+	if n >= prev {
+		m.table.MoveDown(n - prev)
+		// The row the cursor left goes back to its own colour and the row it
+		// landed on gives it up. Two rows, not the list.
+		m.repaintCursorRows(prev)
 		return
 	}
 
@@ -523,6 +581,7 @@ func (m *tuiModel) moveCursorTo(n int) {
 	fresh.SetHeight(m.listHeight())
 	fresh.MoveDown(n)
 	m.table = fresh
+	m.repaintCursorRows(prev)
 }
 
 func (m *tuiModel) moveCursor(delta int) {
@@ -562,6 +621,11 @@ func (m tuiModel) refreshNow() (tea.Model, tea.Cmd) {
 	}
 	m.flags = f
 	m.status = ""
+	// The failure tally belongs to one sweep. Left standing it would double
+	// on the next refresh and report a count nobody could account for; the
+	// per-cluster states stay, so the column does not blank while it refills.
+	m.haFailed, m.haErr = 0, ""
+	m.haTotal, m.haDone, m.haBulk = 0, 0, ""
 	return m.refreshActive()
 }
 
@@ -630,6 +694,18 @@ func watchToken(ch <-chan error) tea.Cmd {
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+
+	case tea.ColorProfileMsg:
+		// What the terminal can show, which the renderer downsamples to. Held
+		// so the theme picker can say a scheme is being approximated rather
+		// than leaving someone to wonder why nord looks like classic.
+		ui.SetProfile(msg.Profile)
+		if ui.ShouldQueryDepth() {
+			// Bubble Tea upgrades the profile and sends this message again if
+			// the terminal answers, so this asks once and does not loop.
+			return m, tea.Batch(tea.RequestCapability("RGB"), tea.RequestCapability("Tc"))
+		}
+		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -853,8 +929,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mergeTenantElements(msg.tsg, msg.tenant, msg.elements)
 			// Behind the list, not in front of it: HA is a request per
 			// cluster, and the rows are what someone is looking for.
-			if pairs := haClusters(msg.elements); len(pairs) > 0 {
-				ha = loadHA(m.ctx, m.pool.get(msg.tsg), msg.tsg, pairs)
+			// Started on the clustered elements, not on the (site, cluster)
+			// pairs: the aggregate asks by element and needs no site, so
+			// gating the whole sweep on a site id -- which the fallback alone
+			// needs -- could leave a fleet on "loading" for ever.
+			if w := haClusters(msg.elements); len(w.elements) > 0 {
+				m.haTotal += w.clusters()
+				ha = loadHABulk(m.ctx, m.pool.get(msg.tsg), msg.tsg, w)
 			}
 		}
 
@@ -945,14 +1026,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, statsTick()
 
-	case tea.MouseWheelMsg:
-		return m.onWheel(msg)
-
-	case tea.MouseMsg:
-		// Clicks and motion arrive with cell-motion reporting but address
-		// nothing, and must not reach the focused input.
-		return m, nil
-
 	case dataLoadedMsg:
 		return m.onDataLoaded(msg)
 
@@ -964,6 +1037,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case haStatesMsg:
 		return m.onHAStates(msg)
+
+	case haTickMsg:
+		return m.onHATick(msg.tsg)
 
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
@@ -979,6 +1055,15 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.form) == 0 || m.formCursor >= len(m.form) {
 			return m, nil
 		}
+		// A block of commands pasted into the macro form is one per line,
+		// which is the shape the form already has. The field the cursor is in
+		// takes the first, so pasting into the empty line at the bottom
+		// appends rather than overwriting what is above it.
+		if p, ok := msg.(tea.PasteMsg); ok && m.formKind == formMacro && m.formCursor >= 1 {
+			if cmds := pasteCommands(p.Content); len(cmds) > 1 {
+				return m.pasteMacroCommands(cmds)
+			}
+		}
 		var cmd tea.Cmd
 		m.form[m.formCursor].input, cmd = m.form[m.formCursor].input.Update(msg)
 		return m, cmd
@@ -988,13 +1073,21 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.filter, cmd = m.filter.Update(msg)
 			m.applyFilter()
-			return m, cmd
+			return m, tea.Batch(cmd, m.askVisibleHA())
 		}
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
 		return m, cmd
 
 	case phaseCommand:
+		// The box is comma separated, so a multi-line paste is a list of
+		// commands. Rewritten before the input sees it: textinput replaces a
+		// newline with a space, which would make one long command of the lot.
+		if p, ok := msg.(tea.PasteMsg); ok {
+			if cmds := pasteCommands(p.Content); len(cmds) > 1 {
+				msg = tea.PasteMsg{Content: strings.Join(cmds, ", ")}
+			}
+		}
 		var cmd tea.Cmd
 		m.cmdInput, cmd = m.cmdInput.Update(msg)
 		return m, cmd
@@ -1075,13 +1168,13 @@ func (m *tuiModel) setElements(els []elementRow) {
 
 // siteName looks up a site within its own tenant, since two tenants can use the
 // same site identifier for different places.
-func (m tuiModel) siteName(el elementRow) string {
+func (m *tuiModel) siteName(el elementRow) string {
 	return m.record(el).SiteLabel()
 }
 
 // record flattens a row into the values --search matches against, so the
 // filter here and the one on the command line cannot disagree.
-func (m tuiModel) record(el elementRow) search.Record {
+func (m *tuiModel) record(el elementRow) search.Record {
 	return search.Of(el.Element, el.TSG, el.Tenant, search.SiteMap(m.sites))
 }
 
@@ -1101,72 +1194,322 @@ func (m tuiModel) showHAColumn() bool {
 	return false
 }
 
+func (m tuiModel) showSerialColumn() bool {
+	for _, r := range m.all {
+		if r.Serial != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// elementColumn is one column of the element list: how wide it would like to
+// be, and how narrow it will go. Sizing to content is why site stopped being
+// 22 columns wide for names like "Store 0003" while a serial was cut off at
+// 16 -- and why adding sn no longer pushes state off an 80-column terminal.
+type elementColumn struct {
+	title string
+	min   int
+	max   int
+	// flex is false for a column whose content is a known width: the marks,
+	// the state words, the HA words. Those are never shaved.
+	flex bool
+}
+
+// The order asked for: element · site · model · sn · state · ha. The serial
+// sits with the model as part of what the box is; state and HA are the pair
+// that change.
+var elementColumns = []elementColumn{
+	{title: "", min: 3, max: 3},
+	{title: "", min: 3, max: 3},
+	{title: "element", min: 12, max: 28, flex: true},
+	{title: "site", min: 8, max: 22, flex: true},
+	{title: "model", min: 8, max: 11, flex: true},
+	{title: "sn", min: 10, max: 24, flex: true},
+	{title: "state", min: 9, max: 9},
+	{title: "ha", min: 8, max: 8},
+	{title: "tenant", min: 8, max: 20, flex: true},
+}
+
+// Which of the optional columns are in this list, by index into
+// elementColumns.
+const (
+	colMark = iota
+	colStatus
+	colName
+	colSite
+	colModel
+	colSerial
+	colState
+	colHA
+	colTenant
+)
+
+// colGap is what the table puts either side of a cell, which has to be
+// counted or the last column is the one that falls off the terminal.
+const colGap = 2
+
+// fitColumns sizes each column to its widest value, capped at its max, then
+// shaves the flexible ones -- widest first, never below their min -- until the
+// set fits the terminal. Widest first because the cost of a column losing two
+// of its twenty columns is nothing next to one losing two of its ten.
+func fitColumns(cols []elementColumn, values [][]string, avail int) []int {
+	w := make([]int, len(cols))
+	for i, c := range cols {
+		w[i] = max(c.min, ui.Width(c.title))
+		for _, row := range values {
+			if i < len(row) {
+				w[i] = max(w[i], ui.Width(row[i]))
+			}
+		}
+		w[i] = min(w[i], c.max)
+	}
+	return shaveColumns(cols, w, avail)
+}
+
+// shaveColumns is the second half, for a caller that measured as it built.
+func shaveColumns(cols []elementColumn, w []int, avail int) []int {
+	total := func() int {
+		n := 0
+		for _, x := range w {
+			n += x + colGap
+		}
+		return n
+	}
+	for total() > avail {
+		widest, at := 0, -1
+		for i, c := range cols {
+			if c.flex && w[i] > c.min && w[i] > widest {
+				widest, at = w[i], i
+			}
+		}
+		if at < 0 {
+			break // nothing left to give: the frame clips the rest
+		}
+		w[at]--
+	}
+	return w
+}
+
 func (m *tuiModel) rebuildRows() {
-	rows := make([]table.Row, 0, len(m.matches))
 	tenants := m.showTenantColumn()
 	ha := m.showHAColumn()
-	for _, i := range m.matches {
-		el := m.all[i]
-		mark := " "
-		if m.selected[el.key()] {
-			mark = "x"
-		}
-		name := el.label()
-		state := "offline"
-		if el.Connected {
-			state = "connected"
-		}
-		row := table.Row{
-			mark,
-			m.rowStatus(el),
-			ui.Truncate(name, 26),
-			ui.Truncate(m.siteName(el), 22),
-			ui.Truncate(el.Model, 11),
-			state,
-		}
-		if ha {
-			row = append(row, m.haCell(el))
-		}
-		if tenants {
-			row = append(row, ui.Truncate(el.Tenant, 20))
-		}
-		rows = append(rows, row)
-	}
+	serials := m.showSerialColumn()
 
-	cols := []table.Column{
-		{Title: "", Width: 3},
-		{Title: "", Width: 3},
-		{Title: "element", Width: 26},
-		{Title: "site", Width: 22},
-		{Title: "model", Width: 11},
-		{Title: "state", Width: 9},
+	keep := []int{colMark, colStatus, colName, colSite, colModel}
+	if serials {
+		keep = append(keep, colSerial)
 	}
-	width := 86
+	keep = append(keep, colState)
 	if ha {
-		cols = append(cols, table.Column{Title: "ha", Width: 8})
-		width += 10
+		keep = append(keep, colHA)
 	}
 	if tenants {
-		cols = append(cols, table.Column{Title: "tenant", Width: 20})
-		width += 22
+		keep = append(keep, colTenant)
 	}
+
+	cols := make([]elementColumn, 0, len(keep))
+	widths := make([]int, len(keep))
+	for j, c := range keep {
+		cols = append(cols, elementColumns[c])
+		widths[j] = max(elementColumns[c].min, ui.Width(elementColumns[c].title))
+	}
+
+	// Values and widths in one pass, plain, so the columns can be sized to
+	// what is in them before anything is truncated or coloured -- and so a
+	// cursor move can repaint one row without working the whole list out
+	// again. This used to build a map per row, which on a fleet is an
+	// allocation per element per keystroke of a search.
+	values := make([][]string, 0, len(m.matches))
+	for _, i := range m.matches {
+		el := m.all[i]
+		row := make([]string, len(keep))
+		for j, c := range keep {
+			row[j] = m.cellValue(el, c)
+			if w := ui.Width(row[j]); w > widths[j] {
+				widths[j] = w
+			}
+		}
+		values = append(values, row)
+	}
+	for j, c := range keep {
+		widths[j] = min(widths[j], elementColumns[c].max)
+	}
+
+	m.listKeep = keep
+	m.listValues = values
+	m.listWidths = shaveColumns(cols, widths, max(20, m.width))
+
+	// Painted only where the table will render: it draws a window around the
+	// cursor and nothing else, so styling the other five thousand rows is work
+	// nobody sees -- and it was happening on every keystroke of a search.
+	rows := make([]table.Row, len(values))
+	lo, hi := m.paintWindow(len(values))
+	for n := range values {
+		if n >= lo && n < hi {
+			rows[n] = m.listRow(n)
+		} else {
+			rows[n] = m.listRowPlain(n)
+		}
+	}
+
+	tcols := make([]table.Column, 0, len(keep))
+	total := 0
+	for i, c := range cols {
+		tcols = append(tcols, table.Column{Title: c.title, Width: m.listWidths[i]})
+		total += m.listWidths[i] + colGap
+	}
+
 	// Columns and rows have to agree at every moment: the table re-renders
 	// inside each setter, so changing the column count while the old rows are
 	// still in place indexes past the end of them. Clearing the rows first is
 	// safe but resets the cursor, so only do it when the shape really changed.
-	if len(m.table.Columns()) != len(cols) {
-		cursor := m.table.Cursor()
+	if len(m.table.Columns()) != len(tcols) {
+		at := m.table.Cursor()
 		m.table.SetRows(nil)
-		m.table.SetColumns(cols)
+		m.table.SetColumns(tcols)
 		m.table.SetRows(rows)
-		if cursor > 0 && cursor < len(rows) {
-			m.table.SetCursor(cursor)
+		if at > 0 && at < len(rows) {
+			m.table.SetCursor(at)
 		}
 	} else {
+		m.table.SetColumns(tcols)
 		m.table.SetRows(rows)
 	}
-	m.table.SetWidth(min(m.width, width))
+	m.table.SetWidth(min(m.width, total))
 	m.table.SetHeight(m.listHeight())
+}
+
+// cellValue is one cell, plain. A switch rather than a map: this runs for
+// every column of every matched row on every keystroke of a search, and a map
+// literal per row is an allocation per element.
+func (m *tuiModel) cellValue(el elementRow, col int) string {
+	switch col {
+	case colMark:
+		if m.selected[el.key()] {
+			return "x"
+		}
+		return " "
+	case colStatus:
+		glyph, _ := m.rowStatusOf(el)
+		return glyph
+	case colName:
+		return el.label()
+	case colSite:
+		return m.siteName(el)
+	case colModel:
+		return el.Model
+	case colSerial:
+		return el.Serial
+	case colState:
+		if el.Connected {
+			return "connected"
+		}
+		return "offline"
+	case colHA:
+		word, cached := m.haState(el)
+		if cached {
+			// The asterisk is part of the text, so it is measured with it.
+			return word + "*"
+		}
+		return word
+	case colTenant:
+		return el.Tenant
+	}
+	return ""
+}
+
+// listRow paints one row from the values rebuildRows worked out. The row under
+// the cursor is painted plain: the table paints its highlight around the whole
+// row, and a highlight wrapped around coloured cells ends at the first reset
+// inside them -- so on a green line the cursor would all but disappear. One
+// rule: the cursor row is the highlight, every other row carries its own
+// colour.
+func (m *tuiModel) listRow(n int) table.Row {
+	vals := m.listValues[n]
+	el := m.all[m.matches[n]]
+	here := n == m.table.Cursor()
+
+	// A connected element reads green across the whole line, so a fleet's
+	// state is scannable without reading one column; offline keeps red on the
+	// state alone, since red across a row reads as an error rather than a
+	// fact about the appliance.
+	paint := func(s string) string { return s }
+	if el.Connected && !here {
+		paint = func(s string) string { return ui.StyleOK.Render(s) }
+	}
+
+	row := make(table.Row, 0, len(vals))
+	for i, c := range m.listKeep {
+		v := ui.Truncate(vals[i], m.listWidths[i])
+		switch c {
+		case colStatus, colHA:
+			// Already styled, and styled per state rather than per row.
+			v = plainIf(here, v)
+		case colState:
+			switch {
+			case here:
+				// The highlight is this row's colour.
+			case el.Connected:
+				v = paint(v)
+			default:
+				v = ui.StyleErr.Render(v)
+			}
+		default:
+			v = paint(v)
+		}
+		row = append(row, v)
+	}
+	return row
+}
+
+// listRowPlain is the same row with no styling, for the rows outside the
+// window: they are never rendered, so painting them is wasted work.
+func (m *tuiModel) listRowPlain(n int) table.Row {
+	vals := m.listValues[n]
+	row := make(table.Row, len(vals))
+	for i := range vals {
+		row[i] = ui.Truncate(vals[i], m.listWidths[i])
+	}
+	return row
+}
+
+// paintWindow is the rows the table can render: it draws from cursor-height to
+// cursor+height, so a margin either side of that is everything that can be
+// seen.
+func (m *tuiModel) paintWindow(n int) (int, int) {
+	return m.windowAround(m.table.Cursor(), n)
+}
+
+func (m *tuiModel) windowAround(at, n int) (int, int) {
+	h := max(8, m.listHeight()) + 4
+	return max(0, at-h), min(n, at+h)
+}
+
+// repaintCursorRows paints the two rows a move touched, instead of the whole
+// list. Rebuilding every row to move a highlight one line is what made a held
+// key and a wheel notch feel stuck on a fleet: the work was proportional to
+// the list, not to what changed.
+func (m *tuiModel) repaintCursorRows(prev int) {
+	rows := m.table.Rows()
+	if len(rows) != len(m.listValues) {
+		// The list changed under us; the next rebuild will paint it.
+		return
+	}
+	// The window the cursor left goes back to plain and the one it moved into
+	// is painted -- and only those two ranges are touched. Walking the whole
+	// slice to find them was O(fleet) on a keypress, which is the mistake
+	// this file has now made twice.
+	lo, hi := m.paintWindow(len(rows))
+	plo, phi := m.windowAround(prev, len(rows))
+	for i := min(lo, plo); i < max(hi, phi); i++ {
+		if i >= lo && i < hi {
+			rows[i] = m.listRow(i)
+			continue
+		}
+		rows[i] = m.listRowPlain(i)
+	}
+	m.table.SetRows(rows)
 }
 
 func (m tuiModel) onEvent(ev sase.Event) (tea.Model, tea.Cmd) {
@@ -1236,6 +1579,11 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case phaseSession:
 		return m.onSessionKey(msg, key)
 	case phaseData:
+		if m.dataFilterOn {
+			if next, cmd, done := m.onDataFilterKey(msg, key); done {
+				return next, cmd
+			}
+		}
 		return m.onDataKey(key)
 	case phaseMacros:
 		return m.onMacroKey(msg, key)
@@ -1316,7 +1664,7 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 			m.applyFilter()
 			return m, nil
 		}
-		m.phase = phaseMenu
+		m.phase = m.listReturn()
 		return m, nil
 
 	case "up", "down":
@@ -1427,6 +1775,9 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 	case "alt+r":
 		return m.refreshNow()
 
+	case "alt+y":
+		return m.copyElements()
+
 	case "alt+u":
 		m.userCursor = 0
 		m.status = ""
@@ -1494,17 +1845,23 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 	}
 
 	if m.filterOn {
-		var cmd tea.Cmd
-		m.filter, cmd = m.filter.Update(msg)
-		m.applyFilter()
-		// Deleting the last character leaves the filter. An empty query with
-		// the cursor still in it is a page where j and k type letters, which
-		// is not what anyone who just cleared a search wants.
+		// Backspace on an **already** empty query is what leaves: the last
+		// press deletes the "/" itself. Checked before the input sees the key,
+		// because doing it after meant the press that emptied the query was
+		// also the one that left -- one too early to carry on typing.
 		if key == "backspace" && m.filter.Value() == "" {
 			m.filterOn = false
 			m.filter.Blur()
+			m.applyFilter()
+			return m, nil
 		}
-		return m, cmd
+		var cmd tea.Cmd
+		m.filter, cmd = m.filter.Update(msg)
+		m.applyFilter()
+		// The rows a search just brought on screen are asked about now rather
+		// than when the background fill reaches them. That is what the pacing
+		// leaves room for.
+		return m, tea.Batch(cmd, m.askVisibleHA())
 	}
 
 	if key == "alt+t" {
@@ -1512,10 +1869,11 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 	}
 	if key == "alt+w" {
 		// alt+w closes what you are in. On the element list that is the list
-		// itself, so it goes back to the menu; only the menu's alt+w quits.
-		// Any sessions keep running and are still reachable with alt+t.
+		// itself, so it goes back where the list was opened from; only the
+		// menu's alt+w quits. Any sessions keep running and are still
+		// reachable with alt+t.
 		m.status = ""
-		m.phase = phaseMenu
+		m.phase = m.listReturn()
 		return m, nil
 	}
 	if next, handled := m.onTabKey(key); handled {
@@ -1882,9 +2240,13 @@ func (m tuiModel) viewPicking() string {
 		if len(m.lastCleared) > 0 {
 			clear = "alt+z undo clear"
 		}
-		hint := fmt.Sprintf("↑↓/jk move · / filter · space select · alt+s selected · %s · alt+r refresh · alt+m mode · alt+u user · %s · esc/q/alt+w menu", clear, act)
+		back := "menu"
+		if m.listReturn() == phaseMacros {
+			back = "macros"
+		}
+		hint := fmt.Sprintf("↑↓/jk move · / filter · space select · alt+s selected · %s · alt+r refresh · alt+m mode · %s id · %s · esc/q/alt+w %s", clear, copyKeyHint, act, back)
 		if m.showSelected {
-			hint = fmt.Sprintf("↑↓/jk move · alt+s all · alt+c clear · space unselect · %s · esc/q/alt+w menu", act)
+			hint = fmt.Sprintf("↑↓/jk move · alt+s all · alt+c clear · space unselect · %s · esc/q/alt+w %s", act, back)
 		}
 		if m.filterOn {
 			// With one match left, enter does the thing rather than just
@@ -1970,4 +2332,13 @@ func (m tuiModel) viewRunning() string {
 	}
 
 	return b.String()
+}
+
+// plainIf strips a cell's own styling on the row the cursor is on, so the
+// table's highlight is the only thing colouring it.
+func plainIf(here bool, cell string) string {
+	if here {
+		return ui.Plain(cell)
+	}
+	return cell
 }

@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ioncmd"
 	"tyrtop.com/iontk/internal/output"
@@ -22,10 +23,33 @@ const (
 	focusContent
 )
 
-var setSections = []string{"General", "Batch", "Tenants", "Users", "Session", "Debug", "Reset"}
+// The General rows, named because the key handler, the content and the tests
+// all have to agree on the order. The refresh is last: it is the one entry
+// here that does something rather than setting something.
+// The order here is the order sectionContent prints them in, and
+// TestGeneralRowsMatchTheirLabels is what keeps the two from drifting: a row
+// that moves without its constant sends the cursor to someone else's setting.
+const (
+	guardRow = iota
+	modeRow
+	jumpRow
+	zoneRow
+	refreshRow
+	generalRows
+)
+
+// generalRowLabels is each row's gutter label, for that test and for nothing
+// else.
+var generalRowLabels = map[int]string{
+	guardRow: "commands", modeRow: "mode", jumpRow: "jump",
+	zoneRow: "times", refreshRow: "elements",
+}
+
+var setSections = []string{"General", "Theme", "Batch", "Tenants", "Users", "Session", "Debug", "Reset"}
 
 const (
 	secGeneral = iota
+	secTheme
 	secBatch
 	secTenants
 	secUsers
@@ -37,7 +61,14 @@ const (
 func (m tuiModel) sectionRows() int {
 	switch m.setSection {
 	case secGeneral:
-		return 5
+		return generalRows
+	case secTheme:
+		if m.themeEdit {
+			// The editor has its own cursor; the section's would otherwise
+			// move the theme list underneath it.
+			return 0
+		}
+		return len(ui.Themes())
 	case secBatch:
 		return 4
 	case secTenants:
@@ -115,6 +146,8 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 	switch m.setSection {
 	case secGeneral:
 		return m.onGeneralKey(key)
+	case secTheme:
+		return m.onThemeKey(key)
 	case secBatch:
 		return m.onBatchKey(key)
 	case secTenants:
@@ -181,23 +214,24 @@ func (m tuiModel) onGeneralKey(key string) (tea.Model, tea.Cmd) {
 	if key != "enter" && key != " " && key != "space" {
 		return m, nil
 	}
-	if m.setCursor == 4 {
+	// The refresh stays the last row of the section: it is the one entry here
+	// that does something rather than setting something.
+	if m.setCursor == refreshRow {
 		return m.refreshNow()
 	}
 	switch m.setCursor {
-	case 2:
-		return m.cycleDefaultMode()
-	case 3:
-		return m.cyclePageStep()
-	case 0:
-		next := ui.NextSpinnerName(m.spinnerName)
-		m.cfg.Spinner = next
-		if err := m.store.SaveConfig(m.cfg); err != nil {
-			m.status = err.Error()
-			return m, nil
+	case zoneRow:
+		// Typed rather than cycled, since there are 600 IANA names. Space
+		// still reaches the two anyone wants without a form.
+		if key == "enter" {
+			return m.openZoneForm()
 		}
-		return m.withSpinner(next)
-	case 1:
+		return m.cycleZone()
+	case modeRow:
+		return m.cycleDefaultMode()
+	case jumpRow:
+		return m.cyclePageStep()
+	case guardRow:
 		m.cfg.AllowWrites = !m.cfg.AllowWrites
 		if err := m.store.SaveConfig(m.cfg); err != nil {
 			m.status = err.Error()
@@ -387,12 +421,12 @@ func (m tuiModel) sectionContent() []string {
 			guard = ui.StyleWarn.Render("writes allowed")
 		}
 		out = append(out,
-			ui.Label("spinner")+m.spinner.View()+" "+ui.StyleElement.Render(m.spinnerName),
 			ui.Label("commands")+guard,
 			ui.Label("mode")+ui.StyleElement.Render(m.defaultMode().String())+
 				ui.StyleDim.Render("  what the element list opens in"),
 			ui.Label("jump")+ui.StyleElement.Render(fmt.Sprintf("%d rows", m.pageStep()))+
 				ui.StyleDim.Render("  how far alt+↑/↓ moves in the element list"),
+			ui.Label("times")+m.zoneLine(),
 			ui.Label("elements")+m.cacheLine(),
 			ui.Label("views")+m.viewsLine(),
 			"",
@@ -404,6 +438,9 @@ func (m tuiModel) sectionContent() []string {
 			}
 			out = append(out, ui.Label("")+ui.StyleWarn.Render("ION passwords are readable by anything that can read that file"))
 		}
+
+	case secTheme:
+		out = append(out, m.themeContent()...)
 
 	case secTenants:
 		if len(m.cfg.Tenants) == 0 {
@@ -485,6 +522,8 @@ func (m tuiModel) sectionContent() []string {
 			ui.Label("secrets")+ui.StyleDim.Render(m.store.Secrets.Backend()),
 			ui.Label("version")+ui.StyleDim.Render(Version),
 			ui.Label("stats")+ui.StyleDim.Render("alt+i overlays live counters"),
+			ui.Label("colours")+ui.StyleDim.Render(ui.CurrentTheme().Name+"  "+profileLabel()),
+			ui.Label("times")+ui.StyleDim.Render(clock.Name()),
 			"",
 			ui.Label("tenant")+ui.StyleDim.Render(m.tenant.Name+"  tsg "+m.tenant.TSGID),
 			ui.Label("ion user")+ui.StyleDim.Render(m.ionUser),
@@ -492,6 +531,7 @@ func (m tuiModel) sectionContent() []string {
 			"",
 			ui.Label("elements")+ui.StyleDim.Render(fmt.Sprintf("%d cached, %d shown", m.cacheCount, len(m.matches))),
 			ui.Label("sessions")+ui.StyleDim.Render(fmt.Sprintf("%d open, %d detached", m.sessions.Count(), m.sessions.DetachedCount())),
+			ui.Label("ha")+ui.StyleDim.Render(m.haPath()),
 			ui.Label("catalog")+ui.StyleDim.Render(fmt.Sprintf("%d commands, %d offered", len(ioncmd.Embedded()), len(m.catalog()))),
 			ui.Label("terminal")+ui.StyleDim.Render(fmt.Sprintf("%d x %d", m.width, m.height)),
 		)
@@ -514,7 +554,12 @@ func (m tuiModel) sectionHint() string {
 	}
 	switch m.setSection {
 	case secGeneral:
-		return "↑↓ row · enter change/refresh · tab back · esc back"
+		return "↑↓ row · enter change/refresh/type · space cycle · tab back · esc back"
+	case secTheme:
+		if m.themeEdit {
+			return "↑↓ role · ←→ cycle · enter type · ctrl+d built-in · esc done"
+		}
+		return "↑↓ theme · enter use it · e edit its colours · tab back · esc back"
 	case secBatch:
 		return "↑↓ row · enter change · tab back · esc back"
 	case secTenants:
@@ -565,7 +610,7 @@ func (m tuiModel) viewSettings() string {
 	}
 
 	navPane := lipgloss.NewStyle().Width(navWidth).Height(bodyHeight).Render(nav.String())
-	divider := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Height(bodyHeight).
+	divider := ui.StyleDivider.Height(bodyHeight).
 		Render(strings.TrimRight(strings.Repeat("│\n", bodyHeight), "\n"))
 	contentPane := lipgloss.NewStyle().Width(contentWidth).Height(bodyHeight).Render(content.String())
 

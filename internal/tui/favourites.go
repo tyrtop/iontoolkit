@@ -78,6 +78,13 @@ func (m tuiModel) onFavouriteKey(key string) (tea.Model, tea.Cmd) {
 		return m.clearFavourite(m.favCursor)
 	case "a":
 		return m.openFavouriteForm(m.favCursor)
+	case "alt+y":
+		f, ok := m.cmds.Favourite(m.favCursor)
+		if !ok {
+			m.status = fmt.Sprintf("alt+%d is empty", m.favCursor)
+			return m, nil
+		}
+		return m.copyText(fmt.Sprintf("alt+%d", m.favCursor), f.Command)
 	}
 	// A digit picks the slot and saves in one keypress, which is the whole
 	// point of a slot picker.
@@ -191,7 +198,7 @@ func (m tuiModel) overlayFavourites(content string) string {
 		lines = append(lines, row+cmd+"  "+tag)
 	}
 	lines = append(lines, "",
-		ui.StyleDim.Render("1-9/enter saves this line · a by hand · ctrl+d clears · esc close"))
+		ui.StyleDim.Render("1-9/enter saves this line · a by hand · "+copyKeyHint+" · ctrl+d clears · esc close"))
 
 	modal := ui.Modal(lines, m.width)
 	keep := max(0, m.height-ui.ModalHeight(len(lines))-1)

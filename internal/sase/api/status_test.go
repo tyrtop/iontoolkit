@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -466,4 +467,155 @@ func TestSnapshotWithNoSiteDoesNotAskForInterfaces(t *testing.T) {
 	if snap.StatusErr != nil {
 		t.Errorf("StatusErr = %v, want the status still fetched", snap.StatusErr)
 	}
+}
+
+// The aggregate, as the portal's own capture of 2026-10-19 shows it: a POST
+// filtered by element id, dest_page counting from one, answered with a flat
+// row per element whose status is "active" or "backup". Nothing about this was
+// guessable -- the first implementation read it as clusters carrying
+// cluster_members and would have fallen back for ever.
+func TestSpokeClusterStatusesReadsTheAggregate(t *testing.T) {
+	const captured = `{"count":2,"items":[
+		{"id":"163241838","site_id":"1632417734","spoke_cluster_id":"1632417740",
+		 "element_id":"1632412620","status":"active","priority":150,
+		 "last_status_update_ts":1790721802930},
+		{"id":"163241896","site_id":"1632417734","spoke_cluster_id":"1632417740",
+		 "element_id":"1632412630","status":"backup","priority":100,
+		 "last_status_update_ts":1790721802295}]}`
+
+	tests := []struct {
+		name    string
+		status  int
+		body    string
+		want    int
+		wantErr string
+	}{
+		{name: "the shape the portal answers with", status: http.StatusOK, body: captured, want: 2},
+		{
+			// A tenant with no clustered elements and a shape this cannot read
+			// are the same answer here, and only one is safe to act on.
+			name:    "nothing usable in it",
+			status:  http.StatusOK,
+			body:    `{"count":0,"items":[]}`,
+			wantErr: "no members",
+		},
+		{
+			name:    "rows with no element id",
+			status:  http.StatusOK,
+			body:    `{"count":1,"items":[{"status":"active"}]}`,
+			wantErr: "no members",
+		},
+		{name: "refused", status: http.StatusForbidden, body: `{"error":"no"}`, wantErr: "Forbidden"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var seen *http.Request
+			var sent []byte
+			c := snapshotClient(t, routes{
+				"/spokeclusters/status/query": func() (int, string) { return tc.status, tc.body },
+			})
+			c.client.Transport = recorder{
+				inner: c.client.Transport,
+				saw:   func(r *http.Request, b []byte) { seen, sent = r, b },
+			}
+
+			got, err := c.SpokeClusterStatuses(context.Background(), []string{"1632412620", "1632412630"})
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("SpokeClusterStatuses() = %v, want an error so the caller falls back", got)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error = %q, want it to mention %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SpokeClusterStatuses() error = %v", err)
+			}
+			if len(got) != tc.want {
+				t.Fatalf("%d rows, want %d", len(got), tc.want)
+			}
+			// The fields the column and the data pane read.
+			if got[0].Status != "active" || got[0].Priority != 150 {
+				t.Errorf("first row = %+v, want the active member at 150", got[0])
+			}
+			if got[1].Status != "backup" {
+				t.Errorf("second row = %+v, want the portal's own word for standby", got[1])
+			}
+			if got[0].ClusterID == "" || got[0].SiteID == "" || got[0].ElementID == "" {
+				t.Errorf("first row = %+v, want its ids decoded", got[0])
+			}
+
+			if seen == nil {
+				t.Fatal("no request was made")
+			}
+			if seen.Method != http.MethodPost {
+				t.Errorf("method = %s, want POST", seen.Method)
+			}
+			if !strings.HasSuffix(seen.URL.Path, "/spokeclusters/status/query") {
+				t.Errorf("path = %s, want the tenant-wide query", seen.URL.Path)
+			}
+			// The body the portal sends: the elements named, and a first page
+			// of one rather than zero.
+			for _, want := range []string{
+				`"query_params":{"element_id":{"in":["1632412620","1632412630"]}}`,
+				`"dest_page":1`,
+				`"limit":200`,
+				`"getDeleted":false`,
+			} {
+				if !strings.Contains(string(sent), want) {
+					t.Errorf("request body\n%s\nis missing %s", sent, want)
+				}
+			}
+		})
+	}
+}
+
+// The call asks about exactly the elements it is given: the chunking is the
+// caller's, so that each chunk can paint as it lands and the first one can be
+// the rows on screen.
+func TestTheAggregateAsksAboutTheElementsItIsGiven(t *testing.T) {
+	var sent []byte
+	c := snapshotClient(t, routes{
+		"/spokeclusters/status/query": func() (int, string) {
+			return http.StatusOK,
+				`{"count":1,"items":[{"element_id":"e2","spoke_cluster_id":"c1","status":"active"}]}`
+		},
+	})
+	calls := 0
+	c.client.Transport = recorder{
+		inner: c.client.Transport,
+		saw:   func(_ *http.Request, b []byte) { sent, calls = b, calls+1 },
+	}
+
+	if _, err := c.SpokeClusterStatuses(context.Background(), []string{"e1", "e2", "e3"}); err != nil {
+		t.Fatalf("SpokeClusterStatuses() error = %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("%d requests, want one for one chunk", calls)
+	}
+	if !strings.Contains(string(sent), `"in":["e1","e2","e3"]`) {
+		t.Errorf("request body %s does not name exactly the elements asked about", sent)
+	}
+	if _, err := c.SpokeClusterStatuses(context.Background(), nil); err == nil {
+		t.Error("asking about no elements should be an error, not a request")
+	}
+}
+
+// recorder keeps the request a test wants to assert on, since the body is
+// gone by the time the response comes back.
+type recorder struct {
+	inner http.RoundTripper
+	saw   func(*http.Request, []byte)
+}
+
+func (r recorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	var body []byte
+	if req.Body != nil {
+		body, _ = io.ReadAll(req.Body)
+		req.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	r.saw(req, body)
+	return r.inner.RoundTrip(req)
 }

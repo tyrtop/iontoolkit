@@ -21,10 +21,10 @@ func TestStatsOverlayKeepsTheFrameHeight(t *testing.T) {
 			return m, func(m tuiModel) string { return m.viewPicking() }
 		},
 		"results": func(t *testing.T) (tuiModel, func(tuiModel) string) {
-			return wheelResultsModel(t), func(m tuiModel) string { return m.viewResults() }
+			return resultsModel(t), func(m tuiModel) string { return m.viewResults() }
 		},
 		"open result": func(t *testing.T) (tuiModel, func(tuiModel) string) {
-			m := wheelResultsModel(t)
+			m := resultsModel(t)
 			m.resOpen = true
 			return m, func(m tuiModel) string { return m.viewResults() }
 		},

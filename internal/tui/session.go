@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/ionterm"
@@ -18,16 +17,6 @@ const (
 	defaultSessionCols = 200
 	defaultSessionRows = 50
 )
-
-var tabColors = []string{"7", "4", "6", "5", "12", "14", "13"}
-
-func styleTabAt(i int, active bool) lipgloss.Style {
-	s := lipgloss.NewStyle().Foreground(lipgloss.Color(tabColors[i%len(tabColors)]))
-	if active {
-		return s.Reverse(true).Bold(true)
-	}
-	return s
-}
 
 type toolkitDialer struct{ c *api.Client }
 
@@ -274,6 +263,12 @@ func (m tuiModel) onSessionKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		return m, nil
 	}
 
+	// Before the checks below, like the favourites: what a tab last said is
+	// the reason anyone is looking at a dead one.
+	if key == "alt+y" {
+		return m.copySession()
+	}
+
 	// A redial is a new CLI session: enable and config context are gone, so
 	// it is never automatic for a shell someone is sitting in front of. It
 	// has to cover a tab that failed as well as one that went quiet -- a torn
@@ -406,7 +401,7 @@ func (m tuiModel) onSessionOpened(eid string) tuiModel {
 func (m tuiModel) tabBar() string {
 	cur := m.currentTab()
 	render := func(i int, label string) string {
-		return styleTabAt(i, i == cur).Render(label)
+		return ui.StyleTab(i, i == cur).Render(label)
 	}
 
 	// No numbers any more: alt+N is a favourite command, and a number on a
@@ -471,7 +466,8 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 		return b.String(), nil
 	}
 
-	const hint = "ctrl+] elements · alt+←→/hl tab · alt+1-9 favourite · alt+f save · alt+w detach · alt+k close · shift+pgup scroll"
+	const hint = "ctrl+] elements · alt+←→/hl tab · alt+1-9 favourite · alt+f save · " + copyKeyHint +
+		" scrollback · alt+w detach · alt+k close · shift+pgup scroll"
 
 	status := m.status
 	switch {

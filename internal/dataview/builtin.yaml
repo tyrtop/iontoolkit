@@ -102,6 +102,14 @@ views:
       # The site's circuits, so a port can name the one it carries rather
       # than printing the id out of site_wan_interface_ids.
       wans: /sdwan/v2.10/api/sites/{{ .site_id }}/waninterfaces
+      # Security zones in two parts, the same way circuits work: the tenant's
+      # zone list has the names, and the element's own bindings say which
+      # interfaces are in which zone. UNVERIFIED against hardware -- no
+      # capture of either body exists, so the field names below are read from
+      # the resource map and the CloudGenix SDK. A name that is wrong prints a
+      # blank cell, not an error, so run it and look at the ZONE column.
+      zones: /sdwan/v2.2/api/securityzones
+      elzones: /sdwan/v2.1/api/sites/{{ .site_id }}/elements/{{ .element_id }}/securityzones
     sections:
       - title: Interfaces
         for_each: ifs.items
@@ -139,6 +147,13 @@ views:
           - header: CIRCUIT
             value: "{{ range .item.site_wan_interface_ids }}{{ with lookup $.wans.items \"id\" . }}{{ .name }} {{ end }}{{ end }}"
             width: 20
+          # The binding holds a list of interface ids, which is what lookup
+          # matches either way round; its zone_id then names the zone.
+          - header: ZONE
+            value: "{{ with lookup $.elzones.items \"interface_ids\" .item.id }}{{ with lookup $.zones.items \"id\" .zone_id }}{{ .name }}{{ end }}{{ end }}"
+            # Real zone names are sentences: "TSC Store - Network Management"
+            # is 30 characters, and a name cut in half names nothing.
+            width: 32
 
   # Circuits are the site's, not the element's, so a hub pair shares them.
   # This is the other direction of the same join: each circuit says which of

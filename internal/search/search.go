@@ -34,6 +34,7 @@ type Record struct {
 	Model     string
 	Software  string
 	HWID      string
+	Serial    string
 	Connected bool
 }
 
@@ -46,6 +47,7 @@ func Of(el api.Element, tsg, tenant string, sites SiteNamer) Record {
 		Model:     el.Model,
 		Software:  el.Software,
 		HWID:      el.HWID,
+		Serial:    el.Serial,
 		Connected: el.Connected,
 	}
 	if sites != nil {
@@ -94,6 +96,9 @@ func (r Record) Fields() []Field {
 		{Value: strings.ToLower(r.Tenant)},
 		{Value: strings.ToLower(r.Model)},
 		{Value: strings.ToLower(r.HWID), Exact: true},
+		// Exact like the hardware id: a serial is quoted off a label or a
+		// support case, never half-remembered.
+		{Value: strings.ToLower(r.Serial), Exact: true},
 		{Value: strings.ToLower(r.Software)},
 		{Value: strings.ToLower(r.TSG), Exact: true},
 		{Value: r.State()},

@@ -19,6 +19,28 @@ type ElementCache struct {
 	FetchedAt time.Time         `json:"fetched_at"`
 	Elements  []api.Element     `json:"elements"`
 	Sites     map[string]string `json:"sites,omitempty"`
+	// last sweep's states, shown with an asterisk: as old as this file
+	HA map[string]string `json:"ha,omitempty"`
+}
+
+// a sweep finishes long after the elements were written
+func (s *Store) SaveHA(tsg string, states map[string]string) error {
+	c, err := s.Cache(tsg)
+	if err != nil {
+		return err
+	}
+	if c == nil {
+		// Nothing to attach it to: the elements are what the file is for, and
+		// HA state without them has nothing to key against.
+		return nil
+	}
+	if c.HA == nil {
+		c.HA = map[string]string{}
+	}
+	for eid, w := range states {
+		c.HA[eid] = w
+	}
+	return s.SaveCache(c)
 }
 
 func (s *Store) cacheDir() string { return filepath.Join(s.Root, "cache") }

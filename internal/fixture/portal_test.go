@@ -26,8 +26,9 @@ func TestTheRealClientTakesAPortalSnapshotOfAFixtureElement(t *testing.T) {
 		t.Errorf("channel = %+v, want it connected with a timestamp", ch)
 	}
 
-	if len(snap.Interfaces) != el.ports() {
-		t.Fatalf("got %d interfaces, want %d", len(snap.Interfaces), el.ports())
+	// The ports, plus the one vlan interface that carries the security zone.
+	if want := el.ports() + 1; len(snap.Interfaces) != want {
+		t.Fatalf("got %d interfaces, want %d", len(snap.Interfaces), want)
 	}
 	first := snap.Interfaces[0]
 	if first.Interface.Name != "1" || first.Interface.UsedFor != "public" {
@@ -45,9 +46,19 @@ func TestTheRealClientTakesAPortalSnapshotOfAFixtureElement(t *testing.T) {
 	}
 	// A port nobody wired up is down, which is what makes an interface list
 	// worth drawing at all.
-	last := snap.Interfaces[len(snap.Interfaces)-1]
-	if last.Status[0].OperationalState != "down" {
-		t.Errorf("last interface status = %+v, want it down", last.Status[0])
+	lastPort := snap.Interfaces[el.ports()-1]
+	if lastPort.Status[0].OperationalState != "down" {
+		t.Errorf("last port status = %+v, want it down", lastPort.Status[0])
+	}
+
+	// The vlan interface comes last, and its status has no port block: a real
+	// element answers with port null on anything that is not a physical port.
+	vlan := snap.Interfaces[len(snap.Interfaces)-1]
+	if vlan.Interface.Type != "vlan" || vlan.Interface.UsedFor != "lan" {
+		t.Errorf("last interface = %+v, want the vlan", vlan.Interface)
+	}
+	if vlan.Status[0].Port != nil {
+		t.Errorf("vlan port = %+v, want nothing: it is not a physical port", vlan.Status[0].Port)
 	}
 }
 

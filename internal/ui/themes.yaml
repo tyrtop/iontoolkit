@@ -1,0 +1,190 @@
+# Colour schemes. A theme is a table of roles, not of widgets: nothing in iontk
+# asks for "blue", it asks for the colour an element name is drawn in.
+#
+# A themes.yaml in the config root is appended to these, and a scheme of the
+# same name replaces the built-in one; --themes points somewhere else, which is
+# how a --fixtures run gets a scheme of its own. Every field is optional except
+# the name.
+#
+#   ok       something worked, and the ✓ mark
+#   err      something failed, and the ✗ mark
+#   warn     worth noticing but not a failure: an offline ION, a stale tenant
+#   cmd      headings and command text; rendered bold
+#   element   an element, tenant or value the page is about
+#   row      the highlight on the row a list is on; rendered bold
+#   hot      a session about to go
+#   border   a modal's frame
+#   divider  the rule between two panes
+#   spinner  the spinner's shape, one of the names iontk ships
+#   spinner_color  what it is drawn in, including in the bubbles widget
+#   tabs     cycled one per open tab, so none of them may be a status colour
+#   mono     true drops colour entirely for bold, faint, italic and reverse
+#
+# A colour is an ANSI index 0-255 or a #rrggbb. An index under 16 is remapped by
+# the terminal's own theme, which is why classic stays there; anything else is
+# emitted as asked and downsampled by the renderer to what the terminal has.
+# "dim" is not in the table: it is the faint attribute, and a scheme that made
+# it a fixed grey would be wrong on half the terminal backgrounds there are.
+
+themes:
+  - name: classic
+    blurb: your terminal's own 16 colours
+    ok: "2"
+    err: "1"
+    warn: "3"
+    cmd: "6"
+    element: "4"
+    row: "5"
+    hot: "9"
+    border: "3"
+    divider: "8"
+    spinner: minidot
+    spinner_color: "5"
+    tabs: ["7", "4", "6", "5", "12", "14", "13"]
+
+  - name: vivid
+    blurb: the bright 8, for a dark palette
+    ok: "10"
+    err: "9"
+    warn: "11"
+    cmd: "14"
+    element: "12"
+    row: "13"
+    hot: "11"
+    border: "11"
+    divider: "8"
+    spinner: jump
+    spinner_color: "13"
+    tabs: ["15", "12", "14", "13", "4", "6", "7"]
+
+  - name: mono
+    blurb: "no colour: bold, faint, reverse"
+    spinner: line
+    mono: true
+
+  - name: nord
+    blurb: truecolor, downsampled if needed
+    ok: "#a3be8c"
+    err: "#bf616a"
+    warn: "#ebcb8b"
+    cmd: "#88c0d0"
+    element: "#81a1c1"
+    row: "#b48ead"
+    hot: "#d08770"
+    border: "#ebcb8b"
+    divider: "#4c566a"
+    spinner: dot
+    spinner_color: "#b48ead"
+    tabs: ["#d8dee9", "#81a1c1", "#88c0d0", "#b48ead", "#5e81ac", "#8fbcbb", "#eceff4"]
+
+  # The six below are after vim's own schemes rather than ports of them: vim
+  # colours syntax groups and iontk colours roles, so what carries over is the
+  # palette and the mood, not a mapping.
+  - name: desert
+    blurb: wheat and khaki on warm grey, after vim's desert
+    ok: "#98fb98"
+    err: "#ff6060"
+    warn: "#cd853f"
+    cmd: "#f0e68c"
+    element: "#87ceeb"
+    row: "#f5deb3"
+    hot: "#ffa07a"
+    border: "#cd853f"
+    divider: "#6b6b6b"
+    spinner: ellipsis
+    spinner_color: "#bdb76b"
+    tabs: ["#f5deb3", "#87ceeb", "#b0c4de", "#d8bfd8", "#deb887", "#c0c0c0", "#add8e6"]
+
+  - name: evening
+    blurb: saturated accents on dark grey, after vim's evening
+    ok: "#60ff60"
+    err: "#ffa0a0"
+    warn: "#ffff60"
+    cmd: "#60ffff"
+    element: "#80a0ff"
+    row: "#ff80ff"
+    hot: "#ffa500"
+    border: "#ffff60"
+    divider: "#4e4e4e"
+    spinner: moon
+    spinner_color: "#ff80ff"
+    tabs: ["#ffffff", "#80a0ff", "#60ffff", "#ff80ff", "#c0c0ff", "#a0a0ff", "#d0d0d0"]
+
+  - name: morning
+    blurb: dark ink for a LIGHT terminal, after vim's morning
+    ok: "#2e8b57"
+    err: "#a00000"
+    warn: "#a0522d"
+    cmd: "#005f5f"
+    element: "#00008b"
+    row: "#8b008b"
+    hot: "#b85c00"
+    border: "#a0522d"
+    divider: "#9e9e9e"
+    spinner: points
+    spinner_color: "#005f5f"
+    tabs: ["#303030", "#00008b", "#005f5f", "#8b008b", "#4b0082", "#2f4f4f", "#555555"]
+
+  - name: slate
+    blurb: muted slate greys, after vim's slate
+    ok: "#b5bd68"
+    err: "#cc6666"
+    warn: "#f0c674"
+    cmd: "#8abeb7"
+    element: "#7aa6da"
+    row: "#b294bb"
+    hot: "#de935f"
+    border: "#8abeb7"
+    divider: "#5a5a5a"
+    spinner: meter
+    spinner_color: "#b294bb"
+    tabs: ["#c5c8c6", "#7aa6da", "#8abeb7", "#b294bb", "#81a2be", "#a3a3a3", "#d0d0d0"]
+
+  - name: industry
+    blurb: high contrast on black, after vim's industry
+    ok: "#00af5f"
+    err: "#d70000"
+    warn: "#d7af00"
+    cmd: "#00d7d7"
+    element: "#5f87ff"
+    row: "#af5fd7"
+    hot: "#ff8700"
+    border: "#d7af00"
+    divider: "#585858"
+    spinner: hamburger
+    spinner_color: "#af5fd7"
+    tabs: ["#ffffff", "#5f87ff", "#00d7d7", "#af5fd7", "#8787ff", "#00afaf", "#bcbcbc"]
+
+  - name: habamax
+    blurb: soft accents on near-black, after vim's habamax
+    ok: "#afd7af"
+    err: "#d78787"
+    warn: "#d7af87"
+    cmd: "#d7d7af"
+    element: "#afafd7"
+    row: "#d7afd7"
+    hot: "#d7875f"
+    border: "#d7af87"
+    divider: "#585858"
+    spinner: pulse
+    spinner_color: "#afafd7"
+    tabs: ["#bcbcbc", "#afafd7", "#87afaf", "#d7afd7", "#a8a8a8", "#8787af", "#d7d7d7"]
+
+  # catppuccin mocha, lifted from the palette the user's own nvim loads
+  # (lemo-o/nvim -> catppuccin-mocha). Roles follow catppuccin's own use of it:
+  # green/red/yellow for state, blue for the "doing" colour, mauve for the
+  # selection, peach for the one that means "about to go".
+  - name: "Ben's Theme"
+    blurb: catppuccin mocha, from Ben's nvim
+    ok: "#a6e3a1"
+    err: "#f38ba8"
+    warn: "#f9e2af"
+    cmd: "#89b4fa"
+    element: "#b4befe"
+    row: "#cba6f7"
+    hot: "#fab387"
+    border: "#f9e2af"
+    divider: "#585b70"
+    spinner: monkey
+    spinner_color: "#cba6f7"
+    tabs: ["#cdd6f4", "#89b4fa", "#94e2d5", "#cba6f7", "#74c7ec", "#f5c2e7", "#b4befe"]

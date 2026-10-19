@@ -2,11 +2,13 @@ package saseauth
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -17,18 +19,44 @@ import (
 // when the machine has none. The tests run it without its sandbox: they drive
 // a throwaway profile against a fake server, and CI images forbid the user
 // namespaces Chrome would need.
+//
+// Packaged builds come first and chromium-browser last. On Ubuntu 24.04 that
+// name is a snap shim, and a snap Chromium on a CI runner is how the v0.5.0
+// release died: chromedp waited out its whole budget on a browser that never
+// came up, and the failure said only "context deadline exceeded".
 func findChrome(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping browser test in short mode")
 	}
-	for _, name := range []string{"chromium-browser", "chromium", "google-chrome", "google-chrome-stable", "chrome"} {
-		if path, err := exec.LookPath(name); err == nil {
-			return path
+	for _, name := range []string{"google-chrome", "google-chrome-stable", "chrome", "chromium", "chromium-browser"} {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			continue
 		}
+		if err := startable(path); err != nil {
+			t.Logf("skipping %s: %v", path, err)
+			continue
+		}
+		return path
 	}
-	t.Skip("no chrome or chromium on PATH")
+	t.Skip("no browser on PATH that will start")
 	return ""
+}
+
+// startable is the cheapest question worth asking of a browser binary: can it
+// print its own version. A wrapper that cannot is one chromedp would sit on
+// until its deadline, and a test that skips with a reason beats a build that
+// fails 45 seconds later without one.
+func startable(path string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s --version: %w: %s", filepath.Base(path), err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // needsDisplay skips a test that opens a real browser window. Only the first

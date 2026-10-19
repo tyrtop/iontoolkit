@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/dataview"
@@ -298,20 +299,57 @@ func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
 
 	switch key {
 	case "esc", "q", "ctrl+]":
+		if m.dataFilterOn || m.dataFilter.Value() != "" {
+			m.dataFilterOn = false
+			m.dataFilter.SetValue("")
+			m.dataFilter.Blur()
+			return m, nil
+		}
 		m.phase = phasePicking
 		return m, nil
+	case "/":
+		if !m.dataFilterOn {
+			m.dataFilterOn = true
+			return m, m.dataFilter.Focus()
+		}
+	case "enter":
+		if m.dataFilterOn {
+			// Applied and left, like the element list: the page's own keys
+			// are letters, so the query has to be finished with.
+			m.dataFilterOn = false
+			m.dataFilter.Blur()
+			return m, nil
+		}
 	case "r":
-		return m.refreshData()
+		if !m.dataFilterOn {
+			return m.refreshData()
+		}
 	case "c":
-		return m.startCompare()
+		if !m.dataFilterOn {
+			return m.startCompare()
+		}
+	case "alt+y":
+		return m.copyDataPage()
 	}
 
 	tab, ok := m.activeData()
 	if !ok {
 		return m, nil
 	}
-	page := m.dataPage(tab)
+	page := m.visiblePage(tab)
 	_, rows := m.dataPaneSize()
+
+	// Scrolling keys still work mid-query -- the arrows and the paging keys
+	// are not letters -- but anything that could be typed belongs to the
+	// input.
+	if m.dataFilterOn {
+		switch key {
+		case "down", "up", "pgdown", "pgup", "home", "end", "alt+down", "alt+up":
+		default:
+			return m, nil
+		}
+	}
+
 	switch key {
 	case "down", "j":
 		tab.scroll++
@@ -366,6 +404,62 @@ func clampScroll(at, total, rows int) int {
 	return max(0, min(at, max(0, total-rows)))
 }
 
+// visiblePage is the page as the pane shows it: the whole thing, or only the
+// lines matching the query with enough around them to read -- the view heading
+// above them and the table header, if they came out of a table.
+//
+// Narrowing rather than jumping to the next match, because that is what every
+// other `/` in iontk does, and because "where is vlan1000" is answered better
+// by one line than by a cursor somewhere in thirty.
+func (m *tuiModel) visiblePage(tab dataTab) dataPage {
+	page := m.dataPage(tab)
+	q := strings.ToLower(strings.TrimSpace(m.dataFilter.Value()))
+	if q == "" {
+		return page
+	}
+
+	// Which heading and which table header each line sits under.
+	head, hdr := make([]int, len(page.lines)), make([]int, len(page.lines))
+	at, under := -1, -1
+	headAt, hdrAt := 0, 0
+	for i := range page.lines {
+		for headAt < len(page.heads) && page.heads[headAt] <= i {
+			at = page.heads[headAt]
+			headAt++
+		}
+		for hdrAt < len(page.hdrs) && page.hdrs[hdrAt] <= i {
+			under = page.hdrs[hdrAt]
+			hdrAt++
+		}
+		head[i], hdr[i] = at, under
+	}
+
+	var out dataPage
+	kept := map[int]bool{}
+	add := func(i int) {
+		if i < 0 || kept[i] {
+			return
+		}
+		kept[i] = true
+		out.lines = append(out.lines, page.lines[i])
+	}
+	for i, line := range page.lines {
+		if !strings.Contains(strings.ToLower(ui.Plain(line)), q) {
+			continue
+		}
+		if h := head[i]; h >= 0 && !kept[h] {
+			out.heads = append(out.heads, len(out.lines))
+			add(h)
+		}
+		// The header only belongs with a row of the table it heads.
+		if d := hdr[i]; d >= 0 && d != i && d > head[i] {
+			add(d)
+		}
+		add(i)
+	}
+	return out
+}
+
 func (m tuiModel) dataPaneSize() (int, int) {
 	return max(20, m.width), max(3, m.height-6-m.statsRows())
 }
@@ -376,6 +470,10 @@ func (m tuiModel) dataPaneSize() (int, int) {
 type dataPage struct {
 	lines []string
 	heads []int
+	// hdrs is where a table's header row is, so a filtered page can keep the
+	// one above a matching row: a port row with no PORT/TYPE/STATE line above
+	// it is a row of unlabelled columns.
+	hdrs []int
 }
 
 func (p dataPage) String() string { return strings.Join(p.lines, "\n") }
@@ -414,7 +512,10 @@ func (m tuiModel) dataPage(tab dataTab) dataPage {
 				}
 				p.lines = append(p.lines, "  "+ui.Label(row.Label)+" "+ui.Truncate(row.Value, width-ui.LabelWidth-4))
 			}
-			p.lines = append(p.lines, m.tableLines(sec, width)...)
+			if table := m.tableLines(sec, width); len(table) > 0 {
+				p.hdrs = append(p.hdrs, len(p.lines))
+				p.lines = append(p.lines, table...)
+			}
 			if sec.Truncated > 0 {
 				p.lines = append(p.lines, "  "+ui.StyleDim.Render(fmt.Sprintf("… %d more not shown", sec.Truncated)))
 			}
@@ -518,7 +619,19 @@ func (m tuiModel) viewData() string {
 	b.WriteString(ui.StyleElement.Render(where) +
 		ui.StyleDim.Render(fmt.Sprintf("  %d views%s", len(tab.panes), state)) + "\n")
 
-	page := m.dataPage(tab)
+	if m.dataFilterOn || m.dataFilter.Value() != "" {
+		line := m.dataFilter.View()
+		if m.dataFilter.Value() != "" {
+			whole := len(m.dataPage(tab).lines)
+			shown := len(m.visiblePage(tab).lines)
+			line += ui.StyleDim.Render(fmt.Sprintf("   %d of %d lines", shown, whole))
+		}
+		b.WriteString(line + "\n")
+	} else {
+		b.WriteString(ui.StyleDim.Render("press / to filter") + "\n")
+	}
+
+	page := m.visiblePage(tab)
 	lines := page.lines
 	_, rows := m.dataPaneSize()
 	at := clampScroll(tab.scroll, len(lines), rows)
@@ -543,8 +656,49 @@ func (m tuiModel) viewData() string {
 		}
 		status = scrolled + status
 	}
-	hint := "alt+↑↓ next heading · ↑↓ scroll · r refresh · c CLI check · alt+←→/hl tab · alt+k close · ctrl+] elements"
+	hint := "alt+↑↓ next heading · ↑↓ scroll · / filter · r refresh · c CLI check · " +
+		copyKeyHint + " page · alt+←→/hl tab · alt+k close · ctrl+] elements"
+	if m.dataFilterOn {
+		hint = "type to narrow the page · ↑↓ scroll · enter apply · esc clear"
+	}
 	width := max(10, m.width-1)
 	b.WriteString(ui.Footer(ui.Truncate(status, width), ui.Truncate(hint, width)))
 	return b.String()
+}
+
+func newDataFilter() textinput.Model {
+	in := textinput.New()
+	in.Prompt = "/"
+	in.Placeholder = "filter lines"
+	in.SetWidth(26)
+	return in
+}
+
+// onDataFilterKey is the typing half of the data pane's filter. It reports
+// whether it took the key: the page's own scrolling keys are not letters, so
+// they go through to onDataKey.
+func (m tuiModel) onDataFilterKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd, bool) {
+	switch key {
+	case "esc", "enter", "down", "up", "pgdown", "pgup", "home", "end",
+		"alt+down", "alt+up", "alt+left", "alt+right", "alt+k", "alt+w", "alt+y":
+		return m, nil, false
+	case "backspace":
+		// On an already-empty query this is the press that closes the filter,
+		// the same two-step as every other one in iontk.
+		if m.dataFilter.Value() == "" {
+			m.dataFilterOn = false
+			m.dataFilter.Blur()
+			return m, nil, true
+		}
+	}
+
+	var cmd tea.Cmd
+	m.dataFilter, cmd = m.dataFilter.Update(msg)
+	// The page shrank or grew under the scroll position.
+	if tab, ok := m.activeData(); ok {
+		_, rows := m.dataPaneSize()
+		tab.scroll = clampScroll(tab.scroll, len(m.visiblePage(tab).lines), rows)
+		m.data[m.dataActive] = tab
+	}
+	return m, cmd, true
 }

@@ -59,7 +59,22 @@ func (e Element) apiInterfaces() []api.Interface {
 		}
 		out = append(out, in)
 	}
+
+	// a real element carries its security zone on the vlans, not the ports
+	out = append(out, api.Interface{
+		ID:      e.vlanInterfaceID(),
+		Name:    "vlan1",
+		Type:    "vlan",
+		UsedFor: "lan",
+		AdminUp: true,
+		MTU:     1500,
+		Scope:   "local",
+	})
 	return out
+}
+
+func (e Element) vlanInterfaceID() string {
+	return syntheticID("interface/"+e.ID+"/vlan1", 19)
 }
 
 // apiInterfaceStatus mirrors a real one: the status record has an ID of its
@@ -67,6 +82,24 @@ func (e Element) apiInterfaces() []api.Interface {
 // up, and extended_state is empty on an ordinary port -- only a service link
 // explains itself there.
 func (e Element) apiInterfaceStatus(iid string) *api.InterfaceStatus {
+	if iid == e.vlanInterfaceID() {
+		st := api.InterfaceStatus{
+			ID:               syntheticID("interface-status/"+iid, 19),
+			ElementID:        e.ID,
+			Name:             "vlan1",
+			Device:           "vlan1",
+			OperationalState: "down",
+			// No port block on anything that is not a physical port, which is
+			// what a real element answers with.
+			VRF:             &api.VRF{ContextID: syntheticID("vrf/"+e.tsg, 19), Name: "Global"},
+			LastStateChange: bootedAt.Add(time.Minute).UnixMilli(),
+		}
+		if e.Connected {
+			st.OperationalState = "up"
+			st.IPv4Addresses = []string{"10.99.1.1/24"}
+		}
+		return &st
+	}
 	for p := 1; p <= e.ports(); p++ {
 		if e.interfaceID(p) != iid {
 			continue
@@ -294,4 +327,86 @@ func utcTicks(t time.Time) int64 {
 func fakeMAC(seed string) string {
 	d := syntheticID("mac/"+seed, 12)
 	return fmt.Sprintf("02:%s:%s:%s:%s:%s", d[0:2], d[2:4], d[4:6], d[6:8], d[8:10])
+}
+
+// a flat row per element, "active" or "backup", as the capture shows
+func (s *Set) apiClusterStatuses(tsg string) []map[string]any {
+	ten := s.tenant(tsg)
+	if ten == nil {
+		return nil
+	}
+	var out []map[string]any
+	for i := range ten.Elements {
+		el := &ten.Elements[i]
+		if !el.HA {
+			continue
+		}
+		// The first HA element on a site carries it, as the per-cluster
+		// fixture decides too.
+		status, priority := "backup", 100
+		if s.activeMember(tsg, el.clusterID()) == el.ID {
+			status, priority = "active", 150
+		}
+		out = append(out, map[string]any{
+			"id":                    syntheticID("clusterstatus/"+el.ID, 17),
+			"site_id":               el.siteID(),
+			"spoke_cluster_id":      el.clusterID(),
+			"element_id":            el.ID,
+			"status":                status,
+			"priority":              priority,
+			"last_status_update_ts": bootedAt.UnixMilli(),
+		})
+	}
+	return out
+}
+
+// the per-cluster fixture and the aggregate have to agree on this
+func (s *Set) activeMember(tsg, cid string) string {
+	ten := s.tenant(tsg)
+	if ten == nil {
+		return ""
+	}
+	for i := range ten.Elements {
+		el := &ten.Elements[i]
+		if el.HA && el.clusterID() == cid && el.Connected {
+			return el.ID
+		}
+	}
+	return ""
+}
+
+// names like a real tenant's, so the join looks like it would in front of one
+func fixtureZones() []map[string]any {
+	return []map[string]any{
+		{"id": syntheticID("zone/trusted", 18), "name": "Store - LAN",
+			"description": "LAN side", "tcp_allow_non_syn": false, "is_l2": false},
+		{"id": syntheticID("zone/guest", 18), "name": "Store - Guest",
+			"description": "guest wifi", "tcp_allow_non_syn": false, "is_l2": false},
+		{"id": syntheticID("zone/internet", 18), "name": "internet",
+			"description": "circuits", "tcp_allow_non_syn": false, "is_l2": false},
+	}
+}
+
+// one record per zone, holding its interface ids; verified in interface.har
+func (e Element) apiZoneBindings() []map[string]any {
+	return []map[string]any{
+		{
+			"id":               syntheticID("elzone/lan/"+e.ID, 18),
+			"zone_id":          syntheticID("zone/trusted", 18),
+			"interface_ids":    []string{e.vlanInterfaceID()},
+			"lannetwork_ids":   nil,
+			"waninterface_ids": nil,
+			"wanoverlay_ids":   nil,
+		},
+		{
+			// A zone with nothing of this element in it, which a tenant always
+			// has: the join has to skip it rather than name it.
+			"id":               syntheticID("elzone/guest/"+e.ID, 18),
+			"zone_id":          syntheticID("zone/guest", 18),
+			"interface_ids":    nil,
+			"lannetwork_ids":   nil,
+			"waninterface_ids": nil,
+			"wanoverlay_ids":   nil,
+		},
+	}
 }

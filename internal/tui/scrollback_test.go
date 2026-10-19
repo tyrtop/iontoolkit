@@ -161,25 +161,17 @@ func TestTypingReturnsThePaneToLive(t *testing.T) {
 	}
 }
 
-func TestWheelScrollsTheSessionPane(t *testing.T) {
+// iontk never asks for the mouse, on any page: reporting would take the
+// terminal's own select-and-copy away, and the keys scroll every pane. The
+// wheel keeps working because terminals send arrow keys for a notch in the
+// alt screen.
+func TestNoPageAsksForTheMouse(t *testing.T) {
 	m, _ := scrolledPane(t)
-
-	up, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
-	m = up.(tuiModel)
-	if m.sesScroll != wheelRows {
-		t.Errorf("sesScroll = %d after one notch, want %d", m.sesScroll, wheelRows)
-	}
-
-	down, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
-	if got := down.(tuiModel).sesScroll; got != 0 {
-		t.Errorf("sesScroll = %d back at the bottom, want 0", got)
-	}
-}
-
-func TestMouseReportingIsOnInTheSessionPane(t *testing.T) {
-	m, _ := scrolledPane(t)
-	if m.mouseMode() != tea.MouseModeCellMotion {
-		t.Error("the session pane scrolls but reports no mouse")
+	for _, phase := range []tuiPhase{phaseSession, phasePicking, phaseResults, phaseData, phaseMenu} {
+		m.phase = phase
+		if got := m.mouseMode(); got != tea.MouseModeNone {
+			t.Errorf("phase %d mouseMode() = %v, want the terminal to keep the mouse", phase, got)
+		}
 	}
 }
 

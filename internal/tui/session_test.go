@@ -403,18 +403,6 @@ func TestPickTargetsFallsBackToTheHighlightedElement(t *testing.T) {
 	}
 }
 
-func TestTabColorsAreNeutral(t *testing.T) {
-	reserved := map[string]string{"1": "red", "2": "green", "3": "yellow", "9": "bright red", "10": "bright green", "11": "bright yellow"}
-	for _, c := range tabColors {
-		if name, bad := reserved[c]; bad {
-			t.Errorf("tab palette uses %s (%s), which carries status meaning", c, name)
-		}
-	}
-	if len(tabColors) < 4 {
-		t.Errorf("palette has %d colors, want enough to tell tabs apart", len(tabColors))
-	}
-}
-
 func TestFirstLoginAsksForCredentialsThenProceeds(t *testing.T) {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json"))

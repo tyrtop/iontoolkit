@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/ui"
 )
 
 // Tests have to ignore whatever the developer has exported. Six variables feed
@@ -321,5 +323,56 @@ func TestHeadlessFlagsCarryThePagerHandling(t *testing.T) {
 	}
 	if len(f.PagerPrompts) == 0 {
 		t.Error("PagerPrompts is empty, want the scraper armed for firmware that ignores --pager-off")
+	}
+}
+
+// Every command draws something -- marks, a progress bar, a time -- so every
+// command takes the appearance and the zone out of the store it just opened.
+func TestApplyDisplaySettingsReadsTheStore(t *testing.T) {
+	clearCredEnv(t)
+	t.Cleanup(func() {
+		_ = clock.Use(clock.UTC)
+		ui.Apply(ui.Default())
+	})
+
+	st := seedStore(t, &config.Config{
+		LastTenant: "Acme",
+		Tenants:    []config.Tenant{serviceTenant("Acme", "1")},
+		Zone:       "America/Chicago",
+		Theme:      "mono",
+	})
+	if err := st.Secrets.Set(config.ClientSecretKey("1"), "shh"); err != nil {
+		t.Fatal(err)
+	}
+	ApplyDisplaySettings(st, nil)
+
+	if got := clock.Name(); got != "America/Chicago" {
+		t.Errorf("clock.Name() = %q, want the saved zone", got)
+	}
+	if got := ui.CurrentTheme().Name; got != "mono" {
+		t.Errorf("CurrentTheme() = %q, want the saved theme", got)
+	}
+}
+
+// A zone that will not load must not stop a batch run: the times print in UTC
+// and say so.
+func TestABadZoneDoesNotStopACommand(t *testing.T) {
+	clearCredEnv(t)
+	t.Cleanup(func() { _ = clock.Use(clock.UTC) })
+
+	st := seedStore(t, &config.Config{
+		LastTenant: "Acme",
+		Tenants:    []config.Tenant{serviceTenant("Acme", "1")},
+		Zone:       "Mars/Olympus_Mons",
+	})
+	if err := st.Secrets.Set(config.ClientSecretKey("1"), "shh"); err != nil {
+		t.Fatal(err)
+	}
+	ApplyDisplaySettings(st, nil)
+	if got := clock.Name(); got != clock.UTC {
+		t.Errorf("clock.Name() = %q, want the UTC fallback", got)
+	}
+	if clock.Problem() == "" {
+		t.Error("nothing recorded why the zone was not used")
 	}
 }

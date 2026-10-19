@@ -549,7 +549,7 @@ func TestDefaultModeSettingPersistsAndApplies(t *testing.T) {
 	m.phase = phaseSettings
 	m.setSection = secGeneral
 	m.setFocus = focusContent
-	m.setCursor = 2
+	m.setCursor = modeRow
 	m.spinner = ui.NewSpinner("")
 
 	if got := m.defaultMode(); got != modeShell {

@@ -42,8 +42,26 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	case strings.HasSuffix(p, "/api/wannetworks"):
 		return t.json(req, http.StatusOK, items(fixtureNetworks()))
 
+	// Security zones in two parts, as the real API has them: the tenant's
+	// zone names, and one element's bindings of interfaces to zones.
+	case strings.HasSuffix(p, "/api/securityzones"):
+		return t.json(req, http.StatusOK, items(fixtureZones()))
+
+	case strings.Contains(p, "/elements/") && strings.HasSuffix(p, "/securityzones"):
+		eid := path.Base(strings.TrimSuffix(p, "/securityzones"))
+		el := t.element(eid)
+		if el == nil {
+			return t.noElement(req, eid)
+		}
+		return t.json(req, http.StatusOK, items(el.apiZoneBindings()))
+
 	case strings.Contains(p, "/waninterfaces"):
 		return t.circuits(req, p)
+
+	// The aggregate, which is tenant-wide: one POST for every cluster. Before
+	// the per-cluster route below, which its path would also match.
+	case strings.HasSuffix(p, "/spokeclusters/status/query"):
+		return t.json(req, http.StatusOK, items(t.set.apiClusterStatuses(t.tsg)))
 
 	case strings.Contains(p, "/spokeclusters/") && strings.HasSuffix(p, "/status"):
 		cid := path.Base(strings.TrimSuffix(p, "/status"))

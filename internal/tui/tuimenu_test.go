@@ -328,10 +328,9 @@ func TestRenderSettings(t *testing.T) {
 				{Name: "Lab", TSGID: "9876543210"},
 			},
 		},
-		spinnerName: ui.DefaultSpinner,
-		spinner:     ui.NewSpinner(ui.DefaultSpinner),
-		width:       80,
-		height:      24,
+		spinner: ui.NewSpinner(ui.DefaultSpinner),
+		width:   80,
+		height:  24,
 	}
 	t.Log("\n" + m.viewSettings())
 }

@@ -24,9 +24,17 @@ jobs:
           go-version-file: go.mod
 
       - name: Test
-        # Discover's first sign-in opens a real window, which chromedp will not
-        # do without a display. Xvfb comes with the runner image.
-        run: xvfb-run -a go test -timeout 5m ./...
+        # -short, which is what broke the v0.5.0 release: the browser
+        # integration test drove chromedp on the runner, Chrome never came up,
+        # and 45s later the tag had no binaries. A release gate must not depend
+        # on whether a browser starts on a VM -- the full suite, that test
+        # included, runs in build.yml on every push to master, so the commit
+        # being tagged has already been through it.
+        #
+        # -p 1 because two packages reach config.DebugRoot(), one fixed path
+        # shared by every test binary; run in parallel they clear each other's
+        # store and the release fails at random.
+        run: go test -short -p 1 -timeout 5m ./...
 
       - name: Build Linux
         run: |

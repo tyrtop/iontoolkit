@@ -4,3 +4,9 @@
 *.txt
 *.json
 *.md
+# The release job builds into dist/, and a local reproduction of it leaves
+# 38MB of binaries here that git add -A would happily commit.
+dist/
+# go test -c and -cpuprofile leave these behind.
+*.test
+*.out

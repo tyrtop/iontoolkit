@@ -88,7 +88,7 @@ func TestSettingsNavAndContentFocus(t *testing.T) {
 func TestSettingsEverySectionRenders(t *testing.T) {
 	m := settingsModel(t)
 	wants := map[int]string{
-		secGeneral: "spinner",
+		secGeneral: "commands",
 		secTenants: "Acme Co",
 		secUsers:   "readonly",
 		secSession: "buffer cols",
@@ -111,7 +111,7 @@ func TestSettingsGeneralTogglesWriteGuard(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection = secGeneral
 	m.setFocus = focusContent
-	m.setCursor = 1
+	m.setCursor = guardRow
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = mm.(tuiModel)
@@ -272,7 +272,7 @@ func TestRenderSettingsPanes(t *testing.T) {
 }
 
 func TestLabelsPadVisibleWidthNotEscapeBytes(t *testing.T) {
-	for _, s := range []string{"spinner", "commands", "a"} {
+	for _, s := range []string{"momentum", "commands", "a"} {
 		if got := len(plain(ui.Label(s))); got != 13 {
 			t.Errorf("ui.Label(%q) visible width = %d, want 13", s, got)
 		}
@@ -436,7 +436,7 @@ func TestEnterInContentStillActs(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection = secGeneral
 	m.setFocus = focusContent
-	m.setCursor = 1
+	m.setCursor = guardRow
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if !mm.(tuiModel).cfg.AllowWrites {
@@ -616,5 +616,32 @@ func TestGeometryFormTypesAValue(t *testing.T) {
 	mm, _ = bad.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if got := mm.(tuiModel).status; !strings.Contains(got, "number") {
 		t.Errorf("status = %q, want a complaint about the value", got)
+	}
+}
+
+// The General rows are reached by number from the key handler and printed in
+// order by sectionContent, so the two have to agree. They did not once: mouse
+// was third in the constants and fourth on screen, which pointed its key at
+// the jump setting.
+func TestGeneralRowsMatchTheirLabels(t *testing.T) {
+	m := settingsModel(t)
+	m.setSection = secGeneral
+	m.spinner = ui.NewSpinner("")
+
+	rows := m.sectionContent()
+	if len(rows) < generalRows {
+		t.Fatalf("%d content lines, want at least one per row (%d)", len(rows), generalRows)
+	}
+	for row := range generalRows {
+		want, ok := generalRowLabels[row]
+		if !ok {
+			t.Fatalf("row %d has no label in generalRowLabels", row)
+		}
+		if got := plain(rows[row]); !strings.HasPrefix(strings.TrimSpace(got), want) {
+			t.Errorf("row %d is %q, want it to start with %q", row, got, want)
+		}
+	}
+	if got := m.sectionRows(); got != generalRows {
+		t.Errorf("sectionRows() = %d, want %d", got, generalRows)
 	}
 }

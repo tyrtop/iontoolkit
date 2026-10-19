@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
@@ -164,9 +164,5 @@ func inspectOut(snap api.Snapshot) inspectReport {
 }
 
 func utcString(v int64) string {
-	t := api.UTCTime(v)
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format(time.RFC3339)
+	return clock.RFC3339(api.UTCTime(v))
 }

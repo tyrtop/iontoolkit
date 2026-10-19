@@ -193,11 +193,11 @@ func TestGeneralSectionRowsAreAllReachable(t *testing.T) {
 	m.width, m.height = 110, 30
 	m.spinner = ui.NewSpinner("")
 
-	if got := m.sectionRows(); got != 5 {
-		t.Fatalf("sectionRows() = %d, want 5", got)
+	if got := m.sectionRows(); got != generalRows {
+		t.Fatalf("sectionRows() = %d, want %d", got, generalRows)
 	}
 	out := plain(m.viewSettings())
-	for _, want := range []string{"spinner", "commands", "mode", "jump", "elements", "views"} {
+	for _, want := range []string{"commands", "mode", "jump", "times", "elements", "views"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the General section is missing %q:\n%s", want, out)
 		}
@@ -758,9 +758,11 @@ func TestArrowsStillMoveTheListWhileSearching(t *testing.T) {
 	}
 }
 
-// Deleting the last character of a query leaves the filter. An empty query
-// with the cursor still in it is a list where j and k type letters.
-func TestDeletingTheQueryLeavesTheFilter(t *testing.T) {
+// Backspacing a query down to nothing leaves the filter **open**, so typing
+// can carry straight on; it is the next backspace -- the one that deletes the
+// "/" itself -- that goes back to the list. Leaving on the press that emptied
+// the query was one too early.
+func TestBackspacingTheQueryEmptiesItThenLeaves(t *testing.T) {
 	m := pickModel(t)
 	m.phase = phasePicking
 
@@ -770,19 +772,39 @@ func TestDeletingTheQueryLeavesTheFilter(t *testing.T) {
 		t.Fatal("/ did not open the filter")
 	}
 
-	for range "s0" {
-		next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
-		m = next.(tuiModel)
+	backspace := func(m tuiModel) tuiModel {
+		t.Helper()
+		next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+		return next.(tuiModel)
 	}
-	if m.filterOn {
-		t.Error("the filter is still open with an empty query")
+
+	for range "s0" {
+		m = backspace(m)
+	}
+	// Empty, still in the filter, whole list back.
+	if !m.filterOn {
+		t.Error("the filter closed on the press that emptied the query")
 	}
 	if m.filter.Value() != "" {
-		t.Errorf("query = %q, want it cleared", m.filter.Value())
+		t.Errorf("query = %q, want it empty", m.filter.Value())
 	}
-	// The whole list is back, and the keys move the cursor again.
 	if len(m.matches) != len(m.all) {
 		t.Errorf("%d matches, want the whole list of %d", len(m.matches), len(m.all))
+	}
+
+	// Typing carries on from there rather than needing / again.
+	m = typeString(t, m, "s9")
+	if m.filter.Value() != "s9" {
+		t.Errorf("query = %q, want typing to continue in the filter", m.filter.Value())
+	}
+	for range "s9" {
+		m = backspace(m)
+	}
+
+	// One more deletes the "/" and hands the keys back to the list.
+	m = backspace(m)
+	if m.filterOn {
+		t.Error("the filter is still open after backspacing the empty query")
 	}
 	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 	if got := next.(tuiModel).table.Cursor(); got != 1 {
@@ -791,7 +813,7 @@ func TestDeletingTheQueryLeavesTheFilter(t *testing.T) {
 }
 
 // The same rule on the macro page, which has a filter of its own.
-func TestDeletingTheMacroQueryLeavesTheFilter(t *testing.T) {
+func TestBackspacingTheMacroQueryEmptiesItThenLeaves(t *testing.T) {
 	m := macroModel(t)
 
 	next, _ := m.onMacroKey(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}), "/")
@@ -804,11 +826,17 @@ func TestDeletingTheMacroQueryLeavesTheFilter(t *testing.T) {
 		next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
 		m = next.(tuiModel)
 	}
-	if m.macroFilterOn {
-		t.Error("the macro filter is still open with an empty query")
+	if !m.macroFilterOn {
+		t.Error("the macro filter closed on the press that emptied the query")
 	}
 	if len(m.macroRows()) != 2 {
 		t.Errorf("%d rows, want every macro back", len(m.macroRows()))
+	}
+
+	// The press that deletes the "/" is the one that leaves.
+	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+	if next.(tuiModel).macroFilterOn {
+		t.Error("the macro filter is still open after backspacing the empty query")
 	}
 }
 
@@ -885,4 +913,138 @@ func TestAltHAndAltLSwitchTabs(t *testing.T) {
 	if got := next.(tuiModel).phase; got != phasePicking {
 		t.Errorf("phase = %v after alt+h, want back on the list", got)
 	}
+}
+
+// The serial is on the row and matched by the filter: a column you can read is
+// one people will type into, and a serial is quoted off a label or a case.
+func TestTheSerialIsOnTheRowAndSearchable(t *testing.T) {
+	m := multiModel(t)
+	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+		{ID: "e1", Name: "s5024-rtr-01", Model: "ion1200", Serial: "ION1200ABC123", Connected: true},
+		{ID: "e2", Name: "s0500-rtr-01", Model: "ion1200", Serial: "ION1200XYZ789"},
+	})
+	m.phase = phasePicking
+	m.width, m.height = 160, 30
+	m.rebuildRows()
+
+	if !m.showSerialColumn() {
+		t.Fatal("the sn column is hidden on a list whose records carry serials")
+	}
+	out := plain(m.viewPicking())
+	for _, want := range []string{"sn", "ION1200ABC123", "ION1200XYZ789"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the list is missing %q:\n%s", want, out)
+		}
+	}
+
+	m.filter.SetValue("ION1200XYZ789")
+	m.applyFilter()
+	if len(m.matches) != 1 {
+		t.Fatalf("%d matches for a serial, want the one element", len(m.matches))
+	}
+	if got := m.all[m.matches[0]].Name; got != "s0500-rtr-01" {
+		t.Errorf("matched %s, want the element with that serial", got)
+	}
+}
+
+// A connected element reads green across the line, an offline one keeps red on
+// the state alone, and the row under the cursor gives both up: the table paints
+// its highlight around the whole row, and a highlight wrapped around coloured
+// cells ends at the first reset inside them.
+func TestConnectedRowsAreGreenAndOfflineKeepsRed(t *testing.T) {
+	m := multiModel(t)
+	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+		// Sorted by name, so the offline one is row 0 and starts under the
+		// cursor.
+		{ID: "e2", Name: "s0500-rtr-01", Model: "ion1200"},
+		{ID: "e1", Name: "s5024-rtr-01", Model: "ion1200", Connected: true},
+	})
+	m.phase = phasePicking
+	m.width, m.height = 140, 30
+	m.rebuildRows()
+
+	// Cursor on the offline row: the connected one is green, name and all.
+	out := m.viewPicking()
+	if !strings.Contains(out, ui.StyleOK.Render("s5024-rtr-01")) {
+		t.Errorf("a connected element is not green across the line:\n%q", out)
+	}
+	if !strings.Contains(out, ui.StyleOK.Render("connected")) {
+		t.Errorf("the state of a connected element is not green:\n%q", out)
+	}
+	if strings.Contains(plain(out), "offline") && strings.Contains(out, ui.StyleErr.Render("offline")) {
+		t.Error("the row under the cursor kept its own colour, which breaks the highlight")
+	}
+
+	// Move off it: now offline is red and the connected row is the plain one.
+	m.moveCursorTo(1)
+	out = m.viewPicking()
+	if !strings.Contains(out, ui.StyleErr.Render("offline")) {
+		t.Errorf("offline is not red once the cursor is elsewhere:\n%q", out)
+	}
+	if strings.Contains(out, ui.StyleOK.Render("s5024-rtr-01")) {
+		t.Error("the row under the cursor is still green, which breaks the highlight")
+	}
+	// Connected is never red, wherever the cursor is.
+	if strings.Contains(out, ui.StyleErr.Render("connected")) {
+		t.Error("connected is rendered in the error colour")
+	}
+}
+
+// Columns are sized to what is in them, which is why site stopped being wider
+// than its names while a serial was cut off.
+func TestColumnsAreSizedToTheirContent(t *testing.T) {
+	cols := []elementColumn{
+		{title: "element", min: 12, max: 28, flex: true},
+		{title: "site", min: 8, max: 22, flex: true},
+		{title: "sn", min: 10, max: 24, flex: true},
+		{title: "state", min: 9, max: 9},
+	}
+	values := [][]string{
+		{"store-0003-rtr-01", "Store 0003", "ION1200ABCDEF123456", "connected"},
+	}
+
+	wide := fitColumns(cols, values, 200)
+	if wide[1] != len("Store 0003") {
+		t.Errorf("site = %d, want the width of its widest name (%d)", wide[1], len("Store 0003"))
+	}
+	if wide[2] != len("ION1200ABCDEF123456") {
+		t.Errorf("sn = %d, want the whole serial (%d)", wide[2], len("ION1200ABCDEF123456"))
+	}
+
+	// On a narrow terminal the flexible columns give way, widest first, and
+	// the fixed ones never do.
+	narrow := fitColumns(cols, values, 60)
+	total := 0
+	for _, w := range narrow {
+		total += w + colGap
+	}
+	if total > 60 {
+		t.Errorf("columns total %d, want them shaved to 60", total)
+	}
+	if narrow[3] != 9 {
+		t.Errorf("state = %d, want a fixed column left alone", narrow[3])
+	}
+	for i, c := range cols {
+		if narrow[i] < c.min {
+			t.Errorf("%s = %d, want never below its minimum %d", c.title, narrow[i], c.min)
+		}
+	}
+}
+
+func TestRenderTheElementListWithSerials(t *testing.T) {
+	m := multiModel(t)
+	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+		{ID: "e1", Name: "s5024-rtr-01", Model: "ion 1200", Serial: "ION1200ABC123", Connected: true,
+			SpokeHA: &api.SpokeHA{ClusterID: "c1"}, SiteID: "s1"},
+		{ID: "e2", Name: "s5024-rtr-02", Model: "ion 1200", Serial: "ION1200DEF456", Connected: true,
+			SpokeHA: &api.SpokeHA{ClusterID: "c1"}, SiteID: "s1"},
+		{ID: "e3", Name: "s0500-rtr-01", Model: "ion 3200", Serial: "ION3200XYZ789"},
+	})
+	m.phase = phasePicking
+	m.width, m.height = 170, 24
+	m.ha = map[string]string{"111/e1": haActive}
+	m.haCached = map[string]string{"111/e2": haStandby}
+	m.haTotal, m.haDone = 2, 1
+	m.rebuildRows()
+	t.Log("\n" + m.viewPicking())
 }

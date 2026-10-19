@@ -123,3 +123,25 @@ func TestScrolledViewDoesNotRaceDeviceOutput(t *testing.T) {
 		}
 	}
 }
+
+// Buffer is what a copy takes, so it has to reach past the screen: the whole
+// point of copying a session is the output that has already scrolled away.
+func TestBufferHoldsTheScrollbackAndTheScreen(t *testing.T) {
+	s, _ := scrolledSession(t, 30)
+
+	got := s.Buffer()
+	for _, want := range []string{"L001", "L015", "L030"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Buffer() is missing %s:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("Buffer() carries escape codes, which a clipboard should not:\n%q", got)
+	}
+	if lines := strings.Split(got, "\n"); len(lines) < 30 {
+		t.Errorf("Buffer() has %d lines, want every line written", len(lines))
+	}
+	if strings.HasSuffix(got, "\n") {
+		t.Error("Buffer() ends with the blank prompt rows the screen pads with")
+	}
+}

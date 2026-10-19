@@ -102,6 +102,13 @@ func (m tuiModel) completedCount() int {
 }
 
 func (m *tuiModel) applyResultFilter() {
+	// The ION the cursor is on, not the row it is on. Results arrive in
+	// whatever order the elements finish and the table is in run order, so an
+	// earlier element landing after a later one moves every row below it --
+	// which used to slide the highlight onto a different ION under the user's
+	// hands, and take an open output pane with it.
+	was := m.cursorResultID()
+
 	q := strings.ToLower(strings.TrimSpace(m.resFilter.Value()))
 	m.resMatches = m.resMatches[:0]
 
@@ -125,7 +132,29 @@ func (m *tuiModel) applyResultFilter() {
 	}
 	m.resFilter.SetSuggestions(names)
 	m.rebuildResultRows()
+	m.keepResultCursorOn(was)
+}
 
+// cursorResultID is the element under the cursor, empty when there is none.
+func (m tuiModel) cursorResultID() string {
+	if idx, ok := m.currentResult(); ok {
+		return m.results[idx].ElementID
+	}
+	return ""
+}
+
+// keepResultCursorOn puts the cursor back on an element wherever its row has
+// moved to, and clamps when that element is no longer listed at all -- which a
+// filter can do.
+func (m *tuiModel) keepResultCursorOn(eid string) {
+	if eid != "" {
+		for row, i := range m.resMatches {
+			if m.results[i].ElementID == eid {
+				m.resTable.SetCursor(row)
+				return
+			}
+		}
+	}
 	if c := m.resTable.Cursor(); c >= len(m.resMatches) {
 		m.resTable.SetCursor(max(0, len(m.resMatches)-1))
 	}
@@ -254,6 +283,9 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		}
 		return m, nil
 
+	case "alt+y":
+		return m.copyResults()
+
 	case "f", "o", "s":
 		if !m.resFilterOn {
 			return m.onResultsOutputKey(key)
@@ -269,15 +301,17 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 	}
 
 	if m.resFilterOn {
-		var cmd tea.Cmd
-		m.resFilter, cmd = m.resFilter.Update(msg)
-		m.applyResultFilter()
-		// Deleting the last character leaves the filter, as on every other
-		// page that has one.
+		// Backspace on an already-empty query leaves, as on every other page
+		// that has a filter: the last press deletes the "/".
 		if key == "backspace" && m.resFilter.Value() == "" {
 			m.resFilterOn = false
 			m.resFilter.Blur()
+			m.applyResultFilter()
+			return m, nil
 		}
+		var cmd tea.Cmd
+		m.resFilter, cmd = m.resFilter.Update(msg)
+		m.applyResultFilter()
 		return m, cmd
 	}
 
@@ -415,9 +449,9 @@ func (m tuiModel) viewResults() string {
 	}
 
 	status := m.status
-	hint := "↑↓/jk move · / filter · enter open · f/o format · s save · esc/q back"
+	hint := "↑↓/jk move · / filter · enter open · f/o format · s save · " + copyKeyHint + " run as json · esc/q back"
 	if m.resOpen {
-		hint = "↑↓/jk scroll · pgup/pgdn page · home/end ends · esc/q close"
+		hint = "↑↓/jk scroll · pgup/pgdn page · home/end ends · " + copyKeyHint + " output · esc/q close"
 		// Where in the output the highlight is, since the pane holds a
 		// fraction of a long run's output.
 		if idx, ok := m.currentResult(); ok {

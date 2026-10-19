@@ -49,6 +49,12 @@ func clusterStatusURL(siteID, cid string) string {
 		apiHost, clusterStatusVer, siteID, cid)
 }
 
+// query_status_spokeclusters: tenant-wide, because the token carries the
+// tenant. One POST where clusterStatusURL is one GET per cluster.
+func clusterQueryURL() string {
+	return fmt.Sprintf("%s/sdwan/%s/api/spokeclusters/status/query", apiHost, clusterStatusVer)
+}
+
 func interfaceStatusURL(siteID, eid, iid string) string {
 	return fmt.Sprintf("%s/sdwan/%s/api/sites/%s/elements/%s/interfaces/%s/status",
 		apiHost, ifaceStatusVer, siteID, eid, iid)

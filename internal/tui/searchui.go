@@ -11,7 +11,6 @@ import (
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -72,7 +71,7 @@ type loadClosedMsg struct{}
 
 func newLoadModel(events <-chan TenantLoad, total int) loadModel {
 	s := spinner.New()
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	s.Style = ui.StyleSpinner
 	return loadModel{
 		events:  events,
 		total:   total,

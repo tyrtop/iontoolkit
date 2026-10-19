@@ -7,6 +7,7 @@ import (
 	"text/template"
 	"time"
 
+	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
@@ -145,12 +146,17 @@ var funcs = template.FuncMap{
 	// utc is the API's timestamp integers, whose unit varies by field. Always
 	// go through this: the scale is three orders of magnitude apart between
 	// two fields of the same object.
+	//
+	// The name is older than the setting: it reads the integer as a time and
+	// prints it in the configured zone, which is UTC unless someone changed
+	// it. Views in the wild call it, so it keeps the name and says which zone
+	// it used.
 	"utc": func(v any) string {
 		n := toInt64(v)
 		if n == 0 {
 			return ""
 		}
-		return api.UTCTime(n).Format("2006-01-02 15:04")
+		return clock.Stamp(api.UTCTime(n))
 	},
 	"ago": func(v any) string {
 		n := toInt64(v)

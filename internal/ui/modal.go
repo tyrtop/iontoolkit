@@ -30,7 +30,7 @@ func Modal(lines []string, width int) string {
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("3")).
+		BorderForeground(BorderColor()).
 		Padding(0, 1).
 		Render(b.String())
 

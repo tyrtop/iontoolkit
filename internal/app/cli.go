@@ -3,10 +3,43 @@ package app
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/ui"
 )
+
+// --themes, read by every command: a batch prints marks and a bar too
+var ThemesFile string
+
+func ThemesPath(st *config.Store) string {
+	if ThemesFile != "" {
+		return ThemesFile
+	}
+	if st == nil {
+		return ""
+	}
+	return filepath.Join(st.Root, ui.ThemesFileName)
+}
+
+// Called by every command, not just the TUI. Nothing here can fail a run; a
+// nil cfg is read from the store.
+func ApplyDisplaySettings(st *config.Store, cfg *config.Config) {
+	_ = ui.LoadThemes(ThemesPath(st))
+	if cfg == nil {
+		if st == nil {
+			return
+		}
+		var err error
+		if cfg, err = st.Config(); err != nil {
+			return
+		}
+	}
+	_ = clock.Use(cfg.Zone)
+	ui.UseTheme(cfg.Theme)
+}
 
 // CredSource is which rule picked the credentials. It gets printed, because
 // otherwise the first sign of a wrong tenant is a fleet of dead elements.

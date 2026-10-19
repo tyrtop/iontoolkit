@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -333,5 +334,96 @@ func TestResultsHeaderNamesTheSaveFormat(t *testing.T) {
 	}
 	if strings.Contains(got, "command-first") {
 		t.Errorf("results header claims an orientation json does not use:\n%s", got)
+	}
+}
+
+// Results arrive in whatever order the elements finish, and the table is in
+// run order, so a later element finishing first and an earlier one landing
+// after it moves every row below it. The cursor has to follow the ION it was
+// on, not the row number it was on -- otherwise the highlight lands on a
+// different element under the user's hands, and an open pane shows one ION's
+// output under another's name.
+func TestTheResultsCursorFollowsItsElementAsResultsArrive(t *testing.T) {
+	m := pickModel(t)
+	m.width, m.height = 100, 30
+	m.ran = []string{"1", "2", "3", "4"}
+	m.results = make([]sase.Result, 4)
+	m.elapsed = make([]time.Duration, 4)
+	m.phase = phaseResults
+
+	done := func(i int, name string) {
+		m.results[i] = sase.Result{
+			ElementID: fmt.Sprint(i + 1), Name: name, Model: "ion 2000",
+			Commands: []ioncli.CommandOutput{{Command: "dump device status", Output: name + " output"}},
+		}
+		m.applyResultFilter()
+	}
+
+	// The last element finishes first, so it is the only row.
+	done(3, "S0100-RTR-04")
+	idx, ok := m.currentResult()
+	if !ok || m.results[idx].Name != "S0100-RTR-04" {
+		t.Fatalf("cursor is on %+v, want the only finished element", m.results[idx])
+	}
+
+	// Now an earlier one lands, which pushes that row down.
+	done(1, "S0100-RTR-02")
+	idx, ok = m.currentResult()
+	if !ok {
+		t.Fatal("no result under the cursor")
+	}
+	if got := m.results[idx].Name; got != "S0100-RTR-04" {
+		t.Errorf("cursor moved to %s, want it to stay on S0100-RTR-04", got)
+	}
+
+	// And an open pane still shows the element the row names.
+	m.resOpen = true
+	out := plain(m.viewResults())
+	if !strings.Contains(out, "S0100-RTR-04 output") {
+		t.Errorf("the open pane is not the element under the cursor:\n%s", out)
+	}
+
+	// Moving down then having another arrive keeps the new choice too.
+	m.moveResultCursor(-1)
+	before, _ := m.currentResult()
+	name := m.results[before].Name
+	done(0, "S0100-RTR-01")
+	after, _ := m.currentResult()
+	if got := m.results[after].Name; got != name {
+		t.Errorf("cursor moved from %s to %s when a result arrived", name, got)
+	}
+}
+
+// The results filter follows the same rule as the others: empty first, leave
+// second.
+func TestBackspacingTheResultsQueryEmptiesItThenLeaves(t *testing.T) {
+	m := resultsModel(t)
+	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
+	m = next.(tuiModel)
+	if !m.resFilterOn {
+		t.Fatal("/ did not open the results filter")
+	}
+	for _, r := range "S9999" {
+		next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
+		m = next.(tuiModel)
+	}
+	if len(m.resMatches) != 1 {
+		t.Fatalf("%d matches, want the query to have narrowed the list", len(m.resMatches))
+	}
+
+	for range "S9999" {
+		next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+		m = next.(tuiModel)
+	}
+	if !m.resFilterOn {
+		t.Error("the results filter closed on the press that emptied the query")
+	}
+	if len(m.resMatches) != m.completedCount() {
+		t.Errorf("%d matches, want every completed result back", len(m.resMatches))
+	}
+
+	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+	if next.(tuiModel).resFilterOn {
+		t.Error("the results filter is still open after backspacing the empty query")
 	}
 }

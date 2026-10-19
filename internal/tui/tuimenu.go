@@ -579,6 +579,12 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 		m.phase = m.formReturn
 		return m, nil
 
+	case formZone:
+		return m.submitZone()
+
+	case formColour:
+		return m.submitColour()
+
 	case formFavourite:
 		return m.submitFavourite()
 

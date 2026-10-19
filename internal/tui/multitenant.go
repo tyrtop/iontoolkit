@@ -187,6 +187,14 @@ func (m *tuiModel) loadFromCache() {
 			}
 			m.sites[k] = v
 		}
+		// Kept apart from the fresh states: the column marks these with an
+		// asterisk, because they are as old as the file they came out of.
+		for eid, w := range c.HA {
+			if m.haCached == nil {
+				m.haCached = map[string]string{}
+			}
+			m.haCached[t.TSGID+"/"+eid] = w
+		}
 		if a := c.Age(); a > oldest {
 			oldest = a
 		}
@@ -441,7 +449,18 @@ func (m tuiModel) refreshNote() string {
 	case cacheFailed:
 		return "  " + ui.StyleErr.Render("refresh failed")
 	}
-	return ""
+	return m.haNote()
+}
+
+// haNote is how far the HA sweep has got. One request per cluster at five a
+// second is tens of seconds on a fleet of pairs, and a column filling in
+// silently looks like one that has given up.
+func (m tuiModel) haNote() string {
+	if m.haTotal == 0 || m.haDone >= m.haTotal {
+		return ""
+	}
+	return "  " + m.spinner.View() + " " +
+		ui.StyleDim.Render(fmt.Sprintf("ha %d/%d clusters", m.haDone, m.haTotal))
 }
 
 // runAsFor is the device login chosen for a tenant: an explicit choice made in

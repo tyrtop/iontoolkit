@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
@@ -206,29 +207,38 @@ func (m tuiModel) onRetryKey(key string) (tea.Model, tea.Cmd) {
 
 // rowStatus is the no-header column beside each element: what this element is
 // doing, and whether it already has a tab.
-func (m tuiModel) rowStatus(el elementRow) string {
+func (m *tuiModel) rowStatus(el elementRow) string {
+	glyph, style := m.rowStatusOf(el)
+	return style.Render(glyph)
+}
+
+// rowStatusOf is the glyph and how to paint it, kept apart for the same reason
+// haState is: the list builds this for every matched row and paints only the
+// handful it shows.
+func (m *tuiModel) rowStatusOf(el elementRow) (string, lipgloss.Style) {
 	if st, ok := m.dialing[el.ID]; ok {
 		if st.failed {
-			return ui.StyleErr.Render(ui.MarkCross.String())
+			return ui.MarkCross.String(), ui.StyleErr
 		}
-		return m.spinner.View()
+		// The spinner is already a styled frame of its own.
+		return m.spinner.View(), lipgloss.NewStyle()
 	}
 	s := m.sessions.Find(el.ID)
 	if s == nil {
 		for _, d := range m.sessions.Detached() {
 			if d.ElementID == el.ID {
-				return ui.StyleDim.Render("○")
+				return "○", ui.StyleDim
 			}
 		}
-		return " "
+		return " ", lipgloss.NewStyle()
 	}
 	switch {
 	case s.Err() != nil:
-		return ui.StyleErr.Render(ui.MarkCross.String())
+		return ui.MarkCross.String(), ui.StyleErr
 	case s.Hung():
-		return ui.StyleWarn.Render("~")
+		return "~", ui.StyleWarn
 	}
-	return ui.StyleOK.Render("●")
+	return "●", ui.StyleOK
 }
 
 // connectBar is the line under the tab bar. It keeps its row whatever the

@@ -23,6 +23,7 @@ import (
 	"tyrtop.com/iontk/internal/saseauth"
 	"tyrtop.com/iontk/internal/search"
 	"tyrtop.com/iontk/internal/tui"
+	"tyrtop.com/iontk/internal/ui"
 )
 
 // Search output formats. These are not the batch formats: --search prints
@@ -63,6 +64,11 @@ func runSearch(ctx context.Context) error {
 	if st == nil {
 		return fmt.Errorf("--search needs the config store, which could not be opened")
 	}
+	app.ApplyDisplaySettings(st, nil)
+	if err := ui.ThemesErr(); err != "" {
+		fmt.Fprintln(os.Stderr, "themes: "+err)
+	}
+
 	tenants, err := searchScope(st)
 	if err != nil {
 		return err

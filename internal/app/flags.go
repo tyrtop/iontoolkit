@@ -37,11 +37,12 @@ var Defaults = RootFlags{
 	SessionTimeout: 20 * time.Second,
 	RefreshMargin:  75 * time.Second,
 	Concurrency:    10,
-	Burst:          10,
+	Burst:          20,
 	DialAttempts:   3,
 	DialTimeout:    10 * time.Second,
-	RPS:            5,
-	PagerPrompts:   ioncli.DefaultPagers,
+	// the portal's own captures peak at 8-9 a second, and a 429 is waited out
+	RPS:          10,
+	PagerPrompts: ioncli.DefaultPagers,
 	// Works on an ion 1200-s running 6.3.4. "terminal length 0", "no paging"
 	// and "set cli pager off" all get rejected there. If a device rejects this
 	// one too, the pager scraper handles the run.

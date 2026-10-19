@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/sase/api"
 )
 
 func macroModel(t *testing.T) tuiModel {
@@ -492,5 +493,87 @@ func TestTheMenuDoesNotOpenTheListInMacroMode(t *testing.T) {
 	// And it comes back as whatever the default mode is, not something new.
 	if got.mode != modeShell {
 		t.Errorf("mode = %v, want the saved default", got.mode)
+	}
+}
+
+// The line the cursor is on is highlighted whole, like a row of the element
+// list. A marker alone was all this page used to manage, because the line is
+// built from styled pieces and a highlight wrapped around those ends at the
+// first reset inside them.
+func TestTheMacroCursorHighlightsTheWholeLine(t *testing.T) {
+	m := macroModel(t)
+	m.width = 120
+
+	m.macroCursor = 1
+	out := m.viewMacros()
+	rows := m.macroRows()
+	if len(rows) < 2 {
+		t.Fatalf("%d macros, want at least two to tell the lines apart", len(rows))
+	}
+
+	// The highlighted line is one styled run: plain text inside ui.StyleRow.
+	var want string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(plain(line), rows[0].Name) {
+			want = line
+			break
+		}
+	}
+	if want == "" {
+		t.Fatalf("no line for %s:\n%s", rows[0].Name, out)
+	}
+	if !strings.Contains(want, "\x1b[1;35m") {
+		t.Errorf("the cursor line is not highlighted:\n%q", want)
+	}
+	// And it is one run rather than a highlight that dies at the first reset.
+	if n := strings.Count(want, "\x1b[0m") + strings.Count(want, "\x1b[m"); n > 1 {
+		t.Errorf("the highlight is broken into %d runs:\n%q", n, want)
+	}
+
+	// Moving the cursor moves the highlight; the "+ new macro" row takes it too.
+	m.macroCursor = 0
+	out = m.viewMacros()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(plain(line), "+ new macro") {
+			if !strings.Contains(line, "\x1b[1;35m") {
+				t.Errorf("the new-macro row is not highlighted:\n%q", line)
+			}
+		}
+	}
+}
+
+// A macro brought you to the element list, so leaving it goes back to the
+// macro page rather than to the main menu: that is where the choice was made
+// and where the next one is.
+func TestLeavingTheElementListGoesBackToTheMacroPage(t *testing.T) {
+	m := macroModel(t)
+	m.all = []elementRow{{Element: api.Element{ID: "1", Name: "s0100-rtr-01"}, TSG: "1"}}
+	m.matches = []int{0}
+
+	next, _ := m.armMacro(m.cmds.Macros[0])
+	m = next.(tuiModel)
+	if m.phase != phasePicking || m.mode != modeMacro {
+		t.Fatalf("phase = %v mode = %v, want the element list in macro mode", m.phase, m.mode)
+	}
+
+	for _, key := range []string{"q", "esc", "alt+w"} {
+		back, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'q', Text: key}), key)
+		if got := back.(tuiModel).phase; got != phaseMacros {
+			t.Errorf("%s from a macro run went to phase %v, want the macro page", key, got)
+		}
+	}
+
+	// Without a macro it still goes to the menu.
+	m.mode, m.armedMacro = modeShell, ""
+	back, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'q', Text: "q"}), "q")
+	if got := back.(tuiModel).phase; got != phaseMenu {
+		t.Errorf("q from the plain list went to phase %v, want the menu", got)
+	}
+	// And the hint says which.
+	m.mode, m.armedMacro = modeMacro, m.cmds.Macros[0].Name
+	m.phase, m.width, m.height = phasePicking, 140, 24
+	m.rebuildRows()
+	if got := plain(m.viewPicking()); !strings.Contains(got, "alt+w macros") {
+		t.Errorf("the hint does not say where back goes:\n%s", got)
 	}
 }

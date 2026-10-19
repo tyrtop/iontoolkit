@@ -83,15 +83,15 @@ func (m tuiModel) onMacroKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cm
 			m.macroFilter.Blur()
 			return m, nil
 		}
-		var cmd tea.Cmd
-		m.macroFilter, cmd = m.macroFilter.Update(msg)
-		// Deleting the last character leaves the filter, the same as on the
-		// element list: an empty query with the cursor in it is a page whose
-		// keys all type letters.
+		// Backspace on an already-empty query leaves, the same as on the
+		// element list: the last press deletes the "/".
 		if key == "backspace" && m.macroFilter.Value() == "" {
 			m.macroFilterOn = false
 			m.macroFilter.Blur()
+			return m.resetMacroCursor(), nil
 		}
+		var cmd tea.Cmd
+		m.macroFilter, cmd = m.macroFilter.Update(msg)
 		return m.resetMacroCursor(), cmd
 	}
 
@@ -114,6 +114,8 @@ func (m tuiModel) onMacroKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cm
 			return m.openMacroForm(mac)
 		}
 		return m, nil
+	case "alt+y":
+		return m.copyMacro()
 	case "ctrl+d", "x":
 		return m.deleteMacro()
 	case "enter":
@@ -408,14 +410,22 @@ func (m tuiModel) viewMacros() string {
 	}
 	b.WriteString("\n\n")
 
+	// The line the cursor is on is highlighted whole, the way a row of the
+	// element list is, and built plain to do it: a highlight wrapped around
+	// styled text ends at the first reset inside it, which is why a marker
+	// was all this page used to manage.
+	width := max(20, m.width-2)
+	line := func(here bool, plain, styled string) string {
+		if here {
+			return ui.StyleRow.Render(fmt.Sprintf("%-*s", width, ui.Truncate(plain, width))) + "\n"
+		}
+		return "  " + styled + "\n"
+	}
+
 	// An action rather than a row, so it stays at the top whatever the filter
 	// says and is where the cursor rests when there is nothing to run.
-	newRow := "+ new macro"
-	if m.macroCursor == 0 {
-		b.WriteString(ui.StyleCmd.Render("> ") + ui.StyleOK.Render(newRow) + "\n")
-	} else {
-		b.WriteString("  " + ui.StyleGhost.Render(newRow) + "\n")
-	}
+	const newRow = "+ new macro"
+	b.WriteString(line(m.macroCursor == 0, newRow, ui.StyleGhost.Render(newRow)))
 
 	list := m.macroRows()
 	if len(m.cmds.Macros) > 0 && len(list) == 0 {
@@ -423,30 +433,32 @@ func (m tuiModel) viewMacros() string {
 	}
 
 	for i, mac := range list {
-		cursor := "  "
-		if i+1 == m.macroCursor {
-			cursor = ui.StyleCmd.Render("> ")
-		}
 		// Padded plain, then styled, so the counts line up down the page.
 		name := fmt.Sprintf("%-22s", ui.Truncate(mac.Name, 22))
 		count := fmt.Sprintf("%-14s", fmt.Sprintf("%d command(s)", len(mac.Commands)))
+		cmds := ui.Truncate(strings.Join(mac.Commands, " · "), max(10, m.width-58))
+
 		// The model is the standing cross-model signal: warn-coloured when it
 		// is not what the selection is, since the question is only asked once.
-		tag := ""
+		model, tag := "", ""
 		if mac.Model != "" {
+			model = mac.Model + "  "
 			style := ui.StyleDim
 			if sel := m.selectionModel(); sel != "" && sel != mac.Model {
 				style = ui.StyleWarn
 			}
-			tag = style.Render(mac.Model + "  ")
+			tag = style.Render(model)
 		}
-		b.WriteString(cursor + ui.StyleElement.Render(name) + ui.StyleDim.Render(count) + tag +
-			ui.StyleDim.Render(ui.Truncate(strings.Join(mac.Commands, " · "), max(10, m.width-58))) + "\n")
+
+		b.WriteString(line(i+1 == m.macroCursor,
+			name+count+model+cmds,
+			ui.StyleElement.Render(name)+ui.StyleDim.Render(count)+tag+ui.StyleDim.Render(cmds)))
 	}
 
 	b.WriteString("\n")
 	b.WriteString(ui.Footer(m.status,
-		"↑↓ move · enter pick, then choose elements · e edit · ctrl+d delete · / filter · esc menu"))
+		"↑↓ move · enter pick, then choose elements · e edit · ctrl+d delete · "+
+			copyKeyHint+" · / filter · esc menu"))
 	return b.String()
 }
 
@@ -458,4 +470,34 @@ func (m tuiModel) modeLabel() string {
 		label += ui.StyleCmd.Render("  " + m.armedMacro)
 	}
 	return label
+}
+
+// pasteMacroCommands fills a line per pasted command, growing the form as it
+// goes, and leaves an empty line at the bottom for the next one.
+func (m tuiModel) pasteMacroCommands(cmds []string) (tea.Model, tea.Cmd) {
+	m.form[m.formCursor].input.Blur()
+
+	at := m.formCursor
+	for i, c := range cmds {
+		if at+i >= len(m.form) {
+			m.form = append(m.form, newMacroCommand(len(m.form)-1))
+		}
+		m.form[at+i].input.SetValue(c)
+	}
+	m.form = append(m.form, newMacroCommand(len(m.form)-1))
+
+	m.formCursor = len(m.form) - 1
+	in := &m.form[m.formCursor].input
+	in.SetCursor(len(in.Value()))
+	return m, in.Focus()
+}
+
+// listReturn is where esc, q and alt+w go from the element list: back to the
+// macro page when a macro is what brought us here, since that is where the
+// choice was made and where another one is made. The main menu otherwise.
+func (m tuiModel) listReturn() tuiPhase {
+	if m.mode == modeMacro && m.armedMacro != "" {
+		return phaseMacros
+	}
+	return phaseMenu
 }

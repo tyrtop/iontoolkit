@@ -158,3 +158,25 @@ func (s *Session) Scrollback() int {
 	defer s.emuMu.Unlock()
 	return s.emu.ScrollbackLen()
 }
+
+// What a copy takes: scrollback and screen, stripped, trailing blanks
+// dropped. One lock, like ScrolledView, so the halves agree.
+func (s *Session) Buffer() string {
+	s.emuMu.Lock()
+	defer s.emuMu.Unlock()
+
+	sb := s.emu.Scrollback()
+	lines := screenLines(s.emu.Render(), s.emu.CursorPosition().Y)
+
+	out := make([]string, 0, sb.Len()+len(lines))
+	for i := 0; i < sb.Len(); i++ {
+		out = append(out, strings.TrimRight(ansi.Strip(sb.Line(i).Render()), " \t"))
+	}
+	for _, ln := range lines {
+		out = append(out, strings.TrimRight(ansi.Strip(ln), " \t"))
+	}
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return strings.Join(out, "\n")
+}

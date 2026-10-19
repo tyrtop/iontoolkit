@@ -147,8 +147,8 @@ func TestGeneralSectionHasARefreshRow(t *testing.T) {
 	}
 	m.spinner = ui.NewSpinner("")
 
-	if got := m.sectionRows(); got != 5 {
-		t.Fatalf("sectionRows() = %d, want 5 so the refresh row is reachable", got)
+	if got := m.sectionRows(); got != generalRows {
+		t.Fatalf("sectionRows() = %d, want %d so the refresh row is reachable", got, generalRows)
 	}
 	if out := m.viewSettings(); !strings.Contains(out, "elements") {
 		t.Errorf("the General section has no elements row:\n%s", out)
