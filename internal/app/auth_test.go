@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +10,7 @@ import (
 
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/fixture"
+	"tyrtop.com/iontk/internal/saseauth"
 )
 
 func TestValidateCreds(t *testing.T) {
@@ -189,7 +192,7 @@ func TestAccountSeedIsSharedBetweenTenants(t *testing.T) {
 	}
 }
 
-func TestTenantWithItsOwnTokenGetsNoSeed(t *testing.T) {
+func TestATenantsOwnTokenComesFirstButTheSeedIsStillThere(t *testing.T) {
 	st := testStore(t)
 	if err := st.Secrets.Set(config.AccountRefreshTokenKey(), "account-rt"); err != nil {
 		t.Fatalf("seed account token: %v", err)
@@ -202,8 +205,11 @@ func TestTenantWithItsOwnTokenGetsNoSeed(t *testing.T) {
 	if got := src.RefreshToken(); got != "tenant-rt" {
 		t.Errorf("RefreshToken() = %q, want the tenant's own %q", got, "tenant-rt")
 	}
-	if src.Seed() != nil {
-		t.Error("Seed() is set for a tenant with its own credential, want it left alone for tenants that need it")
+	// The seed is attached but unreached while the tenant's own token works,
+	// so it is not spent; withholding it instead sent a tenant whose token
+	// had merely expired all the way to the browser.
+	if src.Seed() == nil {
+		t.Error("Seed() = nil, want the account token available for when this tenant's own is rejected")
 	}
 }
 
@@ -280,5 +286,52 @@ func TestFixturesSeedTenantsThatResolveWithoutASignIn(t *testing.T) {
 	// keyring is or the second store would find none.
 	if v, err := again.Secrets.Get(config.IONPassKey("000000000", "admin")); err != nil || v != "ion" {
 		t.Errorf("second store's device password = %q, %v; want the seeded one", v, err)
+	}
+}
+
+func TestShortAuthErrorSaysWhatToDoAboutIt(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			// The one that matters most: the server rejecting a stored
+			// refresh token means this tenant worked once, so the fix is to
+			// sign in again -- not to go looking for an access problem.
+			name: "expired refresh token",
+			err: fmt.Errorf("%w: stored refresh token rejected: token: status 400 Bad Request: "+
+				`{"error_description":"grant is invalid","error":"invalid_grant"}; `+
+				"no existing browser session: authorization failed: interaction_required",
+				saseauth.ErrInteractiveRequired),
+			want: "sign-in expired",
+		},
+		{
+			name: "no access to the tenant",
+			err: fmt.Errorf("%w: no existing browser session: authorization failed: interaction_required",
+				saseauth.ErrInteractiveRequired),
+			want: "not accessible with this sign-in",
+		},
+		{
+			// Proves nothing about access, and arrives wrapped the same way.
+			name: "sign-in timed out",
+			err:  fmt.Errorf("%w: sign-in did not complete within 2m0s", saseauth.ErrInteractiveRequired),
+			want: "sign-in timed out",
+		},
+		{"rejected credential", errors.New("elements: status 403 Forbidden"), "credential rejected"},
+		{"anything else is passed through", errors.New("dial tcp: no route to host"), "dial tcp: no route to host"},
+		{"no error", nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ShortAuthError(tt.err)
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("ShortAuthError() = %q, want it to say %q", got, tt.want)
+			}
+			// The point is to replace the wall of OAuth text, not to reprint it.
+			if tt.err != nil && len(got) >= len(tt.err.Error()) && len(tt.err.Error()) > 80 {
+				t.Errorf("ShortAuthError() = %q, no shorter than the original", got)
+			}
+		})
 	}
 }

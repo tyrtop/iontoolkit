@@ -7,10 +7,16 @@ import (
 	"net/http"
 	"time"
 
+	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-func NewClient(ctx context.Context, f Flags, logw io.Writer) (*api.Client, error) {
+// NewClient builds an authenticated client for the tenant in f. The store is
+// passed rather than opened here: a browser tenant reads and writes refresh
+// tokens through it, and a function that reaches for the real one on its own
+// cannot be pointed anywhere else -- a test that touched this path spent live
+// credentials and wrote into the real keyring.
+func NewClient(ctx context.Context, st *config.Store, f Flags, logw io.Writer) (*api.Client, error) {
 	wsClient := &http.Client{Transport: &http.Transport{
 		MaxConnsPerHost:     f.Concurrency,
 		MaxIdleConnsPerHost: 50,
@@ -40,7 +46,7 @@ func NewClient(ctx context.Context, f Flags, logw io.Writer) (*api.Client, error
 	}
 	if f.BrowserAuth {
 		fmt.Fprintln(logw, "using the browser sign-in for this tenant")
-		src := BrowserSource(f, httpClient, OpenStore())
+		src := BrowserSource(f, httpClient, st)
 		c, err := api.NewTokenSourceClient(ctx, httpClient, wsClient, src, f.RefreshMargin, f.Verbose, f.RPS, f.Burst)
 		if err != nil {
 			return nil, err

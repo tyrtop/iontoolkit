@@ -53,8 +53,8 @@ var flagGroups = []struct {
 	intro string
 	flags []string
 }{
-	{"Targets", "Which elements to act on. Exactly one is required outside the TUI.", []string{
-		"element", "elements-path",
+	{"Targets", "Which elements to act on. Exactly one is required outside the TUI. `--search` runs the TUI's filter over the working set of tenants, narrowed by `--tenant` or `--tsg`.", []string{
+		"element", "elements-path", "search", "refresh", "no-validate", "yes", "no-login",
 	}},
 	{"Commands", "What to run. With none of these, iontk opens an interactive session.", []string{
 		"cmd", "allow-writes",

@@ -10,6 +10,10 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
+// CacheFresh is how long cached elements are treated as current, by the TUI
+// on launch and by a --search that would rather answer from disk.
+const CacheFresh = 15 * time.Minute
+
 type ElementCache struct {
 	TSGID     string            `json:"tsg_id"`
 	FetchedAt time.Time         `json:"fetched_at"`
@@ -64,3 +68,7 @@ func (c *ElementCache) Age() time.Duration {
 func (c *ElementCache) Stale(ttl time.Duration) bool {
 	return c == nil || c.FetchedAt.IsZero() || c.Age() > ttl
 }
+
+// Usable is a cache worth reading: one that was written and has something in
+// it. An empty one is indistinguishable from a tenant that answered nothing.
+func (c *ElementCache) Usable() bool { return c != nil && len(c.Elements) > 0 }

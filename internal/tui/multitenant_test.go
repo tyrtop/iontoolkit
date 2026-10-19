@@ -194,6 +194,33 @@ func TestLoadFromCacheAggregatesActiveTenantsOnly(t *testing.T) {
 	}
 }
 
+func TestLoadFromCacheKeepsSiteNames(t *testing.T) {
+	// Site names were fetched and then dropped, so every site showed a raw id
+	// until the first refresh landed. The cache has to carry them.
+	m := multiModel(t)
+	if err := m.store.SaveCache(&config.ElementCache{
+		TSGID: "111", FetchedAt: time.Now().Add(-time.Minute),
+		Elements: []api.Element{{ID: "e1", Name: "s0100-rtr-01", SiteID: "s1"}},
+		Sites:    map[string]string{"111/s1": "Store 0100"},
+	}); err != nil {
+		t.Fatalf("SaveCache() error = %v", err)
+	}
+
+	m.loadFromCache()
+	if len(m.all) != 1 {
+		t.Fatalf("loaded %d elements, want 1", len(m.all))
+	}
+	if got := m.siteName(m.all[0]); got != "Store 0100" {
+		t.Errorf("siteName() = %q, want the cached name rather than the raw id", got)
+	}
+	// And it is searchable, which a raw id deliberately is not.
+	m.filter.SetValue("store 0100")
+	m.applyFilter()
+	if len(m.matches) != 1 {
+		t.Errorf("matched %d, want the cached site name to be searchable", len(m.matches))
+	}
+}
+
 func TestLoadFromCacheMarksAStaleAggregateAsOwed(t *testing.T) {
 	m := multiModel(t)
 	if err := m.store.SaveCache(&config.ElementCache{

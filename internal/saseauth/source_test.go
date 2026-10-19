@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -231,5 +232,80 @@ func TestConcurrentTenantsEachGetTheirOwnTokenFromOneSeed(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("%d refresh grants were attempted, want 1: a spent seed must not be presented again", n)
+	}
+}
+
+func TestARejectedTenantTokenFallsBackToTheSeed(t *testing.T) {
+	// A per-tenant refresh token that the server has aged out used to skip
+	// the account credential entirely and go straight to the browser, so a
+	// tenant that merely needed renewing reported "no existing browser
+	// session" and asked for an interactive sign-in it did not need.
+	var sent []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		rt := r.PostForm.Get("refresh_token")
+		mu.Lock()
+		sent = append(sent, rt)
+		mu.Unlock()
+		if rt != "account-rt" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error":"invalid_grant","error_description":"grant is invalid"}`))
+			return
+		}
+		w.Write([]byte(`{"access_token":"at","refresh_token":"fresh-rt","expires_in":899}`))
+	}))
+	defer srv.Close()
+
+	var saved atomic.Value
+	src := NewSource("123", "expired-rt",
+		Options{TokenURL: srv.URL, Client: srv.Client(), Seed: NewSeed("account-rt")},
+		func(rt string) error { saved.Store(rt); return nil })
+
+	tok, _, err := src.Token(context.Background())
+	if err != nil {
+		t.Fatalf("Token() error = %v, want the account credential to cover the expired one", err)
+	}
+	if tok != "at" {
+		t.Errorf("token = %q, want %q", tok, "at")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"expired-rt", "account-rt"}
+	if len(sent) != len(want) {
+		t.Fatalf("presented %v, want its own token first and then the account one", sent)
+	}
+	for i := range want {
+		if sent[i] != want[i] {
+			t.Fatalf("presented %v, want %v", sent, want)
+		}
+	}
+	// And the tenant is left with a working credential, so the next run needs
+	// neither the seed nor a browser.
+	if got, _ := saved.Load().(string); got != "fresh-rt" {
+		t.Errorf("saved refresh token = %q, want the renewed %q", got, "fresh-rt")
+	}
+}
+
+func TestBothRefusalsAreReportedWhenNothingWorks(t *testing.T) {
+	// With no seed and no browser profile there is nothing left to try, and
+	// the message has to name the real cause rather than only the last leg.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"invalid_grant","error_description":"grant is invalid"}`))
+	}))
+	defer srv.Close()
+
+	src := NewSource("123", "expired-rt", Options{TokenURL: srv.URL, Client: srv.Client()}, nil)
+	_, _, err := src.Token(context.Background())
+	if err == nil {
+		t.Fatal("Token() error = nil, want a failure")
+	}
+	if !errors.Is(err, ErrInteractiveRequired) {
+		t.Errorf("Token() error = %v, want it to wrap ErrInteractiveRequired", err)
+	}
+	if !strings.Contains(err.Error(), "invalid_grant") {
+		t.Errorf("Token() error = %v, want it to name the rejected refresh token", err)
 	}
 }

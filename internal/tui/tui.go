@@ -25,6 +25,7 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/ioncli"
 	"tyrtop.com/iontk/internal/saseauth"
+	"tyrtop.com/iontk/internal/search"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -111,10 +112,6 @@ const (
 
 const cacheTTL = time.Hour
 
-type elementsLoadedMsg struct {
-	elements []api.Element
-	sites    map[string]string
-}
 type elementsErrMsg string
 type clientReadyMsg struct{ client *api.Client }
 type clientErrMsg string
@@ -410,15 +407,17 @@ func newElementTable() table.Model {
 	)
 }
 
-// cacheFresh is how long cached elements are treated as current.
-const cacheFresh = 15 * time.Minute
+// cacheFresh is how long cached elements are treated as current. The CLI's
+// --search reads the same window, so the two cannot disagree about what is
+// current enough to skip a round trip.
+const cacheFresh = config.CacheFresh
 
 func (m tuiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.spinner.Tick}
 	if m.cacheState == cacheUpdating && m.hasTenant {
 		f := app.TenantFlags(m.store, m.tenant, m.ionUser)
 		if f.ValidateCreds() == nil {
-			cmds = append(cmds, connect(m.ctx, f))
+			cmds = append(cmds, connect(m.ctx, m.store, f))
 		} else {
 			cmds = cmds[:1]
 		}
@@ -444,9 +443,9 @@ func (m tuiModel) refreshNow() (tea.Model, tea.Cmd) {
 	return m.refreshActive()
 }
 
-func connect(ctx context.Context, f app.Flags) tea.Cmd {
+func connect(ctx context.Context, st *config.Store, f app.Flags) tea.Cmd {
 	return func() tea.Msg {
-		c, err := app.NewClient(ctx, f, io.Discard)
+		c, err := app.NewClient(ctx, st, f, io.Discard)
 		if err != nil {
 			if errors.Is(err, saseauth.ErrInteractiveRequired) {
 				return needsSignInMsg{}
@@ -477,7 +476,7 @@ func signIn(ctx context.Context, f app.Flags, st *config.Store) tea.Cmd {
 			return signedInMsg{err: fmt.Errorf("signed in, but the token is scoped to %q rather than tenant %s", ident.Scope, f.TSGID)}
 		}
 
-		c, err := app.NewClient(ctx, f, io.Discard)
+		c, err := app.NewClient(ctx, st, f, io.Discard)
 		if err != nil {
 			return signedInMsg{err: fmt.Errorf("signed in, but the saved credential did not work: %w", err)}
 		}
@@ -504,25 +503,6 @@ func watchToken(ch <-chan error) tea.Cmd {
 			return tokenErrMsg{stopped: true}
 		}
 		return tokenErrMsg{err: err}
-	}
-}
-
-func refreshElements(ctx context.Context, c *api.Client, st *config.Store, tsg string) tea.Cmd {
-	return func() tea.Msg {
-		els, err := c.ListElements(ctx)
-		if err != nil {
-			return elementsErrMsg(err.Error())
-		}
-		sites := map[string]string{}
-		if ss, err := c.ListSites(ctx); err == nil {
-			for _, site := range ss {
-				sites[site.ID] = site.Name
-			}
-		}
-		_ = st.SaveCache(&config.ElementCache{
-			TSGID: tsg, FetchedAt: time.Now(), Elements: els, Sites: sites,
-		})
-		return elementsLoadedMsg{elements: els, sites: sites}
 	}
 }
 
@@ -928,13 +908,13 @@ func (m *tuiModel) setElements(els []elementRow) {
 // siteName looks up a site within its own tenant, since two tenants can use the
 // same site identifier for different places.
 func (m tuiModel) siteName(el elementRow) string {
-	if n, ok := m.sites[el.TSG+"/"+el.SiteID]; ok && n != "" {
-		return n
-	}
-	if el.SiteID != "" {
-		return el.SiteID
-	}
-	return "-"
+	return m.record(el).SiteLabel()
+}
+
+// record flattens a row into the values --search matches against, so the
+// filter here and the one on the command line cannot disagree.
+func (m tuiModel) record(el elementRow) search.Record {
+	return search.Of(el.Element, el.TSG, el.Tenant, search.SiteMap(m.sites))
 }
 
 // showTenantColumn is true once more than one tenant is loaded; with a single
@@ -1490,13 +1470,13 @@ func (m tuiModel) startRun(cmds []string) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) applyFilter() {
-	terms := strings.Fields(strings.ToLower(m.filter.Value()))
+	q := search.Parse(m.filter.Value())
 	m.matches = m.matches[:0]
 	for i, el := range m.all {
 		if m.showSelected && !m.selected[el.key()] {
 			continue
 		}
-		if m.matchesTerms(el, terms) {
+		if q.Match(m.record(el)) {
 			m.matches = append(m.matches, i)
 		}
 	}
@@ -1504,90 +1484,6 @@ func (m *tuiModel) applyFilter() {
 	if c := m.table.Cursor(); c >= len(m.matches) {
 		m.table.SetCursor(max(0, len(m.matches)-1))
 	}
-}
-
-// matchesTerms requires every term to match the element somewhere. Splitting on
-// whitespace is what makes a query like "s50 ion 1200" work: each word can land
-// in a different field, so the store number and the model are found together
-// without having to know which field holds what.
-func (m tuiModel) matchesTerms(el elementRow, terms []string) bool {
-	if len(terms) == 0 {
-		return true
-	}
-	fields := m.searchFields(el)
-	for _, term := range terms {
-		if !matchesAnyField(term, fields) {
-			return false
-		}
-	}
-	return true
-}
-
-// searchField is one value a term can match.
-type searchField struct {
-	value string
-	// exact restricts this field to whole-value matches. Opaque identifiers are
-	// long digit strings, so a partial match in one is almost always
-	// coincidence: searching "1200" for a model found an ion 2000 whose site id
-	// happened to contain those digits.
-	exact bool
-}
-
-// searchFields is everything a term may match against.
-func (m tuiModel) searchFields(el elementRow) []searchField {
-	state := "offline"
-	if el.Connected {
-		state = "connected"
-	}
-
-	// A site that did not resolve shows its raw id, which is as opaque as any
-	// other identifier and must not be matched piecemeal.
-	site := searchField{value: strings.ToLower(m.siteName(el))}
-	if _, resolved := m.sites[el.TSG+"/"+el.SiteID]; !resolved {
-		site.exact = true
-	}
-
-	return []searchField{
-		{value: strings.ToLower(el.Name)},
-		{value: strings.ToLower(el.ID), exact: true},
-		site,
-		{value: strings.ToLower(el.Tenant)},
-		{value: strings.ToLower(el.Model)},
-		{value: strings.ToLower(el.HWID), exact: true},
-		{value: strings.ToLower(el.Software)},
-		{value: strings.ToLower(el.TSG), exact: true},
-		{value: state},
-	}
-}
-
-func matchesAnyField(term string, fields []searchField) bool {
-	for _, f := range fields {
-		if f.exact {
-			if f.value == term {
-				return true
-			}
-			continue
-		}
-		if strings.Contains(f.value, term) {
-			return true
-		}
-	}
-	return false
-}
-func looseMatch(term, s string) bool {
-	if term == "" {
-		return true
-	}
-	at := 0
-	for _, r := range s {
-		if rune(term[at]) == r {
-			at++
-			if at == len(term) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (m tuiModel) current() (elementRow, bool) {

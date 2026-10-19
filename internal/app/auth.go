@@ -1,8 +1,10 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -40,14 +42,14 @@ func BrowserSource(f Flags, httpClient *http.Client, st *config.Store) *saseauth
 	}
 
 	stored, _ := st.Secrets.Get(config.RefreshTokenKey(f.TSGID))
-	if stored == "" {
-		// Narrowing the account token's scope is what makes a new tenant
-		// usable without another trip through the browser. It goes in as a
-		// shared seed, not this tenant's own: one refresh token redeemed from
-		// several tenants at once loses all but one.
-		if acct, _ := st.Secrets.Get(config.AccountRefreshTokenKey()); acct != "" {
-			opt.Seed = accountSeed(acct)
-		}
+	// Narrowing the account token's scope is what makes a new tenant usable
+	// without another trip through the browser. It goes in as a shared seed,
+	// not this tenant's own: one refresh token redeemed from several tenants
+	// at once loses all but one. Attached even when this tenant has a stored
+	// token, because that token may be the thing the server rejects -- a
+	// tenant whose credential expired is exactly who the account one is for.
+	if acct, _ := st.Secrets.Get(config.AccountRefreshTokenKey()); acct != "" {
+		opt.Seed = accountSeed(acct)
 	}
 	save := func(rt string) error {
 		return st.Secrets.Set(config.RefreshTokenKey(f.TSGID), rt)
@@ -139,6 +141,56 @@ func OpenStore() *config.Store {
 		return nil
 	}
 	return st
+}
+
+// ShortAuthError turns a tenant's sign-in failure into the one thing to do
+// about it. The OAuth legs each report their own refusal, so the raw text runs
+// to three clauses and buries the difference between a tenant this account
+// cannot reach and one whose stored credential simply aged out.
+func ShortAuthError(err error) string {
+	if err == nil {
+		return ""
+	}
+	text := err.Error()
+	switch {
+	// A sign-in that ran out of time proves nothing about access, and it
+	// arrives wrapped in ErrInteractiveRequired like a refusal does, so it has
+	// to be read before the access wording below claims it.
+	case strings.Contains(text, "did not complete within"):
+		return "sign-in timed out"
+	// The server rejecting a stored refresh token outright means this tenant
+	// did work once: the credential expired rather than access being denied.
+	case strings.Contains(text, "invalid_grant"),
+		strings.Contains(text, "stored refresh token rejected"):
+		return "sign-in expired"
+	case errors.Is(err, saseauth.ErrInteractiveRequired),
+		strings.Contains(text, "interaction_required"),
+		strings.Contains(text, "login_required"):
+		return "not accessible with this sign-in"
+	case IsAuthFailure(text):
+		return "credential rejected"
+	}
+	if i := strings.Index(text, "\n"); i > 0 {
+		text = text[:i]
+	}
+	// The SD-WAN API answers failures with a JSON document whose only useful
+	// part is the error code; printed whole it buries the line it is on.
+	if code := apiErrorCode(text); code != "" {
+		return code
+	}
+	return text
+}
+
+var apiErrCode = regexp.MustCompile(`"code"\s*:\s*"([A-Z0-9_]+)"`)
+
+func apiErrorCode(text string) string {
+	m := apiErrCode.FindStringSubmatch(text)
+	if m == nil {
+		return ""
+	}
+	// Keep whatever came before the document, which says which call failed.
+	prefix, _, _ := strings.Cut(text, "{")
+	return strings.TrimRight(strings.TrimSpace(prefix), ":") + ": " + m[1]
 }
 
 // IsAuthFailure guesses whether a failure was the credential rather than the
