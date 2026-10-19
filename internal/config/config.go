@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type IONUser struct {
@@ -78,6 +79,7 @@ type Config struct {
 	SessionCols int      `json:"session_cols,omitempty"`
 	SessionRows int      `json:"session_rows,omitempty"`
 	BatchFormat string   `json:"batch_format,omitempty"`
+	BatchOrient string   `json:"batch_orient,omitempty"`
 	BatchToFile bool     `json:"batch_to_file,omitempty"`
 	BatchDir    string   `json:"batch_dir,omitempty"`
 	Tenants     []Tenant `json:"tenants,omitempty"`
@@ -112,6 +114,45 @@ func Open() (*Store, error) {
 
 func OpenAt(root string, s Secrets) *Store {
 	return &Store{Root: root, Secrets: s}
+}
+
+// DebugRoot is where --debug keeps its throwaway config. Fixed rather than
+// random so a debug run can be looked at afterwards.
+func DebugRoot() string { return filepath.Join(os.TempDir(), "iontk-debug") }
+
+// Set up once per process, not per open: the memory store stands in for the OS
+// keyring, which every store in a run shares, and the root has to be cleared
+// before the first open rather than at every one.
+var (
+	debugOnce    sync.Once
+	debugSecrets Secrets
+	debugErr     error
+)
+
+// OpenDebug is the store --debug and --fixtures run against: a root outside the
+// real config directory and secrets that never leave memory, so nothing such a
+// run does can reach a saved tenant or the keyring.
+//
+// The root is fixed so it can be looked at afterwards, which means an earlier
+// run's tenants would still be in it. Clearing it here is what makes "no saved
+// state" true; doing that at startup rather than at exit is what leaves the run
+// inspectable.
+func OpenDebug() (*Store, error) {
+	root := DebugRoot()
+	debugOnce.Do(func() {
+		if err := os.RemoveAll(root); err != nil {
+			debugErr = fmt.Errorf("clear %s: %w", root, err)
+			return
+		}
+		debugSecrets = NewMemorySecrets()
+	})
+	if debugErr != nil {
+		return nil, debugErr
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, fmt.Errorf("create %s: %w", root, err)
+	}
+	return &Store{Root: root, Secrets: debugSecrets}, nil
 }
 
 func (s *Store) configPath() string { return filepath.Join(s.Root, "config.json") }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -50,7 +51,7 @@ func (m tuiModel) authLine() string {
 		return ui.StyleDim.Render("no tenant selected")
 	}
 	if m.authMode == authTenant {
-		return ui.StyleDim.Render(authTenant.Label())
+		return m.serviceAccountLine()
 	}
 
 	label := authBrowser.Label()
@@ -72,6 +73,60 @@ func (m tuiModel) authLine() string {
 		return ui.StyleWarn.Render(label + " · " + ui.Age(left) + " left")
 	}
 	return ui.StyleOK.Render(label)
+}
+
+// serviceAccountLine says which service account is attached and what it has.
+// Which one matters: the tenant name does not name the credential, and a
+// service account reaches exactly one tenant, so the figure above it is not
+// necessarily this account's.
+func (m tuiModel) serviceAccountLine() string {
+	who := m.tenant.ClientID
+	if who == "" {
+		// Records saved before the client ID was kept, and runs whose
+		// credentials came from the environment.
+		who = "client id not saved"
+	}
+
+	n := m.tenantElementCount()
+	count := fmt.Sprintf("%d elements cached", n)
+	if n == 1 {
+		count = "1 element cached"
+	}
+	// More than one tenant is in the working set, so the cache line above is
+	// the total and this is only this account's share of it.
+	if total := len(m.all); total > n {
+		count = fmt.Sprintf("%d of %d elements cached", n, total)
+	}
+
+	head := authTenant.Label() + " · "
+	name := ui.Truncate(m.tenant.Name, 24)
+	tail := " · " + count
+
+	// The client id is the long part, and this has to stay one line: a wrapped
+	// menu line pushes everything below it down a row. A width of zero is a
+	// model that has not been told the terminal size yet.
+	if m.width > 0 {
+		who = ui.Truncate(who, max(8, m.width-ui.Width(head+name+tail)-3))
+	}
+
+	return ui.StyleDim.Render(head) + ui.StyleElement.Render(name) +
+		ui.StyleDim.Render(" · "+who+tail)
+}
+
+// tenantElementCount is how many elements the current tenant has, counted from
+// the loaded list rather than re-read from the cache file on every frame.
+// Before anything has loaded, the launch-time count is this tenant's.
+func (m tuiModel) tenantElementCount() int {
+	if len(m.all) == 0 {
+		return m.cacheCount
+	}
+	n := 0
+	for _, r := range m.all {
+		if r.TSG == m.tenant.TSGID {
+			n++
+		}
+	}
+	return n
 }
 
 // tokenRefreshedMsg is the outcome of the menu's token refresh.

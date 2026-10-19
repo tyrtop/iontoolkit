@@ -35,6 +35,18 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Generate flag docs
+        # *.md is gitignored, so docs/flags.md is built here instead of being
+        # committed. Generation fails if a flag belongs to no group, which is
+        # the part worth checking.
+        run: go generate ./...
+
+      - name: Upload flag docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: iontk-flag-docs
+          path: docs/flags.md
+
       - name: Test
         # Discover's first sign-in opens a real window, which chromedp will not
         # do without a display. Xvfb comes with the runner image.

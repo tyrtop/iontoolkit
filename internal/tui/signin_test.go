@@ -449,7 +449,10 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 		m.sessions = ionterm.NewManager()
 		m.lastTargets = []sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}, {eid: "e2", name: "s0100-rtr-02", tsg: "1"}}
 
-		mm, cmd := m.Update(sessionErrMsg("dial: failed to WebSocket dial: expected handshake response status code 101 but got 401"))
+		mm, cmd := m.Update(sessionErrMsg{
+			target: sessionTarget{eid: "e1", name: "s0100-rtr-01", tsg: "1"},
+			err:    "dial: failed to WebSocket dial: expected handshake response status code 101 but got 401",
+		})
 		got := mm.(tuiModel)
 		if got.phase != phaseSignIn {
 			t.Fatalf("phase = %v, want phaseSignIn so the browser opens", got.phase)
@@ -468,7 +471,10 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 		m.sessions = ionterm.NewManager()
 		m.lastTargets = []sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}}
 
-		mm, _ := m.Update(sessionErrMsg("element e1: run: login failed after 1 attempt"))
+		mm, _ := m.Update(sessionErrMsg{
+			target: sessionTarget{eid: "e1", name: "s0100-rtr-01", tsg: "1"},
+			err:    "element e1: run: login failed after 1 attempt",
+		})
 		got := mm.(tuiModel)
 		if got.phase == phaseSignIn {
 			t.Error("a device-side failure opened a browser")

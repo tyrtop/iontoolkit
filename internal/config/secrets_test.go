@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zalando/go-keyring"
@@ -118,5 +119,62 @@ func TestOpenSecretsPrefersKeyringWhenAvailable(t *testing.T) {
 
 	if got := OpenSecrets(t.TempDir()).Backend(); got != "keyring" {
 		t.Errorf("Backend() = %q, want keyring", got)
+	}
+}
+
+func TestMemorySecretsNeverTouchDisk(t *testing.T) {
+	root := t.TempDir()
+	s := NewMemorySecrets()
+
+	if err := s.Set("tsg/1/ion_user/admin", "pw"); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+	if got, err := s.Get("tsg/1/ion_user/admin"); err != nil || got != "pw" {
+		t.Fatalf("Get() = %q, %v, want %q", got, err, "pw")
+	}
+	if err := s.Delete("tsg/1/ion_user/admin"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if _, err := s.Get("tsg/1/ion_user/admin"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Get() after Delete error = %v, want ErrNotFound", err)
+	}
+
+	// --debug exists so a run cannot leave credentials behind.
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("the memory store wrote %d files", len(entries))
+	}
+	if Plaintext(s) {
+		t.Error("Plaintext() is true for the memory store, which never reaches a file")
+	}
+	if got := SecretsWarning(s); !strings.Contains(got, "memory") {
+		t.Errorf("SecretsWarning() = %q, want it to say the secrets are not kept", got)
+	}
+}
+
+func TestOpenDebugIsOutsideTheRealConfig(t *testing.T) {
+	st, err := OpenDebug()
+	if err != nil {
+		t.Fatalf("OpenDebug() error = %v", err)
+	}
+	real, err := os.UserConfigDir()
+	if err != nil {
+		t.Skip("no user config dir on this machine")
+	}
+	if strings.HasPrefix(st.Root, filepath.Join(real, "iontk")) {
+		t.Errorf("debug root %q is inside the real config directory", st.Root)
+	}
+	if st.Secrets.Backend() != "memory" {
+		t.Errorf("debug secrets backend = %q, want memory", st.Secrets.Backend())
+	}
+	cfg, err := st.Config()
+	if err != nil {
+		t.Fatalf("Config() error = %v", err)
+	}
+	if len(cfg.Tenants) != 0 {
+		t.Errorf("debug config has %d tenants, want none", len(cfg.Tenants))
 	}
 }

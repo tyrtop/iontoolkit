@@ -480,55 +480,40 @@ func TestParseMode(t *testing.T) {
 	}
 }
 
-func TestAltMCyclesTheElementListMode(t *testing.T) {
-	m := multiModel(t)
-	m.phase = phaseMenu
-	m.mode = modeShell
+// The menu has one mode now, the credential one, and both keys reach it. Shell
+// versus batch belongs to the element list, where it is visible.
+func TestTheMenuOnlySwitchesTheCredentialMode(t *testing.T) {
+	for _, key := range []string{"alt+m", "alt+a"} {
+		t.Run(key, func(t *testing.T) {
+			m := multiModel(t)
+			m.phase = phaseMenu
+			m.authMode = authBrowser
+			m.mode = modeShell
 
-	mm, _ := m.onMenuKey("alt+m")
-	got := mm.(tuiModel)
-	if got.mode != modeBatch {
-		t.Errorf("mode = %v, want alt+m to cycle shell and batch", got.mode)
-	}
-	if got.menuEntries()[0].label != "elements (batch)" {
-		t.Errorf("entry = %q, want the label to follow the mode", got.menuEntries()[0].label)
-	}
-	// Cycling is not the same as changing the saved default.
-	if got.cfg.DefaultMode != "" {
-		t.Errorf("DefaultMode = %q, want alt+m to leave the saved default alone", got.cfg.DefaultMode)
-	}
-	// And it must not touch where tenants come from.
-	if got.authMode != m.authMode {
-		t.Error("alt+m changed the credential mode as well")
-	}
-}
+			mm, _ := m.onMenuKey(key)
+			got := mm.(tuiModel)
+			if got.authMode != authTenant {
+				t.Fatalf("authMode = %v, want %s to switch to service account mode", got.authMode, key)
+			}
+			if got.mode != modeShell {
+				t.Errorf("%s changed the element list mode as well", key)
+			}
+			if got.cfg.DefaultMode != "" {
+				t.Errorf("DefaultMode = %q, want the element list's saved default left alone", got.cfg.DefaultMode)
+			}
+			saved, err := got.store.Config()
+			if err != nil {
+				t.Fatalf("Config() error = %v", err)
+			}
+			if saved.AuthMode != "tenant" {
+				t.Errorf("saved AuthMode = %q, want it persisted", saved.AuthMode)
+			}
 
-func TestAltACyclesTheCredentialMode(t *testing.T) {
-	m := multiModel(t)
-	m.phase = phaseMenu
-	m.authMode = authBrowser
-	m.mode = modeShell
-
-	mm, _ := m.onMenuKey("alt+a")
-	got := mm.(tuiModel)
-	if got.authMode != authTenant {
-		t.Fatalf("authMode = %v, want alt+a to switch to tenant mode", got.authMode)
-	}
-	if got.mode != modeShell {
-		t.Error("alt+a changed the element list mode as well")
-	}
-	// Unlike alt+m, this one is remembered.
-	saved, err := got.store.Config()
-	if err != nil {
-		t.Fatalf("Config() error = %v", err)
-	}
-	if saved.AuthMode != "tenant" {
-		t.Errorf("saved AuthMode = %q, want it persisted", saved.AuthMode)
-	}
-
-	mm, _ = got.onMenuKey("alt+a")
-	if back := mm.(tuiModel); back.authMode != authBrowser {
-		t.Errorf("authMode = %v, want alt+a to cycle back", back.authMode)
+			mm, _ = got.onMenuKey(key)
+			if back := mm.(tuiModel); back.authMode != authBrowser {
+				t.Errorf("authMode = %v, want %s to cycle back", back.authMode, key)
+			}
+		})
 	}
 }
 
@@ -698,8 +683,9 @@ func TestMenuSecondEntryFollowsTheCredentialMode(t *testing.T) {
 		want   string
 		absent string
 	}{
-		{authBrowser, "sign in with browser", "tenant select"},
-		{authTenant, "tenant select", "browser"},
+		{authBrowser, "sign in with browser", "service accounts"},
+		// Named for what it lists: one tenant per account, not every tenant.
+		{authTenant, "service accounts", "browser"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.mode.String(), func(t *testing.T) {

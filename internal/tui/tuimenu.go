@@ -38,13 +38,15 @@ func (m tuiModel) menuEntries() []menuEntry {
 
 	// One entry for the list, because shell versus batch is a property of the
 	// list rather than a different thing to start.
-	e = append(e, menuEntry{"elements (" + m.mode.String() + ")", actElements})
+	e = append(e, menuEntry{"elements", actElements})
 
 	// What follows depends on where tenants come from, which is the credential
 	// mode and a separate axis from shell versus batch.
 	switch {
 	case m.authMode == authTenant:
-		e = append(e, menuEntry{"tenant select", actSwitch})
+		// Named for what it lists: a service account reaches one tenant each,
+		// so this is the saved accounts rather than every tenant.
+		e = append(e, menuEntry{"service accounts", actSwitch})
 	case m.signedIn():
 		e = append(e,
 			menuEntry{"browser tenants", actSignIn},
@@ -109,19 +111,16 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "alt+t":
 		return m.reopenFromMenu()
-	case "alt+m":
-		m.mode = m.mode.next()
-		m.status = ""
-		return m, nil
-	case "alt+a":
-		// A separate key from alt+m, because this switches where tenants come
-		// from rather than what selecting an element does.
+	case "alt+m", "alt+a":
+		// The only mode the menu has. Shell versus batch belongs to the element
+		// list, and switching it from here changed nothing you could see.
 		m.authMode = m.authMode.next()
 		m.cfg.AuthMode = m.authMode.String()
 		if err := m.store.SaveConfig(m.cfg); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
+		m.switchCursor = 0
 		m.status = ""
 		return m, nil
 	case "up", "k":
@@ -192,7 +191,7 @@ func (m tuiModel) startContinue() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) onSwitchKey(key string) (tea.Model, tea.Cmd) {
-	choices := m.tenantChoices()
+	choices := m.switchChoices()
 	switch key {
 	case "esc", "q":
 		m.phase = phaseMenu
@@ -202,6 +201,12 @@ func (m tuiModel) onSwitchKey(key string) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.switchCursor = min(len(choices)-1, m.switchCursor+1)
 	case "alt+r":
+		if m.authMode == authTenant {
+			// There is nothing to ask: a service account is one tenant, and its
+			// record is the only thing that says the tenant exists.
+			m.status = "service accounts are added in settings, not discovered"
+			return m, nil
+		}
 		// Re-ask the account what it can reach, in case tenants were added or
 		// revoked since the last sign-in.
 		return m.startDiscover()
@@ -651,9 +656,9 @@ func (m tuiModel) viewMenu() string {
 	}
 
 	b.WriteString("\n")
-	hint := "↑↓ move · enter select · alt+m mode · alt+a account · alt+w quit"
+	hint := "↑↓ move · enter select · alt+m/alt+a service account or browser · q/alt+w quit"
 	if m.sessions.DetachedCount() > 0 || m.sessions.Count() > 0 {
-		hint = "↑↓ move · enter select · alt+m mode · alt+a account · alt+t reattach · alt+w quit"
+		hint = "↑↓ move · enter select · alt+m/alt+a service account or browser · alt+t reattach · q/alt+w quit"
 	}
 	b.WriteString(ui.Footer(m.status, hint))
 	return b.String()
@@ -673,15 +678,32 @@ func (m tuiModel) viewSwitch() string {
 	var b strings.Builder
 	b.WriteString(ui.Banner(m.width, m.height))
 
-	choices := m.tenantChoices()
-	b.WriteString(ui.StyleCmd.Render(fmt.Sprintf("%d tenants", len(choices))) + "\n")
-	if c, err := m.store.TenantCache(); err == nil && c != nil && c.Account != "" {
+	choices := m.switchChoices()
+	noun := "tenant"
+	if m.authMode == authTenant {
+		noun = "service account"
+	}
+	count := fmt.Sprintf("%d %s", len(choices), noun)
+	if len(choices) != 1 {
+		count += "s"
+	}
+	b.WriteString(ui.StyleCmd.Render(count) + "\n")
+
+	if m.authMode == authTenant {
+		// No provenance line: these were typed in, not discovered, and the
+		// browser account that listed other tenants cannot reach them.
+		b.WriteString(ui.StyleDim.Render("one tenant each, added in settings") + "\n")
+	} else if c, err := m.store.TenantCache(); err == nil && c != nil && c.Account != "" {
 		b.WriteString(ui.StyleDim.Render("from "+c.Account+", listed "+ui.Age(c.Age())+" ago") + "\n")
 	}
 	b.WriteString("\n")
 
 	if len(choices) == 0 {
-		b.WriteString("  " + ui.StyleDim.Render("none yet — add an account from the menu") + "\n")
+		empty := "none yet — add an account from the menu"
+		if m.authMode == authTenant {
+			empty = "none yet — add one in settings, or alt+m to sign in with a browser"
+		}
+		b.WriteString("  " + ui.StyleDim.Render(empty) + "\n")
 	}
 	for i, c := range choices {
 		cursor := "  "
@@ -707,7 +729,11 @@ func (m tuiModel) viewSwitch() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(ui.Footer(m.status, "↑↓ move · enter use · alt+r re-list · esc back"))
+	hint := "↑↓ move · enter use · alt+r re-list · esc back"
+	if m.authMode == authTenant {
+		hint = "↑↓ move · enter use · esc back"
+	}
+	b.WriteString(ui.Footer(m.status, hint))
 	return b.String()
 }
 

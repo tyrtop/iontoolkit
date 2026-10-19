@@ -25,7 +25,10 @@ func runShell(ctx context.Context, eid string) error {
 		return fmt.Errorf("--element is required")
 	}
 
-	f := app.BaseFlags()
+	f, err := resolveFlags(os.Stderr)
+	if err != nil {
+		return err
+	}
 	f.Elements = []string{eid}
 	f.Concurrency = 1
 

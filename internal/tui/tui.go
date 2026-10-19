@@ -224,6 +224,8 @@ type tuiModel struct {
 
 	setSection int
 	setFocus   int
+	// The factory reset asks twice, and this is whether it has been asked once.
+	resetArmed bool
 
 	all      []elementRow
 	sites    map[string]string
@@ -257,8 +259,23 @@ type tuiModel struct {
 	resScroll   int
 	elapsed     []time.Duration
 
-	sessions   *ionterm.Manager
+	sessions *ionterm.Manager
+	// How far the session pane is held above its live bottom. Reset on a tab
+	// switch: an offset into one session's output means nothing in another's.
+	sesScroll  int
 	connecting string
+	// Per-element dial progress, and the channel the clients report it on.
+	dialing     map[string]dialState
+	dialReports chan dialProgressMsg
+	// The element a failed connection is asking about, empty when nothing is.
+	// askRetryNo is which answer is highlighted; the zero value picks yes,
+	// since that is what someone who hit enter almost certainly meant.
+	askRetry   sessionTarget
+	askRetryNo bool
+
+	// The stats overlay, and whether its repaint is already running.
+	stats        bool
+	statsTicking bool
 
 	mode        pickMode
 	userCursor  int
@@ -275,18 +292,29 @@ type tuiModel struct {
 // because the release build sets it through main.
 var Version = "dev"
 
+// Tenant is --tenant. The command checks the name before Run, so empty here
+// just means the user didn't ask for one.
+var Tenant string
+
 func Run(ctx context.Context) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return fmt.Errorf("iontk needs a terminal; use --cmd for batch mode")
 	}
 
-	store, err := config.Open()
+	store, err := app.Store()
 	if err != nil {
 		return err
 	}
 	cfg, err := store.Config()
 	if err != nil {
 		return err
+	}
+	// Fail instead of opening with no tenant at all. A typo would otherwise
+	// look the same as a first run.
+	if Tenant != "" {
+		if _, ok := app.ResolveTenant(cfg, Tenant); !ok {
+			return fmt.Errorf("no saved tenant named %q; %s", Tenant, app.TenantChoices(cfg))
+		}
 	}
 
 	model := newTUIModel(ctx, store, cfg)
@@ -330,6 +358,8 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 		filter:      fi,
 		cmdInput:    ci,
 		table:       newElementTable(),
+		dialing:     map[string]dialState{},
+		dialReports: newDialReports(),
 		progress:    progress.New(progress.WithDefaultBlend(), progress.WithWidth(30), progress.WithoutPercentage()),
 		resFilter:   newResultsFilter(),
 		resTable:    newResultsTable(),
@@ -343,12 +373,12 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 	}
 	if am, ok := parseAuthMode(cfg.AuthMode); ok {
 		m.authMode = am
-	} else if t, ok := app.ResolveTenant(cfg, ""); ok && !t.UsesBrowser() {
+	} else if t, ok := app.ResolveTenant(cfg, Tenant); ok && !t.UsesBrowser() {
 		// Nothing saved: follow whatever the tenant already uses, so an existing
 		// service account setup does not open on a browser prompt.
 		m.authMode = authTenant
 	}
-	m.tenant, m.hasTenant = app.ResolveTenant(cfg, "")
+	m.tenant, m.hasTenant = app.ResolveTenant(cfg, Tenant)
 	if m.hasTenant {
 		m.ionUser = m.tenant.DefaultUser()
 		// Elements are refreshed on every launch so the list keeps up with the
@@ -369,6 +399,7 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 func newElementTable() table.Model {
 	return table.New(
 		table.WithColumns([]table.Column{
+			{Title: "", Width: 3},
 			{Title: "", Width: 3},
 			{Title: "element", Width: 26},
 			{Title: "site", Width: 22},
@@ -736,19 +767,33 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.progress, cmd = m.progress.Update(msg)
 		return m, cmd
 
+	case dialProgressMsg:
+		m.noteDial(msg)
+		m.rebuildRows()
+		return m, tea.Batch(waitForDial(m.dialReports), m.spinner.Tick)
+
 	case sessionOpenedMsg:
 		m.connecting = ""
+		m.dialDone(string(msg))
+		m.rebuildRows()
 		return m, waitForSession(m.sessions.Dirty())
 
 	case sessionErrMsg:
 		m.connecting = ""
-		if app.IsAuthFailure(string(msg)) {
+		if app.IsAuthFailure(msg.err) {
+			m.dialDone(msg.target.eid)
 			m.tokenDead = "sign-in expired"
 			return m.signInThenSessions(m.lastTargets)
 		}
-		m.status = string(msg)
-		// With no tab to show the failure against, the session page would be an
-		// empty pane; the element list carries the message better.
+		m.dialFailed(msg.target.eid, msg.err)
+		m.status = msg.err
+		m.rebuildRows()
+		// Every dial has already been retried, so the only thing left to offer
+		// is trying the whole thing again.
+		if msg.target.eid != "" {
+			m.askRetry = msg.target
+			return m, nil
+		}
 		if m.sessions.Count() == 0 && m.phase == phaseSession {
 			m.phase = phasePicking
 		}
@@ -775,6 +820,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if note := m.saveBatchResults(); note != "" {
 			m.status = note
 		}
+		return m, nil
+
+	case statsTickMsg:
+		if !m.stats {
+			m.statsTicking = false
+			return m, nil
+		}
+		return m, statsTick()
+
+	case tea.MouseWheelMsg:
+		return m.onWheel(msg)
+
+	case tea.MouseMsg:
+		// Clicks and motion arrive with cell-motion reporting but address
+		// nothing, and must not reach the focused input.
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -840,7 +900,7 @@ func (m tuiModel) wantsSpinner() bool {
 		// repainted several times a second for nothing.
 		return m.cacheState == cacheUpdating
 	case phaseSession:
-		return m.connecting != ""
+		return m.connectingAny()
 	}
 	return false
 }
@@ -897,6 +957,7 @@ func (m *tuiModel) rebuildRows() {
 		}
 		row := table.Row{
 			mark,
+			m.rowStatus(el),
 			ui.Truncate(name, 26),
 			ui.Truncate(m.siteName(el), 22),
 			ui.Truncate(el.Model, 11),
@@ -910,15 +971,16 @@ func (m *tuiModel) rebuildRows() {
 
 	cols := []table.Column{
 		{Title: "", Width: 3},
+		{Title: "", Width: 3},
 		{Title: "element", Width: 26},
 		{Title: "site", Width: 22},
 		{Title: "model", Width: 11},
 		{Title: "state", Width: 9},
 	}
-	width := 78
+	width := 86
 	if tenants {
 		cols = append(cols, table.Column{Title: "tenant", Width: 20})
-		width = 100
+		width = 108
 	}
 	// Columns and rows have to agree at every moment: the table re-renders
 	// inside each setter, so changing the column count while the old rows are
@@ -986,6 +1048,16 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	// The overlay belongs to the frame rather than to any one page, and the
+	// session pane would otherwise type this at the device.
+	if key == "alt+i" {
+		return m.toggleStats()
+	}
+
+	if m.askRetry.eid != "" {
+		return m.onRetryKey(key)
+	}
+
 	switch m.phase {
 	case phaseSession:
 		return m.onSessionKey(msg, key)
@@ -1036,10 +1108,10 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case phaseCommand:
 		return m.onCommandKey(msg, key)
 	case phaseRunning:
+		// q used to quit here, which made the key that leaves every other page
+		// the one that abandons a run mid-flight. ctrl+c does that now.
 		switch key {
-		case "q":
-			return m, tea.Quit
-		case "esc", "tab", "/":
+		case "esc", "q", "tab", "/":
 			if m.completedCount() > 0 {
 				m.phase = phaseResults
 				m.applyResultFilter()
@@ -1055,7 +1127,10 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
 	switch key {
-	case "esc":
+	case "esc", "q":
+		if key == "q" && m.filterOn {
+			break // a letter while the filter is being typed
+		}
 		if m.filterOn || m.filter.Value() != "" {
 			m.filterOn = false
 			m.filter.SetValue("")
@@ -1242,8 +1317,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 			m.phase = phaseSession
 		}
 		return m, nil
-	case "q":
-		return m, tea.Quit
 	}
 
 	var cmd tea.Cmd
@@ -1528,7 +1601,7 @@ func (m tuiModel) current() (elementRow, bool) {
 func (m tuiModel) total() int { return len(m.ran) }
 
 func (m tuiModel) listHeight() int {
-	h := m.height - 11
+	h := m.height - 11 - m.statsRows()
 	if m.sessions.Count() > 0 {
 		h--
 	}
@@ -1573,8 +1646,12 @@ func (m tuiModel) View() tea.View {
 		v = tea.NewView(content)
 		v.Cursor = cur
 	}
+	if m.askRetry.eid != "" {
+		v = tea.NewView(m.overlayRetry(v.Content))
+	}
 	v.Content = ui.ClipFrame(v.Content, m.height)
 	v.AltScreen = true
+	v.MouseMode = m.mouseMode()
 	return v
 }
 
@@ -1624,9 +1701,9 @@ func (m tuiModel) viewPicking() string {
 		if len(m.lastCleared) > 0 {
 			clear = "alt+z undo clear"
 		}
-		hint := fmt.Sprintf("↑↓/jk move · / filter · space select · alt+s selected · %s · alt+r refresh · alt+m mode · alt+u user · %s · esc/alt+w menu", clear, act)
+		hint := fmt.Sprintf("↑↓/jk move · / filter · space select · alt+s selected · %s · alt+r refresh · alt+m mode · alt+u user · %s · esc/q/alt+w menu", clear, act)
 		if m.showSelected {
-			hint = fmt.Sprintf("↑↓/jk move · alt+s all · alt+c clear · space unselect · %s · esc/alt+w menu", act)
+			hint = fmt.Sprintf("↑↓/jk move · alt+s all · alt+c clear · space unselect · %s · esc/q/alt+w menu", act)
 		}
 		if m.filterOn {
 			// With one match left, enter does the thing rather than just
@@ -1639,6 +1716,9 @@ func (m tuiModel) viewPicking() string {
 				}
 			}
 			hint = "↑↓ move · tab complete · " + enter + " · esc clear"
+		}
+		if m.stats {
+			b.WriteString(m.statsPane() + "\n")
 		}
 		b.WriteString(ui.Footer(m.status, hint))
 	}

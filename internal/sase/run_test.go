@@ -236,28 +236,6 @@ func TestAHealthyCredentialRunsNormally(t *testing.T) {
 	}
 }
 
-func TestRetriesStopOnceTheCredentialDies(t *testing.T) {
-	c := newDeadCredClient()
-	o := testOpts()
-	o.Attempts = 3
-	o.ElementTimeout = 10 * time.Second
-	o.SessionTimeout = 2 * time.Second
-
-	c.session = func(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
-		c.dials.Add(1)
-		c.dead.Store(true)
-		return nil, errors.New("expected handshake response status code 101 but got 401")
-	}
-
-	res := Run(context.Background(), c, o, []string{"1"})
-	if len(res) != 1 || res[0].Error == "" {
-		t.Fatalf("results = %+v, want the element reported as failed", res)
-	}
-	if got := c.dials.Load(); got != 1 {
-		t.Errorf("%d dials, want the retries abandoned once the credential died", got)
-	}
-}
-
 func TestAClientThatCannotSaySoIsAssumedGood(t *testing.T) {
 	var plain Client = &fakeClient{
 		lookup: func(ctx context.Context, eid string) (api.Element, error) {

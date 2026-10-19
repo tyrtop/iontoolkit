@@ -11,6 +11,8 @@ import (
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ioncmd"
 	"tyrtop.com/iontk/internal/output"
+	"tyrtop.com/iontk/internal/sase/api"
+	"tyrtop.com/iontk/internal/saseauth"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -19,7 +21,7 @@ const (
 	focusContent
 )
 
-var setSections = []string{"General", "Batch", "Tenants", "Users", "Session", "Debug"}
+var setSections = []string{"General", "Batch", "Tenants", "Users", "Session", "Debug", "Reset"}
 
 const (
 	secGeneral = iota
@@ -28,6 +30,7 @@ const (
 	secUsers
 	secSession
 	secDebug
+	secReset
 )
 
 func (m tuiModel) sectionRows() int {
@@ -35,7 +38,7 @@ func (m tuiModel) sectionRows() int {
 	case secGeneral:
 		return 4
 	case secBatch:
-		return 3
+		return 4
 	case secTenants:
 		return len(m.cfg.Tenants)
 	case secUsers:
@@ -44,11 +47,18 @@ func (m tuiModel) sectionRows() int {
 		return 2
 	case secDebug:
 		return 0
+	case secReset:
+		return 1
 	}
 	return 0
 }
 
 func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
+	// Arming the reset lasts exactly one keypress. Leaving the row with it
+	// still set would mean a later y resets without having been asked.
+	armed := m.resetArmed
+	m.resetArmed = false
+
 	if key == "enter" && m.setFocus == focusNav {
 		if m.sectionRows() > 0 {
 			m.setFocus = focusContent
@@ -112,7 +122,57 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 		return m.onUsersSectionKey(key)
 	case secSession:
 		return m.onSessionGeoKey(key)
+	case secReset:
+		return m.onResetKey(key, armed)
 	}
+	return m, nil
+}
+
+// onResetKey arms on enter and fires on y. Two keys, because nothing else in
+// iontk destroys credentials that cannot be fetched again.
+func (m tuiModel) onResetKey(key string, armed bool) (tea.Model, tea.Cmd) {
+	if !armed {
+		if key == "enter" {
+			m.resetArmed = true
+			m.status = ""
+		}
+		return m, nil
+	}
+	if key != "y" {
+		m.status = "reset cancelled"
+		return m, nil
+	}
+	return m.factoryReset()
+}
+
+// factoryReset throws away the saved state and leaves the model looking like a
+// first run, which is the only honest way to show that it worked.
+func (m tuiModel) factoryReset() (tea.Model, tea.Cmd) {
+	// Sessions hold a token that has just been deleted, and a device login that
+	// cannot be typed again from anywhere in this process.
+	m.sessions.CloseAll()
+
+	if err := m.store.Reset(); err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+
+	m.cfg = &config.Config{}
+	m.tenant, m.hasTenant, m.ionUser = config.Tenant{}, false, ""
+	m.authMode = authBrowser
+	m.pool = newClientPool()
+	m.client = nil
+	m.setElements(nil)
+	m.sites = nil
+	m.selected, m.lastCleared = map[string]bool{}, nil
+	m.discovered, m.tenantIssues, m.runAs = nil, nil, nil
+	m.ident, m.profile, m.tokenTTL = saseauth.Identity{}, api.Profile{}, 0
+	m.tokenDead = ""
+	m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
+	m.setSection, m.setFocus, m.setCursor = secGeneral, focusNav, 0
+	m.menuCursor = 0
+	m.phase = phaseMenu
+	m.status = "reset — nothing is saved any more"
 	return m, nil
 }
 
@@ -299,9 +359,18 @@ func (m tuiModel) sectionContent() []string {
 		if m.cfg.BatchDir != "" {
 			folder = ui.StyleDim.Render(ui.Truncate(m.cfg.BatchDir, 44))
 		}
+		// The row stays whether the format sorts rows or not: a section that
+		// gains and loses a row as the format cycles moves everything under it.
+		order := ui.StyleElement.Render(output.OrientationLabel(m.batchOrient())) +
+			ui.StyleDim.Render("  "+output.OrientationHelp(m.batchOrient()))
+		if !output.Tabular(m.batchFormat()) {
+			order = ui.StyleDim.Render(output.OrientationLabel(m.batchOrient()) +
+				"  only table and csv have rows to sort")
+		}
 		out = append(out,
 			ui.Label("format")+ui.StyleElement.Render(m.batchFormat())+
 				ui.StyleDim.Render("  "+output.FormatHelp(m.batchFormat())),
+			ui.Label("rows")+order,
 			ui.Label("output")+dest,
 			ui.Label("folder")+folder,
 		)
@@ -386,11 +455,30 @@ func (m tuiModel) sectionContent() []string {
 			ui.Label("buffer rows")+fmt.Sprintf("%-6d", rows)+warn,
 		)
 
+	case secReset:
+		out = append(out, ui.StyleWarn.Render("factory reset"))
+		if m.resetArmed {
+			out = append(out,
+				"",
+				ui.StyleErr.Render("press y to delete every tenant, ION password and token"),
+				ui.StyleDim.Render("the browser profile goes too, so this signs you out"),
+				ui.StyleDim.Render("any other key cancels"),
+			)
+			break
+		}
+		out = append(out,
+			"",
+			ui.StyleDim.Render("deletes saved tenants, ION passwords, browser tokens,"),
+			ui.StyleDim.Render("cached elements and the browser profile"),
+			ui.StyleDim.Render("nothing here can be undone, and nothing is backed up"),
+		)
+
 	case secDebug:
 		out = append(out,
 			ui.Label("config")+ui.StyleDim.Render(m.store.Root),
 			ui.Label("secrets")+ui.StyleDim.Render(m.store.Secrets.Backend()),
 			ui.Label("version")+ui.StyleDim.Render(Version),
+			ui.Label("stats")+ui.StyleDim.Render("alt+i overlays live counters"),
 			"",
 			ui.Label("tenant")+ui.StyleDim.Render(m.tenant.Name+"  tsg "+m.tenant.TSGID),
 			ui.Label("ion user")+ui.StyleDim.Render(m.ionUser),
@@ -401,6 +489,9 @@ func (m tuiModel) sectionContent() []string {
 			ui.Label("catalog")+ui.StyleDim.Render(fmt.Sprintf("%d commands, %d offered", len(ioncmd.Embedded()), len(m.catalog()))),
 			ui.Label("terminal")+ui.StyleDim.Render(fmt.Sprintf("%d x %d", m.width, m.height)),
 		)
+		if app.Debug {
+			out = append(out, "", ui.StyleWarn.Render("--debug: throwaway config, no saved tenants, secrets held only in memory"))
+		}
 	}
 	return out
 }
@@ -408,6 +499,9 @@ func (m tuiModel) sectionContent() []string {
 func (m tuiModel) sectionHint() string {
 	if m.setSection == secDebug {
 		return "read only · ↑↓ section · esc back"
+	}
+	if m.setSection == secReset && m.resetArmed {
+		return "y reset · any other key cancels"
 	}
 	if m.setFocus == focusNav {
 		return "↑↓ section · enter/→ open · esc back"
@@ -425,6 +519,11 @@ func (m tuiModel) sectionHint() string {
 		return "↑↓ row · enter type · -/+ adjust · tab back"
 	case secDebug:
 		return "read only · tab back · esc back"
+	case secReset:
+		if m.resetArmed {
+			return "y reset · any other key cancels"
+		}
+		return "enter arm the reset · tab back · esc back"
 	}
 	return "tab back · esc back"
 }
@@ -487,6 +586,16 @@ func (m tuiModel) batchFormat() string {
 	return f
 }
 
+// batchOrient is the saved row orientation, normalized the same way as the
+// format so a stale value still displays as something real.
+func (m tuiModel) batchOrient() string {
+	o, err := output.NormalizeOrientation(m.cfg.BatchOrient)
+	if err != nil {
+		return output.OrientION
+	}
+	return o
+}
+
 func (m tuiModel) onBatchKey(key string) (tea.Model, tea.Cmd) {
 	switch m.setCursor {
 	case 0:
@@ -498,8 +607,13 @@ func (m tuiModel) onBatchKey(key string) (tea.Model, tea.Cmd) {
 		if key != "enter" && key != " " && key != "space" {
 			return m, nil
 		}
-		m.cfg.BatchToFile = !m.cfg.BatchToFile
+		m.cfg.BatchOrient = output.NextOrientation(m.batchOrient())
 	case 2:
+		if key != "enter" && key != " " && key != "space" {
+			return m, nil
+		}
+		m.cfg.BatchToFile = !m.cfg.BatchToFile
+	case 3:
 		if key != "enter" {
 			return m, nil
 		}

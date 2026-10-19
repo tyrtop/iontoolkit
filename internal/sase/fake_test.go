@@ -29,6 +29,5 @@ func testOpts() Options {
 		Concurrency:    10,
 		ElementTimeout: 60 * time.Second,
 		SessionTimeout: 20 * time.Second,
-		Attempts:       1,
 	}
 }

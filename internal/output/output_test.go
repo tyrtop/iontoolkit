@@ -41,8 +41,12 @@ func TestNormalizeFormat(t *testing.T) {
 		{"text", FormatText, false},
 		{"txt", FormatText, false},
 		{"plain", FormatText, false},
+		{"table", FormatTable, false},
+		{"tbl", FormatTable, false},
+		{"csv", FormatCSV, false},
+		{"CSV", FormatCSV, false},
 		{"yaml", "", true},
-		{"csv", "", true},
+		{"xml", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -89,6 +93,8 @@ func TestFormatExt(t *testing.T) {
 		FormatJSON:  "json",
 		FormatJSONL: "jsonl",
 		FormatText:  "txt",
+		FormatTable: "txt",
+		FormatCSV:   "csv",
 		"nonsense":  "json",
 	}
 	for in, want := range tests {
@@ -131,6 +137,23 @@ func TestJSONSinkKeepsElementOrder(t *testing.T) {
 		if got[i].ElementID != id {
 			t.Errorf("result %d = %q, want %q", i, got[i].ElementID, id)
 		}
+	}
+}
+
+func TestJSONSinkIndents(t *testing.T) {
+	var buf bytes.Buffer
+	sink := NewSink(&buf, FormatJSON)
+	if err := sink.Add(0, sampleResult("a", "s0001")); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	if err := sink.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	got := buf.String()
+	// Without an indent the whole array is one line, which is what this guards.
+	if !strings.Contains(got, "[\n  {\n    \"element_id\"") {
+		t.Errorf("json array is not indented two spaces:\n%s", got)
 	}
 }
 

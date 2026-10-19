@@ -22,7 +22,9 @@ func (m tuiModel) saveBatchResults() string {
 	}
 	defer out.Close()
 
-	sink := output.NewSink(out, format)
+	// No width: this is a file, and a cell trimmed to a terminal that is not
+	// reading it would lose the only copy.
+	sink := output.NewSink(out, format, output.WithOrientation(m.batchOrient()))
 	for i, r := range m.results {
 		if r.ElementID == "" {
 			continue

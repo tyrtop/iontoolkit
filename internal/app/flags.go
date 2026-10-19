@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"tyrtop.com/iontk/internal/sase"
+	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
 // RootFlags are the knobs the root command binds its command-line flags to.
@@ -18,11 +19,14 @@ type RootFlags struct {
 	RefreshMargin  time.Duration
 	Concurrency    int
 	Burst          int
-	Attempts       int
 	RPS            float64
+	DialAttempts   int
+	DialTimeout    time.Duration
 	Verbose        bool
 	AllowWrites    bool
 	TSGID          string
+	PagerOff       string
+	PagerPrompts   []string
 }
 
 // Defaults doubles as the flag defaults the root command declares, so the
@@ -34,8 +38,14 @@ var Defaults = RootFlags{
 	RefreshMargin:  75 * time.Second,
 	Concurrency:    10,
 	Burst:          10,
-	Attempts:       1,
+	DialAttempts:   3,
+	DialTimeout:    10 * time.Second,
 	RPS:            5,
+	PagerPrompts:   ioncli.DefaultPagers,
+	// Works on an ion 1200-s running 6.3.4. "terminal length 0", "no paging"
+	// and "set cli pager off" all get rejected there. If a device rejects this
+	// one too, the pager scraper handles the run.
+	PagerOff: "set paging off",
 }
 
 type Flags struct {
@@ -51,7 +61,10 @@ type Flags struct {
 	RPS            float64
 	Burst          int
 	SessionTimeout time.Duration
-	Attempts       int
+	DialAttempts   int
+	DialTimeout    time.Duration
+	PagerOff       string
+	PagerPrompts   []string
 	ClientID       string
 	ClientSecret   string
 	TSGID          string
@@ -75,7 +88,10 @@ func BaseFlags() Flags {
 		Concurrency:    Defaults.Concurrency,
 		ElementTimeout: Defaults.ElementTimeout,
 		SessionTimeout: Defaults.SessionTimeout,
-		Attempts:       Defaults.Attempts,
+		DialAttempts:   Defaults.DialAttempts,
+		DialTimeout:    Defaults.DialTimeout,
+		PagerOff:       Defaults.PagerOff,
+		PagerPrompts:   Defaults.PagerPrompts,
 	}
 	if Defaults.TSGID != "" {
 		f.TSGID = Defaults.TSGID
@@ -128,7 +144,6 @@ func (f Flags) Options() sase.Options {
 		Concurrency:    f.Concurrency,
 		ElementTimeout: f.ElementTimeout,
 		SessionTimeout: f.SessionTimeout,
-		Attempts:       f.Attempts,
 		Verbose:        f.Verbose,
 	}
 }

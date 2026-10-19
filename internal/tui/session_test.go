@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -356,14 +357,19 @@ func TestShellModeEnterOpensOneTabPerSelection(t *testing.T) {
 
 	mm, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	got := mm.(tuiModel)
-	if got.phase != phaseSession {
-		t.Errorf("phase = %v, want phaseSession in shell mode", got.phase)
-	}
 	if cmd == nil {
 		t.Error("want dial commands")
 	}
-	if got.connecting != "2 sessions" {
-		t.Errorf("connecting = %q, want 2 sessions", got.connecting)
+	// Opening several stays on the list: jumping to whichever tab finished
+	// last hid the others, and there was nothing to watch them by.
+	if got.phase != phasePicking {
+		t.Errorf("phase = %v, want to stay on the element list", got.phase)
+	}
+	if len(got.dialing) != 2 {
+		t.Errorf("dialing = %v, want both elements marked as connecting", got.dialing)
+	}
+	if !got.connectingAny() {
+		t.Error("connectingAny() = false, want the spinner ticking while dials are in flight")
 	}
 }
 
@@ -649,6 +655,7 @@ func (stubConn) Read(ctx context.Context) (websocket.MessageType, []byte, error)
 	<-ctx.Done()
 	return 0, nil, ctx.Err()
 }
+func (stubConn) Ping(ctx context.Context) error                                       { return nil }
 func (stubConn) Write(ctx context.Context, typ websocket.MessageType, p []byte) error { return nil }
 func (stubConn) Close(code websocket.StatusCode, reason string) error                 { return nil }
 
@@ -698,6 +705,8 @@ func (c *recConn) Write(ctx context.Context, typ websocket.MessageType, p []byte
 	c.written = append(c.written, p...)
 	return nil
 }
+
+func (c *recConn) Ping(ctx context.Context) error { return nil }
 
 func (c *recConn) Close(code websocket.StatusCode, reason string) error {
 	c.once.Do(func() { close(c.done) })
@@ -1163,6 +1172,7 @@ type exitConn struct{}
 func (exitConn) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
 	return 0, nil, websocket.CloseError{Code: websocket.StatusNormalClosure}
 }
+func (exitConn) Ping(ctx context.Context) error                                       { return nil }
 func (exitConn) Write(ctx context.Context, typ websocket.MessageType, p []byte) error { return nil }
 func (exitConn) Close(code websocket.StatusCode, reason string) error                 { return nil }
 
@@ -1172,16 +1182,24 @@ func (exitDialer) DialToolkit(ctx context.Context, eid string, cols, rows int) (
 	return exitConn{}, nil
 }
 
-func waitForSessionEnd(t *testing.T, m tuiModel, eid string) {
+func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if s := m.sessions.Find(eid); s != nil && s.Ended() {
+		if cond() {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("session %q never reported that it ended", eid)
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func waitForSessionEnd(t *testing.T, m tuiModel, eid string) {
+	t.Helper()
+	waitFor(t, "session "+eid+" to end", func() bool {
+		s := m.sessions.Find(eid)
+		return s != nil && s.Ended()
+	})
 }
 
 func TestExitingAShellClosesItsTab(t *testing.T) {
@@ -1284,5 +1302,125 @@ func TestReattachingToAFailedDetachedSessionOpensAFreshOne(t *testing.T) {
 	}
 	if n := got.sessions.DetachedCount(); n != 0 {
 		t.Errorf("DetachedCount() = %d, want the unusable session dropped", n)
+	}
+}
+
+// hungConn answers reads with a prompt then goes quiet and stops answering
+// pings, which is a black-holed toolkit socket.
+type hungConn struct {
+	done chan struct{}
+	once sync.Once
+	sent bool
+}
+
+func newHungConn() *hungConn { return &hungConn{done: make(chan struct{})} }
+
+func (c *hungConn) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
+	if !c.sent {
+		c.sent = true
+		return websocket.MessageText, []byte("ion#"), nil
+	}
+	select {
+	case <-ctx.Done():
+		return 0, nil, ctx.Err()
+	case <-c.done:
+		return 0, nil, context.Canceled
+	}
+}
+
+func (c *hungConn) Ping(ctx context.Context) error {
+	return errors.New("context deadline exceeded")
+}
+func (c *hungConn) Write(ctx context.Context, typ websocket.MessageType, p []byte) error { return nil }
+func (c *hungConn) Close(code websocket.StatusCode, reason string) error {
+	c.once.Do(func() { close(c.done) })
+	return nil
+}
+
+type hungDialer struct{ conn *hungConn }
+
+func (d hungDialer) DialToolkit(ctx context.Context, eid string, cols, rows int) (ionterm.Conn, error) {
+	return d.conn, nil
+}
+
+func hungModel(t *testing.T) tuiModel {
+	t.Helper()
+	t.Cleanup(ionterm.SetLivenessForTest(20*time.Millisecond, 30*time.Millisecond))
+	m := pickModel(t)
+	setTestClient(&m, liveClient())
+	m.phase = phaseSession
+	if _, err := m.sessions.Open(context.Background(), hungDialer{newHungConn()}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the hang to be noticed", func() bool {
+		s := m.sessions.Find("1")
+		return s != nil && s.Hung()
+	})
+	return m
+}
+
+func TestAHungSessionSaysSoAndOffersAReconnect(t *testing.T) {
+	m := hungModel(t)
+
+	view := plain(m.viewSession())
+	if !strings.Contains(view, "stopped answering") {
+		t.Errorf("the pane does not say the connection is hung:\n%s", view)
+	}
+	if !strings.Contains(view, "alt+r") {
+		t.Errorf("the pane does not offer a way back:\n%s", view)
+	}
+}
+
+func TestKeystrokesAreNotSentToAHungSession(t *testing.T) {
+	m := hungModel(t)
+
+	// Typing into a socket that is not answering looks like the shell has
+	// swallowed the command.
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"}))
+	got := mm.(tuiModel)
+	if got.sessions.Count() != 1 {
+		t.Errorf("Count() = %d, want the tab left alone", got.sessions.Count())
+	}
+	if !got.sessions.Find("1").Hung() {
+		t.Error("the session stopped reporting as hung after a keypress")
+	}
+}
+
+func TestAltROnAHungSessionOpensAFreshOne(t *testing.T) {
+	m := hungModel(t)
+	hung := m.sessions.Find("1")
+
+	mm, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
+	got := mm.(tuiModel)
+
+	if cmd == nil {
+		t.Fatal("alt+r produced no command, want it to dial the element again")
+	}
+	// The hung tab goes: a redial is a new CLI session, not a resumption.
+	if s := got.sessions.Find("1"); s == hung {
+		t.Error("the hung session was kept, want it replaced")
+	}
+	if got.phase != phaseSession {
+		t.Errorf("phase = %v, want phaseSession while the new session connects", got.phase)
+	}
+}
+
+func TestAltRIsIgnoredWhileASessionIsHealthy(t *testing.T) {
+	m := pickModel(t)
+	setTestClient(&m, liveClient())
+	m.phase = phaseSession
+	conn := newRecConn()
+	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+		t.Fatal(err)
+	}
+
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
+	got := mm.(tuiModel)
+	if got.sessions.Count() != 1 {
+		t.Fatalf("Count() = %d, want the session untouched", got.sessions.Count())
+	}
+	// alt+r reaches the shell as an ordinary keystroke when nothing is wrong.
+	if got.sessions.Find("1") == nil {
+		t.Error("the healthy session was replaced by alt+r")
 	}
 }

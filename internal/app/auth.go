@@ -1,11 +1,13 @@
 package app
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/fixture"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/saseauth"
 )
@@ -63,9 +65,76 @@ func accountSeed(token string) *saseauth.Seed {
 	return v.(*saseauth.Seed)
 }
 
+// Debug sends every store this process opens to a throwaway root with
+// in-memory secrets. It is a process-wide switch because the TUI, the batch
+// path and BrowserSource each open their own store, and a run with one of them
+// still pointed at the real config would not be isolated at all.
+var Debug bool
+
+// Fixture is the loaded --fixtures file, or nil for a real run. It isolates the
+// store for the same reason --debug does, and seeds it so the ordinary tenant
+// flow is what gets exercised.
+var Fixture *fixture.Set
+
+// Store opens the config store, honouring --debug and --fixtures.
+func Store() (*config.Store, error) {
+	if Fixture != nil {
+		st, err := config.OpenDebug()
+		if err != nil {
+			return nil, err
+		}
+		return st, seed(st, Fixture)
+	}
+	if Debug {
+		return config.OpenDebug()
+	}
+	return config.Open()
+}
+
+var (
+	seedMu   sync.Mutex
+	seededAs *fixture.Set
+)
+
+// seed writes the fixture's tenants and device logins into the store. Every
+// entry point opens its own store, so it runs once per fixture rather than once
+// per store: later opens have to see the settings the run has changed since.
+func seed(st *config.Store, f *fixture.Set) error {
+	seedMu.Lock()
+	defer seedMu.Unlock()
+	if seededAs == f {
+		return nil
+	}
+
+	// Written from scratch rather than merged, so changing which fixture a
+	// process runs cannot leave the previous one's tenants in the list.
+	tenants := f.SavedTenants()
+	cfg := &config.Config{Tenants: tenants}
+	if len(tenants) > 0 {
+		cfg.LastTenant = tenants[0].Name
+	}
+	for _, t := range tenants {
+		// A service account tenant with no client secret fails ValidateCreds
+		// before anything ever reaches the fixture transport.
+		if err := st.Secrets.Set(config.ClientSecretKey(t.TSGID), "fixture"); err != nil {
+			return fmt.Errorf("seed fixture tenant %s: %w", t.Name, err)
+		}
+	}
+	for key, pass := range f.Passwords() {
+		if err := st.Secrets.Set(key, pass); err != nil {
+			return fmt.Errorf("seed fixture secret: %w", err)
+		}
+	}
+	if err := st.SaveConfig(cfg); err != nil {
+		return err
+	}
+	seededAs = f
+	return nil
+}
+
 // OpenStore returns the config store, or nil when it cannot be opened.
 func OpenStore() *config.Store {
-	st, err := config.Open()
+	st, err := Store()
 	if err != nil {
 		return nil
 	}

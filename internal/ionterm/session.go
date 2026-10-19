@@ -16,6 +16,9 @@ import (
 type Conn interface {
 	Read(ctx context.Context) (websocket.MessageType, []byte, error)
 	Write(ctx context.Context, typ websocket.MessageType, p []byte) error
+	// Ping must be answered by the peer. An idle ION shell sends nothing for
+	// hours, so silence alone cannot tell a hang from a quiet prompt.
+	Ping(ctx context.Context) error
 	Close(code websocket.StatusCode, reason string) error
 }
 
@@ -32,23 +35,53 @@ type Session struct {
 	emu  *vt.SafeEmulator
 	conn Conn
 
+	// SafeEmulator locks each of its own methods, but Scrollback() hands back
+	// the buffer itself and the lock is gone by the time its lines are read.
+	// This covers a write against the reads that walk them, which is all that
+	// is needed: ionterm owns every emulator call site.
+	emuMu sync.Mutex
+
 	keys   chan uv.KeyEvent
 	text   chan string
 	auto   *autologin
 	notify func(string)
 	cancel context.CancelFunc
 
-	mu      sync.Mutex
-	err     error
-	closed  bool
-	ended   bool
-	gotData bool
-	line    []rune
+	mu       sync.Mutex
+	err      error
+	closed   bool
+	ended    bool
+	hung     bool
+	gotData  bool
+	line     []rune
+	lastSeen time.Time
 
+	// Snapshotted at Open so a session's cadence cannot change under its own
+	// liveness loop.
+	pingEvery time.Duration
+	pongWait  time.Duration
 	handshake time.Duration
 }
 
-var handshakeDeadline = 20 * time.Second
+// A dial that answers nothing at all is still bounded, but once the socket is
+// up liveness comes from pongs rather than the clock: a slow device that keeps
+// answering is not hung, and one that stops is, whatever the elapsed time.
+var (
+	pingEvery = 15 * time.Second
+	pongWait  = 10 * time.Second
+	// A socket that pongs but never sends a prompt still has to be given up
+	// on: autologin has nothing to answer, and there is no traffic to measure.
+	handshakeDeadline = 20 * time.Second
+)
+
+// SetLivenessForTest shortens the ping cadence so another package's tests can
+// reach a hang without waiting out the real one, and restores it afterwards.
+// Sessions snapshot these at Open, so it must be called before one is opened.
+func SetLivenessForTest(ping, pong time.Duration) (restore func()) {
+	oldPing, oldPong := pingEvery, pongWait
+	pingEvery, pongWait = ping, pong
+	return func() { pingEvery, pongWait = oldPing, oldPong }
+}
 
 func Open(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds Credentials, notify func(string)) (*Session, error) {
 	conn, err := d.DialToolkit(ctx, eid, cols, rows)
@@ -69,14 +102,17 @@ func Open(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds
 		text:      make(chan string, 8),
 		auto:      newAutologin(creds),
 		notify:    notify,
-		handshake: handshakeDeadline,
+		lastSeen:  time.Now(),
 		cancel:    cancel,
+		pingEvery: pingEvery,
+		pongWait:  pongWait,
+		handshake: handshakeDeadline,
 	}
 
 	go s.pumpOutput(ctx)
 	go s.pumpInput(ctx)
 	go s.pumpKeys(ctx)
-	go s.watchdog(ctx)
+	go s.liveness(ctx)
 
 	return s, nil
 }
@@ -95,12 +131,16 @@ func (s *Session) pumpOutput(ctx context.Context) {
 		if len(data) == 0 {
 			continue
 		}
-		if _, err := s.emu.Write(data); err != nil {
+		s.emuMu.Lock()
+		_, err = s.emu.Write(data)
+		s.emuMu.Unlock()
+		if err != nil {
 			s.fail(err)
 			return
 		}
 		s.mu.Lock()
 		s.gotData = true
+		s.lastSeen = time.Now()
 		s.mu.Unlock()
 
 		s.mu.Lock()
@@ -149,23 +189,77 @@ func (s *Session) pumpKeys(ctx context.Context) {
 	}
 }
 
-func (s *Session) watchdog(ctx context.Context) {
-	t := time.NewTimer(s.handshake)
+// liveness replaces a flat deadline. Traffic is proof enough; only a quiet
+// connection is pinged, and only an unanswered ping is a hang.
+func (s *Session) liveness(ctx context.Context) {
+	// The handshake is a one-shot deadline because there is no traffic yet to
+	// measure; everything after it is paced by pongs.
+	hs := time.NewTimer(s.handshake)
+	defer hs.Stop()
+	t := time.NewTicker(s.pingEvery)
 	defer t.Stop()
 
-	select {
-	case <-ctx.Done():
-		return
-	case <-t.C:
-	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
 
+		case <-hs.C:
+			s.mu.Lock()
+			mute := !s.gotData && s.err == nil && !s.closed && !s.ended
+			s.mu.Unlock()
+			if mute {
+				s.fail(fmt.Errorf("no response from device after %s", s.handshake))
+				return
+			}
+
+		case <-t.C:
+			s.mu.Lock()
+			quiet := time.Since(s.lastSeen)
+			done := s.closed || s.ended || s.err != nil || s.hung
+			s.mu.Unlock()
+			if done {
+				return
+			}
+			if quiet < s.pingEvery {
+				continue
+			}
+
+			pingCtx, cancel := context.WithTimeout(ctx, s.pongWait)
+			err := s.conn.Ping(pingCtx)
+			cancel()
+			if err == nil {
+				s.mu.Lock()
+				s.lastSeen = time.Now()
+				s.mu.Unlock()
+				continue
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			s.markHung()
+			return
+		}
+	}
+}
+
+// markHung records a connection that stopped answering. It is kept apart from
+// err because it is recoverable: the user can dial the element again, which
+// err offers no route to.
+func (s *Session) markHung() {
 	s.mu.Lock()
-	stalled := !s.gotData && s.err == nil && !s.closed
-	s.mu.Unlock()
-
-	if stalled {
-		s.fail(fmt.Errorf("no response from device after %s", s.handshake))
+	if s.err == nil && !s.closed && !s.ended {
+		s.hung = true
 	}
+	s.mu.Unlock()
+	s.markDirty()
+}
+
+// Hung is a session whose connection stopped answering pings.
+func (s *Session) Hung() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hung
 }
 
 func (s *Session) markDirty() {

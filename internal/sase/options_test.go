@@ -12,7 +12,6 @@ func TestOptionsValidate(t *testing.T) {
 		Concurrency:    10,
 		ElementTimeout: 60 * time.Second,
 		SessionTimeout: 20 * time.Second,
-		Attempts:       1,
 	}
 
 	cases := map[string]struct {
@@ -27,14 +26,9 @@ func TestOptionsValidate(t *testing.T) {
 		"cmd without pass":  {func(o *Options) { o.Password = "" }, true},
 		"zero concurrency":  {func(o *Options) { o.Concurrency = 0 }, true},
 		"session > element": {func(o *Options) { o.SessionTimeout = 90 * time.Second }, true},
-		"zero attempts":     {func(o *Options) { o.Attempts = 0 }, true},
-
-		"3 attempts fits exactly": {func(o *Options) { o.Attempts = 3 }, false},
-		"4 attempts overruns":     {func(o *Options) { o.Attempts = 4 }, true},
-		"huge attempts overflows the check": {func(o *Options) {
-			o.Attempts = 1 << 34
-			o.SessionTimeout = time.Second
-		}, true},
+		"session == element": {func(o *Options) {
+			o.SessionTimeout = o.ElementTimeout
+		}, false},
 	}
 
 	for name, tc := range cases {

@@ -16,9 +16,11 @@ const (
 	FormatJSON  = "json"
 	FormatJSONL = "jsonl"
 	FormatText  = "text"
+	FormatTable = "table"
+	FormatCSV   = "csv"
 )
 
-var outputFormats = []string{FormatJSON, FormatJSONL, FormatText}
+var outputFormats = []string{FormatJSON, FormatJSONL, FormatText, FormatTable, FormatCSV}
 
 func FormatHelp(f string) string {
 	switch f {
@@ -26,6 +28,10 @@ func FormatHelp(f string) string {
 		return "one JSON object per line, written as each element finishes"
 	case FormatText:
 		return "plain text, grouped by element"
+	case FormatTable:
+		return "one row per command, output flattened to a single line"
+	case FormatCSV:
+		return "one row per command, quoted per RFC 4180"
 	default:
 		return "a single JSON array, written when every element is done"
 	}
@@ -37,6 +43,10 @@ func formatExt(f string) string {
 		return "jsonl"
 	case FormatText:
 		return "txt"
+	case FormatTable:
+		return "txt"
+	case FormatCSV:
+		return "csv"
 	default:
 		return "json"
 	}
@@ -50,6 +60,10 @@ func NormalizeFormat(s string) (string, error) {
 		return FormatJSONL, nil
 	case FormatText, "txt", "plain":
 		return FormatText, nil
+	case FormatTable, "tbl":
+		return FormatTable, nil
+	case FormatCSV:
+		return FormatCSV, nil
 	}
 	return "", fmt.Errorf("unknown output format %q: want one of %s", s, strings.Join(outputFormats, ", "))
 }
@@ -63,20 +77,52 @@ func NextFormat(f string) string {
 	return FormatJSON
 }
 
+// Tabular is asked before offering an orientation control: on the other
+// formats it would change nothing.
+func Tabular(f string) bool { return f == FormatTable || f == FormatCSV }
+
 // Sink receives each element's result as it finishes and writes it out.
-// The streaming formats write immediately; json buffers, because an array has
-// to keep the order the elements were given in.
+// The streaming formats write immediately; json and the tabular formats
+// buffer, because an array has to keep the order the elements were given in
+// and a row sort cannot start until every row exists.
 type Sink interface {
 	Add(index int, r sase.Result) error
 	Close() error
 }
 
-func NewSink(w io.Writer, format string) Sink {
+// Only the tabular formats read these, so a caller can pass them without
+// knowing which format it ended up with.
+type Option func(*sinkOpts)
+
+type sinkOpts struct {
+	orient string
+	width  int
+}
+
+func WithOrientation(o string) Option { return func(s *sinkOpts) { s.orient = o } }
+
+// WithWidth fits table rows into n columns. Zero leaves every cell whole,
+// which is what a file wants -- truncating one would lose the only copy.
+func WithWidth(n int) Option { return func(s *sinkOpts) { s.width = n } }
+
+func NewSink(w io.Writer, format string, opts ...Option) Sink {
+	o := sinkOpts{orient: OrientION}
+	for _, apply := range opts {
+		apply(&o)
+	}
+	if orient, err := NormalizeOrientation(o.orient); err == nil {
+		o.orient = orient
+	}
+
 	switch format {
 	case FormatJSONL:
 		return &jsonlSink{enc: json.NewEncoder(w)}
 	case FormatText:
 		return &textSink{w: w}
+	case FormatTable:
+		return &tableSink{w: w, opts: o}
+	case FormatCSV:
+		return &csvSink{w: w, opts: o}
 	default:
 		return &jsonSink{w: w}
 	}
@@ -88,18 +134,29 @@ type jsonSink struct {
 }
 
 func (s *jsonSink) Add(index int, r sase.Result) error {
-	for len(s.results) <= index {
-		s.results = append(s.results, sase.Result{})
-	}
-	s.results[index] = r
+	s.results = addAt(s.results, index, r)
 	return nil
+}
+
+// addAt exists because results arrive in completion order and have to be
+// written in the order the elements were given.
+func addAt(results []sase.Result, index int, r sase.Result) []sase.Result {
+	for len(results) <= index {
+		results = append(results, sase.Result{})
+	}
+	results[index] = r
+	return results
 }
 
 func (s *jsonSink) Close() error {
 	if s.results == nil {
 		s.results = []sase.Result{}
 	}
-	return json.NewEncoder(s.w).Encode(s.results)
+	enc := json.NewEncoder(s.w)
+	// Command output stays \n-escaped inside the JSON strings whatever the
+	// indentation, which is why text and table exist.
+	enc.SetIndent("", "  ")
+	return enc.Encode(s.results)
 }
 
 type jsonlSink struct{ enc *json.Encoder }

@@ -518,3 +518,62 @@ func setTestClient(m *tuiModel, c *api.Client) {
 	m.pool.set(m.tenant.TSGID, c)
 	m.pool.set("1", c)
 }
+
+func TestServiceAccountModeOnlyOffersWhatItCanReach(t *testing.T) {
+	m := multiModel(t)
+	m.cfg = &config.Config{Tenants: []config.Tenant{
+		{Name: "Saved SA", TSGID: "111", Auth: config.AuthServiceAccount, ClientID: "sa@1.iam"},
+		{Name: "Saved Browser", TSGID: "222", Auth: config.AuthBrowser},
+	}}
+	m.tenant, m.hasTenant = m.cfg.Tenants[0], true
+	// A browser sign-in listed a third tenant that has no saved credential.
+	if err := m.store.SaveTenantCache(&config.TenantCache{
+		Account: "someone@example.com",
+		Tenants: []config.KnownTenant{{TSGID: "333", Name: "Discovered"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m.authMode = authBrowser
+	if got := len(m.switchChoices()); got != 3 {
+		t.Errorf("browser mode offers %d tenants, want all 3", got)
+	}
+
+	// A service account credential cannot reach a discovered tenant or a
+	// browser-backed one, and offering them is a page of tenants that all fail.
+	m.authMode = authTenant
+	got := m.switchChoices()
+	if len(got) != 1 || got[0].name != "Saved SA" {
+		t.Errorf("service account mode offers %+v, want only the saved service account", got)
+	}
+
+	view := plain(m.viewSwitch())
+	if !strings.Contains(view, "1 service account\n") {
+		t.Errorf("the page does not count service accounts:\n%s", view)
+	}
+	// The browser account that listed those tenants is irrelevant here.
+	if strings.Contains(view, "someone@example.com") {
+		t.Errorf("the page claims browser provenance in service account mode:\n%s", view)
+	}
+	if strings.Contains(view, "alt+r") {
+		t.Errorf("the page offers a re-list with nothing to ask:\n%s", view)
+	}
+}
+
+func TestReListIsRefusedInServiceAccountMode(t *testing.T) {
+	m := multiModel(t)
+	m.authMode = authTenant
+	m.phase = phaseSwitch
+
+	mm, cmd := m.onSwitchKey("alt+r")
+	got := mm.(tuiModel)
+	if cmd != nil {
+		t.Error("alt+r started a browser discovery in service account mode")
+	}
+	if got.phase != phaseSwitch {
+		t.Errorf("phase = %v, want to stay on the page", got.phase)
+	}
+	if !strings.Contains(got.status, "settings") {
+		t.Errorf("status = %q, want it to say where service accounts come from", got.status)
+	}
+}

@@ -1,5 +1,7 @@
 package main
 
+//go:generate go run . gen-flag-docs ../../docs/flags.md
+
 import (
 	"context"
 	"fmt"
