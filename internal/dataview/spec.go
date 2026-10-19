@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
 //go:embed builtin.yaml
@@ -32,6 +33,35 @@ type View struct {
 	// templates refer to them by.
 	Fetch    map[string]string `yaml:"fetch"`
 	Sections []Section         `yaml:"sections"`
+	// Compare is the GUI-vs-CLI half, and the only part of a view that costs a
+	// device login. It runs on a keypress, never with the page.
+	Compare *Compare `yaml:"compare"`
+}
+
+// Compare puts what the portal says beside what the appliance's own CLI says.
+// It reads the portal again rather than reusing the page: a comparison is only
+// worth something if both answers were taken at the same moment.
+type Compare struct {
+	// When gates the whole comparison, same template rules as a section's: an
+	// element that is not clustered is not worth dialling to ask about HA.
+	When string `yaml:"when"`
+	// Fetch is the portal side, read when the comparison runs.
+	Fetch map[string]string `yaml:"fetch"`
+	// Commands is name -> CLI command, which .cli.<name> holds the output of.
+	// Not templated, unlike a path: a command built out of fetched data could
+	// expand into one that writes, and the read-only check here happens at
+	// load.
+	Commands map[string]string `yaml:"commands"`
+	Rows     []CompareRow      `yaml:"rows"`
+}
+
+// CompareRow is one question asked of both sources. Each side is a template,
+// which is where a difference in spelling between the two gets reconciled;
+// the engine only decides whether the answers match.
+type CompareRow struct {
+	Label  string `yaml:"label"`
+	Portal string `yaml:"portal"`
+	Device string `yaml:"device"`
 }
 
 // Section is either a list of label/value rows or, with for_each, a table over
@@ -196,6 +226,9 @@ func (s *Set) normalize() error {
 				return err
 			}
 		}
+		if err := v.Compare.normalize(v.Name); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -222,6 +255,42 @@ func (sec *Section) normalize(view string) error {
 	}
 	if sec.MaxItems <= 0 {
 		sec.MaxItems = defaultMaxItems
+	}
+	return nil
+}
+
+// normalize checks the comparison. The commands are the part that matters:
+// they run on an appliance, and a view is the one piece of iontk a person is
+// expected to edit, so only the read-only verbs are allowed.
+func (c *Compare) normalize(view string) error {
+	if c == nil {
+		return nil
+	}
+	if len(c.Rows) == 0 {
+		return fmt.Errorf("view %q compares nothing: a compare block with no rows is a dial for no answer", view)
+	}
+	if len(c.Commands) == 0 {
+		return fmt.Errorf("view %q compares without asking the device anything", view)
+	}
+	cmds := make([]string, 0, len(c.Commands))
+	for _, name := range sortedKeys(c.Commands) {
+		cmds = append(cmds, c.Commands[name])
+	}
+	if err := ioncli.CheckReadOnly(cmds); err != nil {
+		return fmt.Errorf("view %q compare: %w", view, err)
+	}
+	for i, r := range c.Rows {
+		switch {
+		case r.Label == "":
+			return fmt.Errorf("view %q compare row %d has no label", view, i+1)
+		case r.Portal == "" || r.Device == "":
+			return fmt.Errorf("view %q compare row %q needs both a portal and a device side", view, r.Label)
+		}
+	}
+	for name, p := range c.Fetch {
+		if err := checkPath(p); err != nil {
+			return fmt.Errorf("view %q compare fetch %q: %w", view, name, err)
+		}
 	}
 	return nil
 }

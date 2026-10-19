@@ -53,10 +53,7 @@ func Fetch(ctx context.Context, g Getter, v View, vars Vars) (*Data, error) {
 	d := newData()
 	d.Vars = vars
 
-	ctxMap := map[string]any{}
-	for k, val := range vars {
-		ctxMap[k] = val
-	}
+	ctxMap := varsCtx(vars)
 
 	for _, name := range sortedKeys(v.Fetch) {
 		path, err := expand(v.Fetch[name], ctxMap)
@@ -180,6 +177,16 @@ func itemsAt(ctx map[string]any, path string) ([]any, error) {
 	default:
 		return nil, fmt.Errorf("for_each %s is a %T, not a list", path, cur)
 	}
+}
+
+// varsCtx is the element's ids as a template context, which every template in
+// a view starts from.
+func varsCtx(vars Vars) map[string]any {
+	out := make(map[string]any, len(vars))
+	for k, val := range vars {
+		out[k] = val
+	}
+	return out
 }
 
 func sortedKeys(m map[string]string) []string {

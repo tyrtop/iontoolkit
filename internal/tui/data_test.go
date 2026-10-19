@@ -87,7 +87,9 @@ func TestRichDataModeLoadsEveryViewOntoOnePage(t *testing.T) {
 
 	// The pane shows the top of it, says which element and how much there is.
 	got := plain(m.viewData())
-	for _, want := range []string{"store-0003-rtr-01", "Store 0003", "4 views", "Overview", "of 5"} {
+	// The window onto the page, not its length: the page grows whenever a
+	// view does.
+	for _, want := range []string{"store-0003-rtr-01", "Store 0003", "4 views", "Overview", "1-24 of"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the pane is missing %q:\n%s", want, got)
 		}

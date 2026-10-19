@@ -50,6 +50,10 @@ type dataTab struct {
 	panes  []dataPane
 	at     time.Time
 	scroll int
+
+	// The GUI-vs-CLI comparison, which exists only once asked for: it is the
+	// one thing in this mode that dials the element.
+	cmp compareState
 }
 
 type dataPane struct {
@@ -298,6 +302,8 @@ func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "r":
 		return m.refreshData()
+	case "c":
+		return m.startCompare()
 	}
 
 	tab, ok := m.activeData()
@@ -416,6 +422,7 @@ func (m tuiModel) dataPage(tab dataTab) dataPage {
 		for _, e := range pane.rendered.Errs {
 			p.lines = append(p.lines, "  "+ui.StyleWarn.Render(ui.Truncate(e, width-2)))
 		}
+		m.comparePane(&p, tab, pane.view, width)
 	}
 	return p
 }
@@ -536,7 +543,7 @@ func (m tuiModel) viewData() string {
 		}
 		status = scrolled + status
 	}
-	hint := "alt+↑↓ next heading · ↑↓ scroll · r refresh · alt+←/→ tab · alt+k close · ctrl+] elements"
+	hint := "alt+↑↓ next heading · ↑↓ scroll · r refresh · c CLI check · alt+←/→ tab · alt+k close · ctrl+] elements"
 	width := max(10, m.width-1)
 	b.WriteString(ui.Footer(ui.Truncate(status, width), ui.Truncate(hint, width)))
 	return b.String()

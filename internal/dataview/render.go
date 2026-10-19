@@ -254,6 +254,60 @@ var funcs = template.FuncMap{
 		}
 		return list[0]
 	},
+
+	// The four below read CLI text rather than JSON, for the device side of a
+	// comparison. An appliance prints "Key<tab>: value" lines, so kv is the
+	// one most rows want.
+	"lines": func(v any) []any {
+		return textLines(v, "")
+	},
+	// grep is the lines holding pat, case-insensitively: count over it answers
+	// "how many tunnels are up".
+	"grep": func(v any, pat string) []any {
+		return textLines(v, pat)
+	},
+	// kv is the value of the first line that starts with key, with whatever
+	// separator the firmware used taken off. Anchored at the line start so a
+	// key cannot match inside another line's value.
+	"kv": func(v any, key string) string {
+		k := strings.ToLower(strings.TrimSpace(key))
+		for _, line := range strings.Split(fmt.Sprint(v), "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(strings.ToLower(line), k) {
+				continue
+			}
+			return strings.TrimSpace(strings.TrimLeft(line[len(k):], " \t:="))
+		}
+		return ""
+	},
+	// field is the nth whitespace-separated field, counting from 1, for output
+	// that is columns rather than keys.
+	"field": func(v any, n int) string {
+		f := strings.Fields(fmt.Sprint(v))
+		if n < 1 || n > len(f) {
+			return ""
+		}
+		return f[n-1]
+	},
+}
+
+// textLines splits CLI output into its non-blank lines, keeping only those
+// holding want. The elements are any so count and range treat them the way
+// they treat a fetched list.
+func textLines(v any, want string) []any {
+	want = strings.ToLower(want)
+	var out []any
+	for _, line := range strings.Split(fmt.Sprint(v), "\n") {
+		line = strings.TrimRight(line, " \t\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if want != "" && !strings.Contains(strings.ToLower(line), want) {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 // sameValue compares what came out of two JSON documents. Ids are strings in

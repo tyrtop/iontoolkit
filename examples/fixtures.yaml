@@ -33,11 +33,23 @@ tenants:
         # fixture with no site shows a raw identifier exactly like the real API.
         site: Store 0003
         connected: true
+        # Puts it in a spoke HA cluster with the site's other HA element, so
+        # the HA view and its comparison have something to answer.
+        ha: true
+        # What the CLI answers. "c" on a rich-data page runs the read-only
+        # commands the views ask for and marks each answer against the
+        # portal's: Model and Version agree here, and Serial does not, since
+        # the fixture derives the portal's serial from the element name.
         responses:
           "dump device status": |
             Serial     : FAKE0001
             Model      : ion 1200
+            Version    : 6.5.1
             Uptime     : 4 days
+          "dump spoke-ha status": |
+            State      : active
+            Priority   : 160
+            Peer       : not connected
           "dump interface status 1": |
             1: up, 1000Mb/s, full duplex
 
@@ -46,6 +58,7 @@ tenants:
         software: 6.3.4-b2
         site: Store 0003
         connected: true
+        ha: true
         # Makes long output stop on the pager prompt an ion 1200-s running
         # 6.3.4-b2 prints, and wait for a space. "set paging off" turns it off
         # for the rest of the session, which is what --pager-off sends.

@@ -856,6 +856,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dataLoadedMsg:
 		return m.onDataLoaded(msg)
 
+	case compareDoneMsg:
+		return m.onCompareDone(msg)
+
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
 
@@ -922,8 +925,10 @@ func (m tuiModel) wantsSpinner() bool {
 		return m.connectingAny()
 	case phaseData:
 		// Only while a pane is actually reading, or it repaints for nothing.
+		// A comparison counts: it is a dial and a login, and the slowest
+		// thing the mode does.
 		for _, t := range m.data {
-			if t.loading() {
+			if t.loading() || t.cmp.loading {
 				return true
 			}
 		}

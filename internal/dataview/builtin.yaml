@@ -11,10 +11,18 @@
 #           runs once per row with {{ .item }} in scope, so a table costs one
 #           request per row -- max_items bounds it.
 # when:     the section is dropped when this renders empty or false.
+# compare:  the GUI-vs-CLI check, which "c" runs on an open page. It is the
+#           only part of a view that logs in to the appliance, so nothing here
+#           happens until that keypress. Its own fetch: reads the portal again
+#           at the same moment, commands: are read-only CLI commands (checked
+#           at load), and each row renders both answers and is marked by
+#           whether they agree. One session serves the whole page.
 #
 # Values are Go templates. Helpers: utc and ago for the API's timestamp
 # integers (never divide those by hand -- the unit varies by field), unwrap to
 # take one record out of an items envelope, first, join, count, yesno, dash.
+# For CLI text: kv reads a "Key : value" line, grep keeps the lines holding a
+# string, lines splits them all, field takes the nth column.
 
 views:
   - name: Overview
@@ -66,6 +74,27 @@ views:
             value: "{{ .el.spoke_ha_config.priority }}{{ if not .el.spoke_ha_config.enable }} (disabled){{ end }}"
           - label: Tracking
             value: "{{ count .el.spoke_ha_config.track.interfaces }} interface(s)"
+
+    # What the portal holds about this appliance against what the appliance
+    # says about itself. The portal side is confirmed; the CLI key names are
+    # not -- `dump device status` has not been captured, and a key that is
+    # spelled differently reads as "·", nothing to compare, rather than a
+    # disagreement. Open a shell tab, run the command, and fix the names here.
+    compare:
+      fetch:
+        el: /sdwan/v3.2/api/elements/{{ .element_id }}
+      commands:
+        dev: dump device status
+      rows:
+        - label: Serial
+          portal: "{{ .el.serial_number }}"
+          device: "{{ kv .cli.dev \"Serial\" }}"
+        - label: Model
+          portal: "{{ .el.model_name }}"
+          device: "{{ kv .cli.dev \"Model\" }}"
+        - label: Software
+          portal: "{{ .el.software_version }}"
+          device: "{{ kv .cli.dev \"Version\" }}"
 
   - name: Interfaces
     fetch:
@@ -199,3 +228,22 @@ views:
             width: 14
           - header: WHY
             value: "{{ range .item.adjustments }}-{{ .adjustment }} {{ .kind }} {{ .name }} {{ end }}"
+
+    # HA is the comparison worth having: the controller's view of which member
+    # is active is the thing most likely to be out of date, and the appliance
+    # is the authority on its own state. Gated on the element being clustered,
+    # so an ordinary spoke is never dialled for this. Unverified like the one
+    # above: `dump spoke-ha status` has not been captured either.
+    compare:
+      when: "{{ .cluster_id }}"
+      fetch:
+        cl: /sdwan/v2.0/api/sites/{{ .site_id }}/spokeclusters/{{ .cluster_id }}/status
+      commands:
+        ha: dump spoke-ha status
+      rows:
+        - label: Active
+          portal: "{{ with lookup .cl.cluster_members \"element_id\" .element_id }}{{ .status }}{{ end }}"
+          device: "{{ kv .cli.ha \"State\" }}"
+        - label: Priority
+          portal: "{{ with lookup .cl.switch_over_events \"element_id\" .element_id }}{{ .effective_priority }}{{ end }}"
+          device: "{{ kv .cli.ha \"Priority\" }}"
