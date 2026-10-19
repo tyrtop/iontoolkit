@@ -118,6 +118,13 @@ func (f Flags) Validate() error {
 	if err := f.ValidateCreds(); err != nil {
 		return err
 	}
+	return f.ValidateRun()
+}
+
+// ValidateRun checks everything but the credentials, for a run whose targets
+// carry their own: a --search can span tenants, and each one signs in for
+// itself.
+func (f Flags) ValidateRun() error {
 	if f.RefreshMargin <= 0 {
 		return fmt.Errorf("refresh margin must be greater than 0")
 	}

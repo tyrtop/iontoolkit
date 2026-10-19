@@ -11,25 +11,50 @@ import (
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/sase"
+	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/ioncli"
 	"tyrtop.com/iontk/internal/tui"
 )
 
-func runBatch(ctx context.Context) error {
+// selection is what a batch run acts on. A --search resolves its own targets,
+// each carrying the client and device login of the tenant it came from,
+// because one search spans the whole working set; everything else hands over
+// element IDs and lets one client serve them all.
+type selection struct {
+	elements []string
+	targets  []sase.Target
+	clients  []*api.Client
+	// stdin says the IDs arrived down a pipe, which changes what the progress
+	// display may do with the terminal.
+	stdin bool
+}
+
+func (s selection) crossTenant() bool { return len(s.targets) > 0 }
+
+// flagSelection is the ordinary --element / -f target list.
+func flagSelection() (selection, error) {
+	els, err := gatherElements(flagElement, flagElementsPath)
+	if err != nil {
+		return selection{}, err
+	}
+	return selection{elements: els, stdin: flagElementsPath == "-"}, nil
+}
+
+func runBatch(ctx context.Context, sel selection) error {
 	if len(flagCommands) == 0 {
 		return fmt.Errorf("--cmd is required for batch mode")
 	}
 
-	elements, err := gatherElements(flagElement, flagElementsPath)
-	if err != nil {
+	var f app.Flags
+	var err error
+	if sel.crossTenant() {
+		// Nothing left to resolve: every target already holds the credential
+		// it will sign in with.
+		f = app.BaseFlags()
+	} else if f, err = resolveFlags(os.Stderr); err != nil {
 		return err
 	}
-
-	f, err := resolveFlags(os.Stderr)
-	if err != nil {
-		return err
-	}
-	f.Elements = elements
+	f.Elements = sel.elements
 	f.Commands = app.SplitCommands(flagCommands)
 
 	if !app.Defaults.AllowWrites {
@@ -38,21 +63,31 @@ func runBatch(ctx context.Context) error {
 		}
 	}
 
-	if err := f.Validate(); err != nil {
+	if sel.crossTenant() {
+		err = f.ValidateRun()
+	} else {
+		err = f.Validate()
+	}
+	if err != nil {
 		return err
 	}
 	opts := f.Options()
-	if err := opts.Validate(); err != nil {
-		return err
-	}
 
 	format, orient, dest, err := batchOutput()
 	if err != nil {
 		return err
 	}
 
-	client, err := app.NewClient(ctx, f, os.Stderr)
-	if err != nil {
+	targets, clients := sel.targets, sel.clients
+	if !sel.crossTenant() {
+		client, cerr := app.NewClient(ctx, app.OpenStore(), f, os.Stderr)
+		if cerr != nil {
+			return cerr
+		}
+		targets = sase.Targets(client, f.Elements)
+		clients = []*api.Client{client}
+	}
+	if err := opts.ValidateFor(targets); err != nil {
 		return err
 	}
 
@@ -64,7 +99,9 @@ func runBatch(ctx context.Context) error {
 	// The api package no longer prints refresh failures itself, so a batch run
 	// has to say them out loud or a token dying mid-run looks like the devices
 	// going quiet.
-	go watchCredential(client.TokenErrors(), client.RefreshStopped, stopRun, os.Stderr)
+	for _, c := range clients {
+		go watchCredential(c.TokenErrors(), c.RefreshStopped, stopRun, os.Stderr)
+	}
 
 	// The file is only created once the run is ready to produce something, so a
 	// failure before this point leaves no empty report behind.
@@ -89,18 +126,20 @@ func runBatch(ctx context.Context) error {
 	// Fixture mode swaps the client only here: the lookup and the session come
 	// from the playback device, and everything either side of them is the real
 	// run, including ioncli's autologin and pager handling.
-	var runClient sase.Client = client
 	if app.Fixture != nil {
-		runClient = app.Fixture.SessionClient(f.PagerOff, f.PagerPrompts)
+		playback := app.Fixture.SessionClient(f.PagerOff, f.PagerPrompts)
+		for i := range targets {
+			targets[i].Client = playback
+		}
 	}
 
-	events := sase.RunStream(ctx, opts, sase.Targets(runClient, f.Elements))
+	events := sase.RunStream(ctx, opts, targets)
 
 	var total int
 	var failed int
 
 	if !flagNoProgress && term.IsTerminal(int(os.Stderr.Fd())) {
-		total, failed, err = tui.DrainLive(ctx, events, f.Commands, len(f.Elements), sink, flagElementsPath == "-")
+		total, failed, err = tui.DrainLive(ctx, events, f.Commands, len(f.Elements), sink, sel.stdin)
 	} else {
 		total, failed, err = drainPlain(events, len(f.Elements), sink)
 	}

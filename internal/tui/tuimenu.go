@@ -187,7 +187,7 @@ func (m tuiModel) startContinue() (tea.Model, tea.Cmd) {
 		m.ionUser = f.IONUsername
 	}
 
-	return m, tea.Batch(m.spinner.Tick, connect(m.ctx, f))
+	return m, tea.Batch(m.spinner.Tick, connect(m.ctx, m.store, f))
 }
 
 func (m tuiModel) onSwitchKey(key string) (tea.Model, tea.Cmd) {

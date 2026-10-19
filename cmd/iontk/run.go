@@ -20,6 +20,13 @@ however many dials it took to get there.`,
   cat ids.txt | iontk run -f - -c uptime`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBatch(cmd.Context())
+		if flagSearch != "" {
+			return runSearch(cmd.Context())
+		}
+		sel, err := flagSelection()
+		if err != nil {
+			return err
+		}
+		return runBatch(cmd.Context(), sel)
 	},
 }

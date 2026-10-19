@@ -21,6 +21,9 @@ var shellCmd = &cobra.Command{
 }
 
 func runShell(ctx context.Context, eid string) error {
+	if flagSearch != "" {
+		return fmt.Errorf("a shell takes one element; run `iontk --search %q` to find its ID", flagSearch)
+	}
 	if eid == "" {
 		return fmt.Errorf("--element is required")
 	}
@@ -36,7 +39,7 @@ func runShell(ctx context.Context, eid string) error {
 		return err
 	}
 
-	client, err := app.NewClient(ctx, f, os.Stderr)
+	client, err := app.NewClient(ctx, app.OpenStore(), f, os.Stderr)
 	if err != nil {
 		return err
 	}

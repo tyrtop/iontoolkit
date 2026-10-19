@@ -5,22 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
 )
-
-const scmBase = "https://api.sase.paloaltonetworks.com/sdwan/v3.2/api"
-
-// Sites are on their own version. The portal's own traffic asks v4.13 for them
-// while using v3.2 for elements, and v3.2/sites does not answer, which left
-// every site name unresolved and showing a raw id instead.
-const sitesBase = "https://api.sase.paloaltonetworks.com/sdwan/v4.13/api"
 
 // strata expects a browser UA in the header.
 const browserUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
@@ -95,55 +85,23 @@ func NewClient(client, wsClient *http.Client, token string, verbose bool, rps fl
 	}
 }
 
-func (s *Client) LookupElement(ctx context.Context, eid string) (Element, error) {
-	if err := s.limiter.Wait(ctx); err != nil {
-		return Element{}, fmt.Errorf("element %s: rate limit wait: %w", eid, err)
-	}
-
-	url := scmBase + "/elements/" + eid
-
-	if s.verbose {
-		fmt.Fprintln(os.Stderr, "GET", url)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// ElementRecord is LookupElement keeping the body, for callers that want to
+// show what the server actually sent.
+func (s *Client) ElementRecord(ctx context.Context, eid string) ([]byte, Element, error) {
+	body, err := s.get(ctx, "element "+eid, ElementURL(eid))
 	if err != nil {
-		return Element{}, fmt.Errorf("element %s: build request: %w", eid, err)
+		return nil, Element{}, err
 	}
-
-	req.Header.Set("Authorization", "Bearer "+s.getToken())
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", browserUA)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return Element{}, fmt.Errorf("element %s: response: %w", eid, err)
-	}
-
-	if s.verbose {
-		for k, v := range resp.Header {
-			if strings.HasPrefix(strings.ToLower(k), "x-ratelimit") || strings.EqualFold(k, "retry-after") {
-				fmt.Fprintln(os.Stderr, k+":", v)
-			}
-		}
-	}
-
-	defer func() {
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return Element{}, fmt.Errorf("element %s: status %s: %s", eid, resp.Status, body)
-	}
-
 	var el Element
-	if err := json.NewDecoder(resp.Body).Decode(&el); err != nil {
-		return Element{}, fmt.Errorf("element %s: json decode: %w", eid, err)
+	if err := json.Unmarshal(body, &el); err != nil {
+		return body, Element{}, fmt.Errorf("element %s: json decode: %w", eid, err)
 	}
+	return body, el, nil
+}
 
-	return el, nil
+func (s *Client) LookupElement(ctx context.Context, eid string) (Element, error) {
+	_, el, err := s.ElementRecord(ctx, eid)
+	return el, err
 }
 
 func (s *Client) getToken() string {

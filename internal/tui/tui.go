@@ -20,11 +20,13 @@ import (
 	"golang.org/x/term"
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/dataview"
 	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/ioncli"
 	"tyrtop.com/iontk/internal/saseauth"
+	"tyrtop.com/iontk/internal/search"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -48,6 +50,7 @@ const (
 	phaseSignedIn
 	phaseDiscover
 	phaseTenantPick
+	phaseData
 )
 
 type pickMode int
@@ -55,14 +58,18 @@ type pickMode int
 const (
 	modeShell pickMode = iota
 	modeBatch
+	modeData
 )
 
 // pickModes is the cycle alt+m walks. Adding a mode means adding it here.
-var pickModes = []pickMode{modeShell, modeBatch}
+var pickModes = []pickMode{modeShell, modeBatch, modeData}
 
 func (p pickMode) String() string {
-	if p == modeBatch {
+	switch p {
+	case modeBatch:
 		return "batch"
+	case modeData:
+		return "rich data"
 	}
 	return "shell"
 }
@@ -111,10 +118,6 @@ const (
 
 const cacheTTL = time.Hour
 
-type elementsLoadedMsg struct {
-	elements []api.Element
-	sites    map[string]string
-}
 type elementsErrMsg string
 type clientReadyMsg struct{ client *api.Client }
 type clientErrMsg string
@@ -277,7 +280,17 @@ type tuiModel struct {
 	stats        bool
 	statsTicking bool
 
-	mode        pickMode
+	mode pickMode
+	// The rich-data views and the panes open on them. viewsErr is a broken
+	// views.yaml, reported where the mode is used rather than at startup.
+	views      *dataview.Set
+	viewsErr   string
+	data       []dataTab
+	dataActive int
+	// What to reopen once a tenant connection or sign-in finishes, the way
+	// resumeSessions does for shells.
+	resumeData []sessionTarget
+
 	userCursor  int
 	slash       slashMode
 	slashInput  textinput.Model
@@ -371,6 +384,16 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 	if mode, ok := parseMode(cfg.DefaultMode); ok {
 		m.mode = mode
 	}
+
+	// The views load here rather than when the mode is first used: a broken
+	// views.yaml should be reported once, at the start, and never leave the
+	// mode with nothing to show. Load returns the built-ins even when the
+	// user's file is the thing that failed.
+	views, err := dataview.Load(ViewsPath(store))
+	if err != nil {
+		m.viewsErr = err.Error()
+	}
+	m.views = views
 	if am, ok := parseAuthMode(cfg.AuthMode); ok {
 		m.authMode = am
 	} else if t, ok := app.ResolveTenant(cfg, Tenant); ok && !t.UsesBrowser() {
@@ -410,15 +433,17 @@ func newElementTable() table.Model {
 	)
 }
 
-// cacheFresh is how long cached elements are treated as current.
-const cacheFresh = 15 * time.Minute
+// cacheFresh is how long cached elements are treated as current. The CLI's
+// --search reads the same window, so the two cannot disagree about what is
+// current enough to skip a round trip.
+const cacheFresh = config.CacheFresh
 
 func (m tuiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.spinner.Tick}
 	if m.cacheState == cacheUpdating && m.hasTenant {
 		f := app.TenantFlags(m.store, m.tenant, m.ionUser)
 		if f.ValidateCreds() == nil {
-			cmds = append(cmds, connect(m.ctx, f))
+			cmds = append(cmds, connect(m.ctx, m.store, f))
 		} else {
 			cmds = cmds[:1]
 		}
@@ -444,9 +469,9 @@ func (m tuiModel) refreshNow() (tea.Model, tea.Cmd) {
 	return m.refreshActive()
 }
 
-func connect(ctx context.Context, f app.Flags) tea.Cmd {
+func connect(ctx context.Context, st *config.Store, f app.Flags) tea.Cmd {
 	return func() tea.Msg {
-		c, err := app.NewClient(ctx, f, io.Discard)
+		c, err := app.NewClient(ctx, st, f, io.Discard)
 		if err != nil {
 			if errors.Is(err, saseauth.ErrInteractiveRequired) {
 				return needsSignInMsg{}
@@ -477,7 +502,7 @@ func signIn(ctx context.Context, f app.Flags, st *config.Store) tea.Cmd {
 			return signedInMsg{err: fmt.Errorf("signed in, but the token is scoped to %q rather than tenant %s", ident.Scope, f.TSGID)}
 		}
 
-		c, err := app.NewClient(ctx, f, io.Discard)
+		c, err := app.NewClient(ctx, st, f, io.Discard)
 		if err != nil {
 			return signedInMsg{err: fmt.Errorf("signed in, but the saved credential did not work: %w", err)}
 		}
@@ -504,25 +529,6 @@ func watchToken(ch <-chan error) tea.Cmd {
 			return tokenErrMsg{stopped: true}
 		}
 		return tokenErrMsg{err: err}
-	}
-}
-
-func refreshElements(ctx context.Context, c *api.Client, st *config.Store, tsg string) tea.Cmd {
-	return func() tea.Msg {
-		els, err := c.ListElements(ctx)
-		if err != nil {
-			return elementsErrMsg(err.Error())
-		}
-		sites := map[string]string{}
-		if ss, err := c.ListSites(ctx); err == nil {
-			for _, site := range ss {
-				sites[site.ID] = site.Name
-			}
-		}
-		_ = st.SaveCache(&config.ElementCache{
-			TSGID: tsg, FetchedAt: time.Now(), Elements: els, Sites: sites,
-		})
-		return elementsLoadedMsg{elements: els, sites: sites}
 	}
 }
 
@@ -648,6 +654,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			next, cmd := m.openSessions(targets)
 			return next, tea.Batch(watch, cmd)
 		}
+		if targets := m.resumeData; len(targets) > 0 {
+			m.resumeData = nil
+			next, cmd := m.openDataTabs(targets)
+			return next, tea.Batch(watch, cmd)
+		}
 		if m.signInResume {
 			m.signInResume = false
 			next, cmd := m.startContinue()
@@ -716,6 +727,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if targets := m.resumeSessions; len(targets) > 0 {
 			m.resumeSessions = nil
 			next, cmd := m.openSessions(targets)
+			return next, tea.Batch(watch, cmd)
+		}
+		if targets := m.resumeData; len(targets) > 0 {
+			m.resumeData = nil
+			next, cmd := m.openDataTabs(targets)
 			return next, tea.Batch(watch, cmd)
 		}
 		return m, watch
@@ -837,6 +853,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// nothing, and must not reach the focused input.
 		return m, nil
 
+	case dataLoadedMsg:
+		return m.onDataLoaded(msg)
+
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
 
@@ -901,6 +920,13 @@ func (m tuiModel) wantsSpinner() bool {
 		return m.cacheState == cacheUpdating
 	case phaseSession:
 		return m.connectingAny()
+	case phaseData:
+		// Only while a pane is actually reading, or it repaints for nothing.
+		for _, t := range m.data {
+			if t.loading() {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -928,13 +954,13 @@ func (m *tuiModel) setElements(els []elementRow) {
 // siteName looks up a site within its own tenant, since two tenants can use the
 // same site identifier for different places.
 func (m tuiModel) siteName(el elementRow) string {
-	if n, ok := m.sites[el.TSG+"/"+el.SiteID]; ok && n != "" {
-		return n
-	}
-	if el.SiteID != "" {
-		return el.SiteID
-	}
-	return "-"
+	return m.record(el).SiteLabel()
+}
+
+// record flattens a row into the values --search matches against, so the
+// filter here and the one on the command line cannot disagree.
+func (m tuiModel) record(el elementRow) search.Record {
+	return search.Of(el.Element, el.TSG, el.Tenant, search.SiteMap(m.sites))
 }
 
 // showTenantColumn is true once more than one tenant is loaded; with a single
@@ -1061,6 +1087,8 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch m.phase {
 	case phaseSession:
 		return m.onSessionKey(msg, key)
+	case phaseData:
+		return m.onDataKey(key)
 	case phaseMenu:
 		return m.onMenuKey(key)
 	case phaseSwitch:
@@ -1145,6 +1173,16 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
 		return m, cmd
+
+	// A jump through a long list, between one row and a whole page. The step
+	// is a setting because the right size depends on the list: ten is a lot
+	// in a lab and nothing in a fleet of thousands.
+	case "alt+up":
+		m.table.MoveUp(m.pageStep())
+		return m, nil
+	case "alt+down":
+		m.table.MoveDown(m.pageStep())
+		return m, nil
 
 	case "k", "j", "home", "end":
 		// These move the cursor only when the query is not being typed. A
@@ -1232,11 +1270,7 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		return m, nil
 
 	case "alt+m":
-		if m.mode == modeShell {
-			m.mode = modeBatch
-		} else {
-			m.mode = modeShell
-		}
+		m.mode = m.mode.next()
 		m.status = ""
 		return m, nil
 
@@ -1360,6 +1394,13 @@ func (m tuiModel) onPickTargets(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	// stops blocking the tenants it affected.
 	for _, want := range targets {
 		delete(m.tenantIssues, want.tsg)
+	}
+
+	// Rich-data mode reads the portal and never opens a session, so it comes
+	// before the device-login gate: asking for an ION password to look at
+	// portal data would be asking for a credential the answer does not need.
+	if m.mode == modeData {
+		return m.openDataTabs(targets)
 	}
 
 	// A selection can span tenants, and each keeps its own device login, so
@@ -1490,13 +1531,13 @@ func (m tuiModel) startRun(cmds []string) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) applyFilter() {
-	terms := strings.Fields(strings.ToLower(m.filter.Value()))
+	q := search.Parse(m.filter.Value())
 	m.matches = m.matches[:0]
 	for i, el := range m.all {
 		if m.showSelected && !m.selected[el.key()] {
 			continue
 		}
-		if m.matchesTerms(el, terms) {
+		if q.Match(m.record(el)) {
 			m.matches = append(m.matches, i)
 		}
 	}
@@ -1504,90 +1545,6 @@ func (m *tuiModel) applyFilter() {
 	if c := m.table.Cursor(); c >= len(m.matches) {
 		m.table.SetCursor(max(0, len(m.matches)-1))
 	}
-}
-
-// matchesTerms requires every term to match the element somewhere. Splitting on
-// whitespace is what makes a query like "s50 ion 1200" work: each word can land
-// in a different field, so the store number and the model are found together
-// without having to know which field holds what.
-func (m tuiModel) matchesTerms(el elementRow, terms []string) bool {
-	if len(terms) == 0 {
-		return true
-	}
-	fields := m.searchFields(el)
-	for _, term := range terms {
-		if !matchesAnyField(term, fields) {
-			return false
-		}
-	}
-	return true
-}
-
-// searchField is one value a term can match.
-type searchField struct {
-	value string
-	// exact restricts this field to whole-value matches. Opaque identifiers are
-	// long digit strings, so a partial match in one is almost always
-	// coincidence: searching "1200" for a model found an ion 2000 whose site id
-	// happened to contain those digits.
-	exact bool
-}
-
-// searchFields is everything a term may match against.
-func (m tuiModel) searchFields(el elementRow) []searchField {
-	state := "offline"
-	if el.Connected {
-		state = "connected"
-	}
-
-	// A site that did not resolve shows its raw id, which is as opaque as any
-	// other identifier and must not be matched piecemeal.
-	site := searchField{value: strings.ToLower(m.siteName(el))}
-	if _, resolved := m.sites[el.TSG+"/"+el.SiteID]; !resolved {
-		site.exact = true
-	}
-
-	return []searchField{
-		{value: strings.ToLower(el.Name)},
-		{value: strings.ToLower(el.ID), exact: true},
-		site,
-		{value: strings.ToLower(el.Tenant)},
-		{value: strings.ToLower(el.Model)},
-		{value: strings.ToLower(el.HWID), exact: true},
-		{value: strings.ToLower(el.Software)},
-		{value: strings.ToLower(el.TSG), exact: true},
-		{value: state},
-	}
-}
-
-func matchesAnyField(term string, fields []searchField) bool {
-	for _, f := range fields {
-		if f.exact {
-			if f.value == term {
-				return true
-			}
-			continue
-		}
-		if strings.Contains(f.value, term) {
-			return true
-		}
-	}
-	return false
-}
-func looseMatch(term, s string) bool {
-	if term == "" {
-		return true
-	}
-	at := 0
-	for _, r := range s {
-		if rune(term[at]) == r {
-			at++
-			if at == len(term) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (m tuiModel) current() (elementRow, bool) {
@@ -1645,6 +1602,8 @@ func (m tuiModel) View() tea.View {
 		content, cur := m.renderSession()
 		v = tea.NewView(content)
 		v.Cursor = cur
+	case phaseData:
+		v = tea.NewView(m.viewData())
 	}
 	if m.askRetry.eid != "" {
 		v = tea.NewView(m.overlayRetry(v.Content))
@@ -1692,8 +1651,11 @@ func (m tuiModel) viewPicking() string {
 		if n != 1 {
 			act += "s"
 		}
-		if m.mode == modeBatch {
+		switch m.mode {
+		case modeBatch:
 			act = fmt.Sprintf("enter command on %d", n)
+		case modeData:
+			act = fmt.Sprintf("enter data on %d", n)
 		}
 		// While typing a query the only keys that matter are the ones that end
 		// it, so the hint says just those.

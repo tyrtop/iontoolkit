@@ -147,14 +147,15 @@ func TestGeneralSectionHasARefreshRow(t *testing.T) {
 	}
 	m.spinner = ui.NewSpinner("")
 
-	if got := m.sectionRows(); got != 4 {
-		t.Fatalf("sectionRows() = %d, want 4 so the refresh row is reachable", got)
+	if got := m.sectionRows(); got != 5 {
+		t.Fatalf("sectionRows() = %d, want 5 so the refresh row is reachable", got)
 	}
 	if out := m.viewSettings(); !strings.Contains(out, "elements") {
 		t.Errorf("the General section has no elements row:\n%s", out)
 	}
 
-	m.setCursor = 3
+	// The last row is the refresh; it moved when the jump setting was added.
+	m.setCursor = m.sectionRows() - 1
 	mm, cmd := m.onGeneralKey("enter")
 	got := mm.(tuiModel)
 	if got.cacheState != cacheUpdating {

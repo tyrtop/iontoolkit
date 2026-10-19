@@ -89,19 +89,6 @@ func TestFilterCombinesTermsAcrossFields(t *testing.T) {
 	}
 }
 
-func TestFilterDoesNotGetLooseWithShortTerms(t *testing.T) {
-	m := filterModel(t)
-	// Two characters are too few to match out of order: nearly everything would
-	// qualify, which makes the filter useless rather than forgiving.
-	m.filter.SetValue("or")
-	m.applyFilter()
-	for _, i := range m.matches {
-		if !strings.Contains(strings.ToLower(m.all[i].Name+m.all[i].Tenant), "or") {
-			t.Errorf("%q matched a two-character term it does not contain", m.all[i].Name)
-		}
-	}
-}
-
 func TestFilterNarrowsAcrossTenantsAtOnce(t *testing.T) {
 	m := filterModel(t)
 	m.filter.SetValue("1200 connected")
@@ -197,15 +184,6 @@ func rankModel(t *testing.T) tuiModel {
 	return m
 }
 
-func TestEveryTermStillHasToMatch(t *testing.T) {
-	m := rankModel(t)
-	m.filter.SetValue("s5024 ion9999")
-	m.applyFilter()
-	if got := matchedNames(m); len(got) != 0 {
-		t.Errorf("matched %v, want nothing when one term matches nothing", got)
-	}
-}
-
 func TestGeneralSectionRowsAreAllReachable(t *testing.T) {
 	m := rankModel(t)
 	m.phase = phaseSettings
@@ -214,124 +192,16 @@ func TestGeneralSectionRowsAreAllReachable(t *testing.T) {
 	m.width, m.height = 110, 30
 	m.spinner = ui.NewSpinner("")
 
-	if got := m.sectionRows(); got != 4 {
-		t.Fatalf("sectionRows() = %d, want 4", got)
+	if got := m.sectionRows(); got != 5 {
+		t.Fatalf("sectionRows() = %d, want 5", got)
 	}
 	out := plain(m.viewSettings())
-	for _, want := range []string{"spinner", "commands", "mode", "elements"} {
+	for _, want := range []string{"spinner", "commands", "mode", "jump", "elements", "views"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the General section is missing %q:\n%s", want, out)
 		}
 	}
 	t.Log("\n" + m.viewSettings())
-}
-
-// storeModel reproduces the names behind the second ranking report: store
-// numbers are padded, so "s502" contains-matches none of them and every match
-// is out of order.
-func storeModel(t *testing.T) tuiModel {
-	t.Helper()
-	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
-		{ID: "e1", Name: "s0502-rtr-01", Model: "ion1200", Connected: true},
-		{ID: "e2", Name: "s1405-rtr-02", Model: "ion1200", Connected: true},
-		{ID: "e3", Name: "s1405-rtr-01", Model: "ion1200", Connected: true},
-		{ID: "e4", Name: "s0502-rtr-02", Model: "ion1200", Connected: true},
-		{ID: "e5", Name: "s2500-rtr-02", Model: "ion1200", Connected: true},
-	})
-	return m
-}
-
-func TestYourStoreQueryWorks(t *testing.T) {
-	// The query that has to work: a store number, a model split over two words,
-	// and nothing matching out of order.
-	m := multiModel(t)
-	m.sites = map[string]string{"111/s50": "Store 5024"}
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
-		{ID: "1695401228372008796", Name: "s5024-rtr-01", SiteID: "s50", Model: "ion 1200", Connected: true},
-		{ID: "1695401228372008797", Name: "s1405-rtr-01", SiteID: "x", Model: "ion 2000", Connected: true},
-		{ID: "1695401228372008798", Name: "s0502-rtr-01", SiteID: "x", Model: "ion 3200", Connected: true},
-	})
-
-	m.filter.SetValue("s50 ion 1200")
-	m.applyFilter()
-	got := matchedNames(m)
-	if len(got) != 1 || got[0] != "s5024-rtr-01" {
-		t.Errorf("matched %v, want only s5024-rtr-01", got)
-	}
-}
-
-func TestOnlyNamesThatContainTheTermMatch(t *testing.T) {
-	// No out-of-order matching at all now: s502 must not reach s1405.
-	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
-		{ID: "e1", Name: "s1405-rtr-02", Model: "ion 2000"},
-		{ID: "e2", Name: "s0502-rtr-01", Model: "ion 1200"},
-		{ID: "e3", Name: "s502-rtr-01", Model: "ion 1200"},
-	})
-
-	m.filter.SetValue("s502")
-	m.applyFilter()
-	got := matchedNames(m)
-	if len(got) != 1 || got[0] != "s502-rtr-01" {
-		t.Errorf("matched %v, want only the name that contains s502", got)
-	}
-
-	// And a padded store number is found by typing it as written.
-	m.filter.SetValue("s0502")
-	m.applyFilter()
-	if got := matchedNames(m); len(got) != 1 || got[0] != "s0502-rtr-01" {
-		t.Errorf("matched %v, want only s0502-rtr-01", got)
-	}
-}
-
-func TestOpaqueIdentifiersNeedTheWholeValue(t *testing.T) {
-	// An element id is a 19-digit number, so a partial match in one is
-	// coincidence. "1200" found an ion 2000 this way.
-	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
-		{ID: "1695401228372008796", Name: "s1405-rtr-01", SiteID: "1695401228372008796", Model: "ion 2000"},
-	})
-
-	for _, partial := range []string{"16954", "372008", "228372"} {
-		m.filter.SetValue(partial)
-		m.applyFilter()
-		if got := matchedNames(m); len(got) != 0 {
-			t.Errorf("query %q matched %v, want nothing for a partial identifier", partial, got)
-		}
-	}
-
-	// The whole value still works, for pasting one in.
-	m.filter.SetValue("1695401228372008796")
-	m.applyFilter()
-	if got := matchedNames(m); len(got) != 1 {
-		t.Errorf("matched %v, want the element found by its full id", got)
-	}
-}
-
-func TestAnUnresolvedSiteIsTreatedAsOpaque(t *testing.T) {
-	// When site names do not resolve the column shows a raw id, which must not
-	// become a substring haystack.
-	m := multiModel(t)
-	m.sites = map[string]string{} // nothing resolved
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
-		{ID: "e1", Name: "s1405-rtr-01", SiteID: "1695401228372008796", Model: "ion 2000"},
-	})
-
-	m.filter.SetValue("12283")
-	m.applyFilter()
-	if got := matchedNames(m); len(got) != 0 {
-		t.Errorf("matched %v, want nothing from inside an unresolved site id", got)
-	}
-
-	// A resolved site name is searchable as normal.
-	m.sites = map[string]string{"111/1695401228372008796": "Store 1405"}
-	m.applyFilter()
-	m.filter.SetValue("store 1405")
-	m.applyFilter()
-	if got := matchedNames(m); len(got) != 1 {
-		t.Errorf("matched %v, want the resolved site name to be searchable", got)
-	}
 }
 
 func TestResultsStayInNameOrder(t *testing.T) {

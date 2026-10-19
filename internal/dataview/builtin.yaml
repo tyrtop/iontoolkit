@@ -1,0 +1,201 @@
+# The views rich-data mode offers out of the box, and the worked example of
+# the format. Copy this to views.yaml in the config directory (iontk reports
+# the path on the settings page) and edit; a view whose name matches one here
+# replaces it.
+#
+# fetch:    name -> GET path. Templated, and only /sdwan paths are allowed.
+#           {{ .element_id }}, {{ .site_id }}, {{ .cluster_id }} and
+#           {{ .tenant_id }} come from the element the tab was opened on.
+# sections: rows of label/value, or a table over for_each.
+# for_each: a dotted path into what a fetch returned. A section's own fetch
+#           runs once per row with {{ .item }} in scope, so a table costs one
+#           request per row -- max_items bounds it.
+# when:     the section is dropped when this renders empty or false.
+#
+# Values are Go templates. Helpers: utc and ago for the API's timestamp
+# integers (never divide those by hand -- the unit varies by field), unwrap to
+# take one record out of an items envelope, first, join, count, yesno, dash.
+
+views:
+  - name: Overview
+    fetch:
+      el: /sdwan/v3.2/api/elements/{{ .element_id }}
+      st: /sdwan/v2.6/api/elements/{{ .element_id }}/status
+    sections:
+      - title: Device
+        rows:
+          - label: Name
+            value: "{{ .el.name }}{{ with .el.description }} — {{ . }}{{ end }}"
+          - label: Model
+            value: "{{ .el.model_name }} · {{ .el.software_version }}"
+          - label: Serial
+            value: "{{ dash .el.serial_number }}"
+          - label: Role
+            value: "{{ .el.role }}{{ with .el.allowed_roles }} (allowed: {{ join . \", \" }}){{ end }}"
+          - label: State
+            value: "{{ .el.state }}{{ if .el.connected }} · connected{{ else }} · not connected{{ end }}"
+          - label: Mode
+            value: "{{ dash .st.device_mode }}"
+          - label: FIPS
+            value: "{{ dash .el.fips_mode }}"
+          - label: Tags
+            value: "{{ with .el.tags }}{{ join . \", \" }}{{ end }}"
+
+      - title: Controller
+        rows:
+          - label: Rebooted
+            value: "{{ utc .st.last_rebooted_time }} ({{ ago .st.last_rebooted_time }}){{ with .st.last_rebooted_info }} — {{ . }}{{ end }}"
+          - label: Config
+            value: "{{ if .st.config_and_events_connected }}up since {{ utc .st.config_and_events_connected_on_utc }} ({{ ago .st.config_and_events_connected_on_utc }}){{ else }}down since {{ utc .st.config_and_events_disconnected_on_utc }}{{ end }} · {{ dash .st.config_and_events_from }}"
+          - label: Analytics
+            value: "{{ if .st.analytics_live_connected }}up{{ else }}down{{ end }} · {{ dash .st.analytics_live_from }}"
+          - label: Flows
+            value: "{{ if .st.flows_live_connected }}up{{ else }}down{{ end }} · {{ dash .st.flows_live_from }}"
+          - label: Logs
+            value: "{{ if .st.logs_live_connected }}up{{ else }}down{{ end }} · {{ dash .st.logs_live_from }}"
+
+      # Only on an element that has one, which is what the element's own record
+      # says. The backlog channels are left out on purpose: they connect,
+      # drain and drop, so "disconnected" is their normal state.
+      - title: HA
+        when: "{{ .el.spoke_ha_config.cluster_id }}"
+        rows:
+          - label: Cluster
+            value: "{{ .el.spoke_ha_config.cluster_id }}"
+          - label: Priority
+            value: "{{ .el.spoke_ha_config.priority }}{{ if not .el.spoke_ha_config.enable }} (disabled){{ end }}"
+          - label: Tracking
+            value: "{{ count .el.spoke_ha_config.track.interfaces }} interface(s)"
+
+  - name: Interfaces
+    fetch:
+      ifs: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces
+      # The site's circuits, so a port can name the one it carries rather
+      # than printing the id out of site_wan_interface_ids.
+      wans: /sdwan/v2.10/api/sites/{{ .site_id }}/waninterfaces
+    sections:
+      - title: Interfaces
+        for_each: ifs.items
+        empty: this element has no interfaces
+        fetch:
+          st: /sdwan/v3.9/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces/{{ .item.id }}/status
+        columns:
+          - header: PORT
+            value: "{{ .item.name }}"
+            width: 24
+          - header: TYPE
+            value: "{{ .item.type }}"
+            width: 13
+          - header: USED FOR
+            value: "{{ .item.used_for }}"
+            width: 8
+          - header: STATE
+            value: "{{ (unwrap .st).operational_state }}{{ with (unwrap .st).extended_state }} ({{ . }}){{ end }}"
+            width: 22
+          - header: ADDRESS
+            value: "{{ dash (first (unwrap .st).ipv4_addresses) }}"
+            width: 18
+          - header: LINK
+            value: "{{ with (unwrap .st).port }}{{ if .connected }}{{ .speed }}M{{ if .full_duplex }} full{{ end }}{{ else }}no carrier{{ end }}{{ end }}"
+            width: 11
+          # Which circuit this port is tied to, by joining the id in
+          # site_wan_interface_ids back to the site's circuit list.
+          - header: CIRCUIT
+            value: "{{ range .item.site_wan_interface_ids }}{{ with lookup $.wans.items \"id\" . }}{{ .name }} {{ end }}{{ end }}"
+            width: 26
+
+  # Circuits are the site's, not the element's, so a hub pair shares them.
+  # This is the other direction of the same join: each circuit says which of
+  # this element's ports carries it.
+  - name: Circuits
+    fetch:
+      wans: /sdwan/v2.10/api/sites/{{ .site_id }}/waninterfaces
+      ifs: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces
+      labels: /sdwan/v2.6/api/waninterfacelabels
+      networks: /sdwan/v2.1/api/wannetworks
+    sections:
+      - title: Circuits
+        for_each: wans.items
+        empty: this site has no circuits
+        fetch:
+          # The circuit's own status, and this element's view of it: a circuit
+          # can be up at the site while the element beside it cannot use it.
+          st: /sdwan/v2.1/api/sites/{{ .site_id }}/waninterfaces/{{ .item.id }}/status
+          state: /sdwan/v2.1/api/sites/{{ .site_id }}/elements/{{ .element_id }}/waninterfaces/{{ .item.id }}/state
+        columns:
+          - header: CIRCUIT
+            value: "{{ dash .item.name }}"
+            width: 26
+          - header: LABEL
+            value: "{{ with lookup $.labels.items \"id\" .item.label_id }}{{ .name }}{{ end }}"
+            width: 20
+          - header: NETWORK
+            value: "{{ with lookup $.networks.items \"id\" .item.network_id }}{{ .name }}{{ end }}"
+            width: 20
+          # ctrl marks the circuit carrying the controller session, which is
+          # the one whose loss takes the element off the portal.
+          - header: TYPE
+            value: "{{ dash .item.type }}{{ if .item.use_for_controller_connections }} ctrl{{ end }}"
+            width: 15
+          - header: BW
+            value: "{{ with .item.link_bw_down }}{{ . }}↓{{ end }}{{ with .item.link_bw_up }} {{ . }}↑{{ end }}"
+            width: 12
+          - header: PORT
+            value: "{{ with lookup $.ifs.items \"site_wan_interface_ids\" .item.id }}{{ .name }}{{ end }}"
+            width: 16
+          - header: STATUS
+            value: "{{ with .st }}{{ dash .operational_state }}{{ end }}{{ with .state }} · {{ if .operational }}operational{{ else }}not operational{{ end }}{{ if .disabled }} · disabled{{ end }}{{ end }}"
+
+  # Nothing here is reachable on an element that is not in a cluster, so every
+  # section is gated on the element's own record saying it is.
+  - name: HA
+    fetch:
+      el: /sdwan/v3.2/api/elements/{{ .element_id }}
+      cl: /sdwan/v2.0/api/sites/{{ .site_id }}/spokeclusters/{{ .cluster_id }}/status
+    sections:
+      - title: Cluster
+        when: "{{ .cluster_id }}"
+        rows:
+          - label: Cluster
+            value: "{{ .cluster_id }}"
+          - label: This ION
+            value: "priority {{ .el.spoke_ha_config.priority }}, tracking {{ count .el.spoke_ha_config.track.interfaces }} interface(s)"
+          - label: Members
+            value: "{{ count .cl.cluster_members }}"
+
+      - title: Members
+        when: "{{ .cluster_id }}"
+        for_each: cl.cluster_members
+        empty: the cluster reported no members
+        columns:
+          - header: ELEMENT
+            value: "{{ .item.element_id }}"
+            width: 22
+          - header: STATUS
+            value: "{{ .item.status }}"
+
+      # Newest first, as the API sends them. adjustments is the useful part:
+      # it says why the effective priority is not the configured one.
+      - title: Switchovers
+        when: "{{ .cluster_id }}"
+        for_each: cl.switch_over_events
+        empty: no switchovers recorded
+        max_items: 12
+        columns:
+          - header: WHEN
+            value: "{{ utc .item.switch_over_time }}"
+            width: 18
+          - header: ELEMENT
+            value: "{{ .item.element_id }}"
+            width: 22
+          - header: ACTIVE
+            value: "{{ yesno .item.active }}"
+            width: 7
+          - header: PRIORITY
+            value: "{{ .item.effective_priority }}"
+            width: 9
+          - header: PEER
+            value: "{{ if .item.peer_connected }}connected{{ else }}not connected{{ end }}"
+            width: 14
+          - header: WHY
+            value: "{{ range .item.adjustments }}-{{ .adjustment }} {{ .kind }} {{ .name }} {{ end }}"

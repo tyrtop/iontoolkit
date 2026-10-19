@@ -77,6 +77,11 @@ func (s *Source) accept(tok *Token) (string, time.Duration, error) {
 }
 
 func (s *Source) Token(ctx context.Context) (string, time.Duration, error) {
+	// Why the stored credential was not good enough. Without it the only
+	// error reported is the browser leg's, which says "no existing browser
+	// session" for a tenant whose real problem is a rejected refresh token.
+	var stored error
+
 	if rt := s.RefreshToken(); rt != "" {
 		tok, err := Refresh(ctx, s.opt.httpClient(), s.opt.token(), rt, s.tsg)
 		if err == nil {
@@ -85,15 +90,23 @@ func (s *Source) Token(ctx context.Context) (string, time.Duration, error) {
 		if ctx.Err() != nil {
 			return "", 0, err
 		}
-	} else if tok, tried, err := s.opt.Seed.redeem(ctx, s.opt.httpClient(), s.opt.token(), s.tsg); tried {
-		// The seed is only ever reached by a tenant with nothing of its own,
-		// and only one tenant at a time; accept turns what comes back into this
-		// tenant's own credential.
+		stored = fmt.Errorf("stored refresh token rejected: %w", err)
+	}
+
+	// The account credential, narrowed to this tenant. Reached by a tenant
+	// with nothing of its own and by one whose own credential the server has
+	// since rejected -- skipping it in the second case is what sent a tenant
+	// with a merely expired token all the way to the browser. Only one tenant
+	// gets it; accept turns what comes back into that tenant's own.
+	if tok, tried, err := s.opt.Seed.redeem(ctx, s.opt.httpClient(), s.opt.token(), s.tsg); tried {
 		if err == nil {
 			return s.accept(tok)
 		}
 		if ctx.Err() != nil {
 			return "", 0, err
+		}
+		if stored == nil {
+			stored = fmt.Errorf("account credential rejected: %w", err)
 		}
 	}
 
@@ -103,6 +116,9 @@ func (s *Source) Token(ctx context.Context) (string, time.Duration, error) {
 	}
 	if ctx.Err() != nil {
 		return "", 0, err
+	}
+	if stored != nil {
+		return "", 0, permanentError{fmt.Errorf("%w: %v; %v", ErrInteractiveRequired, stored, err)}
 	}
 	return "", 0, permanentError{fmt.Errorf("%w: %v", ErrInteractiveRequired, err)}
 }

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,7 +17,6 @@ import (
 	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/api"
-	"tyrtop.com/iontk/internal/saseauth"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -119,7 +117,7 @@ func loadTenant(ctx context.Context, f app.Flags, t config.Tenant, pool *clientP
 
 		c := pool.get(t.TSGID)
 		if c == nil {
-			built, err := app.NewClient(ctx, f, io.Discard)
+			built, err := app.NewClient(ctx, st, f, io.Discard)
 			if err != nil {
 				return fail(err)
 			}
@@ -145,6 +143,7 @@ func loadTenant(ctx context.Context, f app.Flags, t config.Tenant, pool *clientP
 				TSGID:     t.TSGID,
 				FetchedAt: time.Now(),
 				Elements:  els,
+				Sites:     sites,
 			})
 		}
 		return tenantElementsMsg{
@@ -176,11 +175,17 @@ func (m *tuiModel) loadFromCache() {
 	oldest := time.Duration(0)
 	for _, t := range m.aggregateTenants() {
 		c, err := m.store.Cache(t.TSGID)
-		if err != nil || c == nil || len(c.Elements) == 0 {
+		if err != nil || !c.Usable() {
 			continue
 		}
 		for _, el := range c.Elements {
 			rows = append(rows, elementRow{Element: el, TSG: t.TSGID, Tenant: t.Name})
+		}
+		for k, v := range c.Sites {
+			if m.sites == nil {
+				m.sites = map[string]string{}
+			}
+			m.sites[k] = v
 		}
 		if a := c.Age(); a > oldest {
 			oldest = a
@@ -311,24 +316,7 @@ func (m *tuiModel) tenantErr(tsg, tenant string, err error) {
 // session would fail every tenant at once, so the likely cause of one tenant
 // failing is access, and the wording says so without claiming to be sure.
 func shortTenantErr(err error) string {
-	text := err.Error()
-	switch {
-	// A sign-in that ran out of time proves nothing about access, and it
-	// arrives wrapped in ErrInteractiveRequired like a refusal does, so it has
-	// to be read before the access wording below claims it.
-	case strings.Contains(text, "did not complete within"):
-		return "sign-in timed out"
-	case errors.Is(err, saseauth.ErrInteractiveRequired),
-		strings.Contains(text, "interaction_required"),
-		strings.Contains(text, "login_required"):
-		return "not accessible with this sign-in"
-	case app.IsAuthFailure(text):
-		return "credential rejected"
-	}
-	if i := strings.Index(text, "\n"); i > 0 {
-		text = text[:i]
-	}
-	return ui.Truncate(text, 90)
+	return ui.Truncate(app.ShortAuthError(err), 90)
 }
 
 // tenantOf finds the configured record for a tenant ID.
@@ -349,6 +337,17 @@ func (m tuiModel) ionUserFor(t config.Tenant) string {
 // tsgForElement finds which tenant an element belongs to. Sessions and the
 // reattach list only carry an element ID, so the tenant has to be recovered
 // from the loaded list; the active tenant is the fallback.
+// elementByKey is the loaded row for a tenant's element, which is where a
+// data tab gets the site and cluster ids its views are written against.
+func (m tuiModel) elementByKey(key string) (elementRow, bool) {
+	for _, r := range m.all {
+		if r.key() == key {
+			return r, true
+		}
+	}
+	return elementRow{}, false
+}
+
 func (m tuiModel) tsgForElement(eid string) string {
 	for _, r := range m.all {
 		if r.ID == eid {
@@ -552,9 +551,9 @@ type tenantConnectedMsg struct {
 }
 
 // connectTenant authenticates one tenant without fetching anything.
-func connectTenant(ctx context.Context, f app.Flags, tsg string) tea.Cmd {
+func connectTenant(ctx context.Context, st *config.Store, f app.Flags, tsg string) tea.Cmd {
 	return func() tea.Msg {
-		c, err := app.NewClient(ctx, f, io.Discard)
+		c, err := app.NewClient(ctx, st, f, io.Discard)
 		return tenantConnectedMsg{tsg: tsg, client: c, fresh: true, err: err}
 	}
 }
@@ -621,7 +620,7 @@ func (m tuiModel) ensureClients(tsgs []string) []tea.Cmd {
 		if err := f.ValidateCreds(); err != nil {
 			continue
 		}
-		cmds = append(cmds, connectTenant(m.ctx, f, tsg))
+		cmds = append(cmds, connectTenant(m.ctx, m.store, f, tsg))
 	}
 	return cmds
 }
