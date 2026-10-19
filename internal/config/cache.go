@@ -17,8 +17,10 @@ type ElementCache struct {
 	Sites     map[string]string `json:"sites,omitempty"`
 }
 
+func (s *Store) cacheDir() string { return filepath.Join(s.Root, "cache") }
+
 func (s *Store) cachePath(tsg string) string {
-	return filepath.Join(s.Root, "cache", "elements-"+tsg+".json")
+	return filepath.Join(s.cacheDir(), "elements-"+tsg+".json")
 }
 
 func (s *Store) Cache(tsg string) (*ElementCache, error) {

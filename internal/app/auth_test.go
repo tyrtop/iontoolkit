@@ -1,11 +1,13 @@
 package app
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/fixture"
 )
 
 func TestValidateCreds(t *testing.T) {
@@ -202,5 +204,81 @@ func TestTenantWithItsOwnTokenGetsNoSeed(t *testing.T) {
 	}
 	if src.Seed() != nil {
 		t.Error("Seed() is set for a tenant with its own credential, want it left alone for tenants that need it")
+	}
+}
+
+func TestDebugRedirectsEveryStoreThisProcessOpens(t *testing.T) {
+	Debug = true
+	t.Cleanup(func() { Debug = false })
+
+	st, err := Store()
+	if err != nil {
+		t.Fatalf("Store() error = %v", err)
+	}
+	// BrowserSource opens its own store, so a --debug run that left this one
+	// pointed at the real root would still write a refresh token to the keyring.
+	if got := st.Secrets.Backend(); got != "memory" {
+		t.Errorf("secrets backend = %q, want memory", got)
+	}
+	if st.Root != config.DebugRoot() {
+		t.Errorf("root = %q, want %q", st.Root, config.DebugRoot())
+	}
+	if OpenStore().Root != st.Root {
+		t.Error("OpenStore() and Store() disagree about where --debug points")
+	}
+}
+
+func TestFixturesSeedTenantsThatResolveWithoutASignIn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fixtures.yaml")
+	body := "tenants:\n  - name: Acme Co\n    tsg_id: \"000000000\"\n    users:\n      - name: admin\n        password: ion\n    elements:\n      - name: rtr-01\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	set, err := fixture.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	Fixture = set
+	t.Cleanup(func() { Fixture = nil })
+
+	st, err := Store()
+	if err != nil {
+		t.Fatalf("Store() error = %v", err)
+	}
+	if st.Secrets.Backend() != "memory" {
+		t.Errorf("secrets backend = %q, want a fixture run to keep nothing", st.Secrets.Backend())
+	}
+
+	// The whole point of seeding: the ordinary credential path is what runs,
+	// rather than a fixture-only branch through the tenant resolution.
+	creds, err := ResolveCredentials(st, "Acme Co")
+	if err != nil {
+		t.Fatalf("ResolveCredentials() error = %v", err)
+	}
+	if creds.Flags.IONUsername != "admin" || creds.Flags.IONPassword != "ion" {
+		t.Errorf("device login = %q/%q, want the fixture's", creds.Flags.IONUsername, creds.Flags.IONPassword)
+	}
+	if err := creds.Flags.ValidateCreds(); err != nil {
+		t.Errorf("ValidateCreds() = %v; a seeded tenant has to look usable", err)
+	}
+
+	// Opening a second store must not double up or fail: every entry point
+	// opens its own.
+	again, err := Store()
+	if err != nil {
+		t.Fatalf("second Store() error = %v", err)
+	}
+	cfg, err := again.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Tenants) != 1 {
+		t.Errorf("config holds %d tenants after two opens, want 1", len(cfg.Tenants))
+	}
+	// Seeding happens once, so the secrets have to be shared the way the OS
+	// keyring is or the second store would find none.
+	if v, err := again.Secrets.Get(config.IONPassKey("000000000", "admin")); err != nil || v != "ion" {
+		t.Errorf("second store's device password = %q, %v; want the seeded one", v, err)
 	}
 }

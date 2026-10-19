@@ -104,7 +104,7 @@ func (m *tuiModel) rebuildResultRows() {
 }
 
 func (m tuiModel) resTableHeight() int {
-	room := m.height - 7
+	room := m.height - 7 - m.statsRows()
 	if m.resOpen {
 		room = min(room, max(3, m.height/3))
 	}
@@ -254,7 +254,7 @@ func (m tuiModel) viewResults() string {
 
 		lines := m.resultDetail(idx)
 		used := len(strings.Split(strings.TrimRight(b.String(), "\n"), "\n"))
-		room := max(2, m.height-used-2)
+		room := max(2, m.height-used-2-m.statsRows())
 		start := min(m.resScroll, max(0, len(lines)-room))
 		for i := start; i < len(lines) && i-start < room; i++ {
 			b.WriteString(ui.Truncate(lines[i], max(10, m.width-1)) + "\n")
@@ -266,8 +266,11 @@ func (m tuiModel) viewResults() string {
 
 	body := strings.TrimRight(b.String(), "\n")
 	used := len(strings.Split(body, "\n"))
-	for i := used; i < m.height-2; i++ {
+	for i := used; i < m.height-2-m.statsRows(); i++ {
 		body += "\n"
+	}
+	if m.stats {
+		body += "\n" + m.statsPane()
 	}
 
 	hint := "↑↓ move · / filter · enter open · esc back · q quit"

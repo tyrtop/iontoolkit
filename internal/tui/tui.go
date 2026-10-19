@@ -224,6 +224,8 @@ type tuiModel struct {
 
 	setSection int
 	setFocus   int
+	// The factory reset asks twice, and this is whether it has been asked once.
+	resetArmed bool
 
 	all      []elementRow
 	sites    map[string]string
@@ -268,6 +270,10 @@ type tuiModel struct {
 	askRetry   sessionTarget
 	askRetryNo bool
 
+	// The stats overlay, and whether its repaint is already running.
+	stats        bool
+	statsTicking bool
+
 	mode        pickMode
 	userCursor  int
 	slash       slashMode
@@ -292,7 +298,7 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("iontk needs a terminal; use --cmd for batch mode")
 	}
 
-	store, err := config.Open()
+	store, err := app.Store()
 	if err != nil {
 		return err
 	}
@@ -813,6 +819,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case statsTickMsg:
+		if !m.stats {
+			m.statsTicking = false
+			return m, nil
+		}
+		return m, statsTick()
+
+	case tea.MouseWheelMsg:
+		return m.onWheel(msg)
+
+	case tea.MouseMsg:
+		// Clicks and motion arrive with cell-motion reporting but address
+		// nothing, and must not reach the focused input.
+		return m, nil
+
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
 
@@ -1022,6 +1043,12 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if key == "ctrl+c" && m.phase != phaseSession {
 		return m, tea.Quit
+	}
+
+	// The overlay belongs to the frame rather than to any one page, and the
+	// session pane would otherwise type this at the device.
+	if key == "alt+i" {
+		return m.toggleStats()
 	}
 
 	if m.askRetry.eid != "" {
@@ -1570,7 +1597,7 @@ func (m tuiModel) current() (elementRow, bool) {
 func (m tuiModel) total() int { return len(m.ran) }
 
 func (m tuiModel) listHeight() int {
-	h := m.height - 11
+	h := m.height - 11 - m.statsRows()
 	if m.sessions.Count() > 0 {
 		h--
 	}
@@ -1620,6 +1647,7 @@ func (m tuiModel) View() tea.View {
 	}
 	v.Content = ui.ClipFrame(v.Content, m.height)
 	v.AltScreen = true
+	v.MouseMode = m.mouseMode()
 	return v
 }
 
@@ -1684,6 +1712,9 @@ func (m tuiModel) viewPicking() string {
 				}
 			}
 			hint = "↑↓ move · tab complete · " + enter + " · esc clear"
+		}
+		if m.stats {
+			b.WriteString(m.statsPane() + "\n")
 		}
 		b.WriteString(ui.Footer(m.status, hint))
 	}

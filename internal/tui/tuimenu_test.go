@@ -21,8 +21,8 @@ func plain(s string) string { return testANSI.ReplaceAllString(s, "") }
 
 func TestMenuEntries(t *testing.T) {
 	// The menu is now the same four entries whatever is configured: the element
-	// list (mode in its label), the way in to a browser account, settings, quit.
-	want := []string{"elements (shell)", "sign in with browser", "Settings", "Quit"}
+	// list, the way in to a browser account, settings, quit.
+	want := []string{"elements", "sign in with browser", "Settings", "Quit"}
 
 	cases := map[string]struct {
 		cfg       *config.Config
@@ -57,15 +57,19 @@ func TestMenuEntries(t *testing.T) {
 	}
 }
 
-func TestMenuLabelFollowsTheMode(t *testing.T) {
+func TestMenuLabelDoesNotCarryTheMode(t *testing.T) {
 	root := t.TempDir()
-	m := tuiModel{
-		cfg:   &config.Config{},
-		store: config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json")),
-		mode:  modeBatch,
-	}
-	if got := m.menuEntries()[0].label; got != "elements (batch)" {
-		t.Errorf("first entry = %q, want the mode in the label", got)
+	// The mode belongs to the element list, so the menu reads the same whichever
+	// mode is set; a menu that renamed itself was the phase 7 state explosion.
+	for _, mode := range []pickMode{modeShell, modeBatch} {
+		m := tuiModel{
+			cfg:   &config.Config{},
+			store: config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json")),
+			mode:  mode,
+		}
+		if got := m.menuEntries()[0].label; got != "elements" {
+			t.Errorf("first entry in %v mode = %q, want %q", mode, got, "elements")
+		}
 	}
 }
 

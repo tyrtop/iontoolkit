@@ -1,0 +1,79 @@
+# iontk testing mode. Run with:
+#
+#   iontk --fixtures examples/fixtures.yaml            # the TUI
+#   iontk --fixtures examples/fixtures.yaml -v --cmd help -e <id>
+#
+# A fixture run reaches no network and keeps no state: the config goes to a
+# throwaway root and the secrets never leave memory. -v lists the element IDs,
+# which are generated from the names unless given here.
+
+# What the device answers a command it has no response for. "{command}" is
+# replaced with what was typed. Optional; this is the default, and the text is
+# invented rather than observed on an appliance.
+unknown_response: '% unknown command: {command}'
+
+tenants:
+  - name: Acme Co
+    # Optional; generated from the name when absent.
+    tsg_id: "000000000"
+    # Optional. With no users, the device accepts admin/ion.
+    users:
+      - name: admin
+        password: ion
+
+    elements:
+      - name: store-0003-rtr-01
+        # Optional. Generated as 19 digits from the name when absent, and stable
+        # across runs so a cached list and a written-down --element keep working.
+        id: "1234567890123456789"
+        model: ion 1200
+        software: 6.5.1
+        hw_id: FAKE0001
+        # Resolved through the sites endpoint, the way the portal does it, so a
+        # fixture with no site shows a raw identifier exactly like the real API.
+        site: Store 0003
+        connected: true
+        responses:
+          "dump device status": |
+            Serial     : FAKE0001
+            Model      : ion 1200
+            Uptime     : 4 days
+          "dump interface status 1": |
+            1: up, 1000Mb/s, full duplex
+
+      - name: store-0003-rtr-02
+        model: ion 1200-s
+        software: 6.3.4-b2
+        site: Store 0003
+        connected: true
+        # Makes long output stop on the pager prompt an ion 1200-s running
+        # 6.3.4-b2 prints, and wait for a space. "set paging off" turns it off
+        # for the rest of the session, which is what --pager-off sends.
+        pages: true
+        page_lines: 20
+        responses:
+          help: |
+            arping     send an ARP request
+            dig        DNS lookup
+            dump       show device state
+            inspect    inspect a subsystem
+            ping       send ICMP echo requests
+            traceroute trace the route to a host
+
+      # An offline element: the list shows it, and a session will not reach it.
+      - name: store-0100-rtr-01
+        model: ion 3200
+        site: Store 0100
+        connected: false
+
+  # A second tenant, to exercise the aggregated list and the tenant column.
+  - name: Lab
+    tsg_id: "111111111"
+    elements:
+      - name: lab-rtr-01
+        model: ion 1200
+        connected: true
+        responses:
+          "dump device status": |
+            Serial     : FAKELAB1
+            Uptime     : 10 minutes

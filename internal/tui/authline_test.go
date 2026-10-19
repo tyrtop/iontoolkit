@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/saseauth"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -38,7 +39,7 @@ func authModel(t *testing.T, auth string) tuiModel {
 
 func TestAuthLineNamesTheCredentialKind(t *testing.T) {
 	sa := authModel(t, config.AuthServiceAccount)
-	if got := plain(sa.authLine()); got != "SASE Service Account" {
+	if got := plain(sa.authLine()); !strings.HasPrefix(got, "SASE Service Account") {
 		t.Errorf("authLine() = %q, want the service account wording", got)
 	}
 
@@ -242,4 +243,84 @@ func TestRenderMenuWithCredentialLine(t *testing.T) {
 		}
 	}
 	t.Log("\n" + m.viewMenu())
+}
+
+func TestServiceAccountLineNamesWhichAccountIsAttached(t *testing.T) {
+	m := authModel(t, config.AuthServiceAccount)
+	m.cfg.Tenants[0].ClientID = "iontk@1234567890.iam.panserviceaccount.com"
+	m.tenant = m.cfg.Tenants[0]
+	m.width = 120
+	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+		{ID: "1", Name: "s0100-rtr-01"},
+		{ID: "2", Name: "s0100-rtr-02"},
+	})
+
+	got := plain(m.authLine())
+	// The tenant name does not say which credential answered, and a tenant can
+	// be reached by more than one service account.
+	for _, want := range []string{
+		"SASE Service Account", "Tractor Supply",
+		"iontk@1234567890.iam.panserviceaccount.com", "2 elements cached",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("authLine() = %q, want it to mention %q", got, want)
+		}
+	}
+
+	// On a narrow terminal the client id gives way rather than wrapping: a
+	// wrapped line pushes the whole menu down a row.
+	m.width = 72
+	narrow := plain(m.authLine())
+	if ui.Width(narrow) > m.width {
+		t.Errorf("authLine() is %d columns at width %d:\n%s", ui.Width(narrow), m.width, narrow)
+	}
+	if !strings.Contains(narrow, "2 elements cached") || !strings.Contains(narrow, "Tractor Supply") {
+		t.Errorf("truncation cut the wrong end: %q", narrow)
+	}
+	if !strings.Contains(narrow, "iontk@") {
+		t.Errorf("the account is unrecognisable at width %d: %q", m.width, narrow)
+	}
+}
+
+func TestServiceAccountLineCountsOnlyItsOwnElements(t *testing.T) {
+	m := authModel(t, config.AuthServiceAccount)
+	m.tenant = m.cfg.Tenants[0]
+
+	// A second tenant's elements are in the same working set, so the cache line
+	// above is the total and this line has to say which part of it is ours.
+	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "a", Name: "one"}})
+	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{
+		{ID: "b", Name: "two"},
+		{ID: "c", Name: "three"},
+	})
+
+	if got := m.tenantElementCount(); got != 1 {
+		t.Errorf("tenantElementCount() = %d, want only this tenant's 1", got)
+	}
+	if got := plain(m.authLine()); !strings.Contains(got, "1 of 3 elements cached") {
+		t.Errorf("authLine() = %q, want this account's share of the total", got)
+	}
+}
+
+func TestServiceAccountLineBeforeAnythingHasLoaded(t *testing.T) {
+	m := authModel(t, config.AuthServiceAccount)
+	m.tenant = m.cfg.Tenants[0]
+	// What newTUIModel puts there from this tenant's own cache file, so the
+	// figure is right from launch rather than reading the file every frame.
+	m.cacheCount = 143
+
+	if got := plain(m.authLine()); !strings.Contains(got, "143 elements cached") {
+		t.Errorf("authLine() = %q, want the launch-time cache count", got)
+	}
+}
+
+func TestServiceAccountLineSaysWhenNoClientIDWasSaved(t *testing.T) {
+	m := authModel(t, config.AuthServiceAccount)
+	m.tenant = m.cfg.Tenants[0]
+
+	// Records written before the client ID was kept, and runs whose credentials
+	// came from the environment. Saying nothing would read as "no account".
+	if got := plain(m.authLine()); !strings.Contains(got, "client id not saved") {
+		t.Errorf("authLine() = %q, want it to say the client id is missing", got)
+	}
 }

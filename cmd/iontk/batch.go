@@ -78,7 +78,15 @@ func runBatch(ctx context.Context) error {
 	}
 	sink := output.NewSink(out, format)
 
-	events := sase.RunStream(ctx, opts, sase.Targets(client, f.Elements))
+	// Fixture mode swaps the client only here: the lookup and the session come
+	// from the playback device, and everything either side of them is the real
+	// run, including ioncli's autologin and pager handling.
+	var runClient sase.Client = client
+	if app.Fixture != nil {
+		runClient = app.Fixture.SessionClient(f.PagerOff, f.PagerPrompts)
+	}
+
+	events := sase.RunStream(ctx, opts, sase.Targets(runClient, f.Elements))
 
 	var total int
 	var failed int

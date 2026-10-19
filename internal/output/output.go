@@ -99,7 +99,11 @@ func (s *jsonSink) Close() error {
 	if s.results == nil {
 		s.results = []sase.Result{}
 	}
-	return json.NewEncoder(s.w).Encode(s.results)
+	enc := json.NewEncoder(s.w)
+	// Command output stays \n-escaped inside the JSON strings whatever the
+	// indentation, which is why text and table exist.
+	enc.SetIndent("", "  ")
+	return enc.Encode(s.results)
 }
 
 type jsonlSink struct{ enc *json.Encoder }

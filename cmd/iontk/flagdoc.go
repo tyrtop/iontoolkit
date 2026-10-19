@@ -72,6 +72,9 @@ var flagGroups = []struct {
 	{"Output", "", []string{
 		"format", "out", "no-progress", "verbose",
 	}},
+	{"Testing", "Running without touching saved state. `--debug` redirects the config root and keeps secrets in memory; `--fixtures` does the same and seeds fake tenants, elements and CLI sessions from a YAML file.", []string{
+		"debug", "fixtures",
+	}},
 }
 
 func writeFlagDocs(w io.Writer, root *cobra.Command) error {

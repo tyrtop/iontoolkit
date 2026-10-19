@@ -13,6 +13,9 @@ const LabelWidth = 13
 
 func Label(s string) string { return StyleDim.Render(fmt.Sprintf("%-*s", LabelWidth, s)) }
 
+// Width is the printed width of a string, ignoring its escape codes.
+func Width(s string) int { return ansi.StringWidth(s) }
+
 func Truncate(s string, n int) string {
 	if n <= 0 {
 		return ""

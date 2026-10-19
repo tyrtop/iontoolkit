@@ -17,6 +17,7 @@ var (
 	flagFormat       string
 	flagOut          string
 	flagTenant       string
+	flagFixtures     string
 )
 
 var rootCmd = &cobra.Command{
@@ -49,11 +50,15 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		_ = godotenv.Load()
+		return loadFixtures(cmd.ErrOrStderr())
 	},
 
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if app.Debug && flagFixtures == "" && flagTenant != "" {
+			return fmt.Errorf("--debug has no saved tenants, so --tenant %s cannot resolve", flagTenant)
+		}
 		switch {
 		case len(flagCommands) > 0:
 			return runBatch(cmd.Context())
@@ -100,6 +105,8 @@ func init() {
 	pf.BoolVar(&flagNoProgress, "no-progress", false, "never draw the batch progress bar")
 	pf.BoolVar(&app.Defaults.AllowWrites, "allow-writes", app.Defaults.AllowWrites, "permit commands that are not read-only")
 	pf.StringVar(&flagTenant, "tenant", "", "saved tenant to run as, by name (overrides the environment)")
+	pf.BoolVar(&app.Debug, "debug", false, "run against a throwaway config with no saved tenants and secrets held only in memory")
+	pf.StringVar(&flagFixtures, "fixtures", "", "YAML file of fake tenants, elements and CLI responses to run against instead of real hardware")
 	pf.StringVar(&app.Defaults.TSGID, "tsg", "", "tenant service group ID (overrides SCM_TSG_ID)")
 	pf.StringVar(&flagFormat, "format", "", `batch output format: "json", "jsonl", or "text" (default from settings, else json)`)
 	pf.StringVar(&flagOut, "out", "", `write batch output to this file ("-" is stdout; default from settings)`)

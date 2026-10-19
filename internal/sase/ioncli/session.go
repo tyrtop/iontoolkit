@@ -11,6 +11,14 @@ import (
 
 var ansi = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 
+// Conn is the half of a websocket a CLI session uses. Declared here rather than
+// taking *websocket.Conn so the playback device in internal/fixture runs the
+// real login and pager code.
+type Conn interface {
+	Read(ctx context.Context) (websocket.MessageType, []byte, error)
+	Write(ctx context.Context, typ websocket.MessageType, p []byte) error
+}
+
 // DefaultPagers are lines a device stops on to wait for a keypress. The text
 // is firmware-specific, so these are only the ones we've seen.
 var DefaultPagers = []string{
@@ -108,7 +116,7 @@ func clean(out, prompt, cmd string, pagers []string) string {
 	return strings.Trim(s, " \b\r\n")
 }
 
-func readUntil(ctx context.Context, conn *websocket.Conn, pattern string) (string, error) {
+func readUntil(ctx context.Context, conn Conn, pattern string) (string, error) {
 	var buf strings.Builder
 	for {
 		_, data, err := conn.Read(ctx)
@@ -125,7 +133,7 @@ func readUntil(ctx context.Context, conn *websocket.Conn, pattern string) (strin
 // A paging device waits for a keypress and never sends the prompt. If nothing
 // answers it, any command with more than a screen of output uses up the whole
 // session timeout.
-func readUntilPrompt(ctx context.Context, conn *websocket.Conn, prompt string, pagers []string) (string, error) {
+func readUntilPrompt(ctx context.Context, conn Conn, prompt string, pagers []string) (string, error) {
 	var buf strings.Builder
 	// The device doesn't erase its prompt right away, and a second space would
 	// end up in whatever runs next. Tracked by offset, not by text, because
@@ -201,7 +209,7 @@ func (o RunOptions) pagers() []string {
 	return o.Pagers
 }
 
-func Run(ctx context.Context, conn *websocket.Conn, o RunOptions) ([]CommandOutput, error) {
+func Run(ctx context.Context, conn Conn, o RunOptions) ([]CommandOutput, error) {
 	prompt, cmds := o.Prompt, o.Commands
 
 	if raw, err := readUntil(ctx, conn, "login: "); err != nil {

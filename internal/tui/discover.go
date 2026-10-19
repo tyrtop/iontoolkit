@@ -51,6 +51,10 @@ type tenantChoice struct {
 	tsg   string
 	known bool // the browser account can reach it
 	saved bool // has a config record, so it may hold ION users or a secret
+	// serviceAccount means its saved record carries a service account rather
+	// than a browser credential, which is the only thing reachable without a
+	// browser sign-in.
+	serviceAccount bool
 }
 
 // mergeKey identifies a tenant across the two sources. The tenant ID is the
@@ -80,6 +84,7 @@ func (m tuiModel) tenantChoices() []tenantChoice {
 			// A saved record names the tenant, since that name is what the user
 			// sees elsewhere and what the config is keyed by.
 			cur.name = t.Name
+			cur.serviceAccount = !t.UsesBrowser()
 			merged[k] = cur
 		}
 	}
@@ -91,6 +96,23 @@ func (m tuiModel) tenantChoices() []tenantChoice {
 	sort.Slice(out, func(i, j int) bool {
 		return strings.ToLower(out[i].name) < strings.ToLower(out[j].name)
 	})
+	return out
+}
+
+// switchChoices is what the switch page offers. In service account mode the
+// browser-discovered tenants are left out: a service account credential cannot
+// reach them, and listing them gives a page of tenants that all fail to connect.
+func (m tuiModel) switchChoices() []tenantChoice {
+	all := m.tenantChoices()
+	if m.authMode != authTenant {
+		return all
+	}
+	out := make([]tenantChoice, 0, len(all))
+	for _, c := range all {
+		if c.serviceAccount {
+			out = append(out, c)
+		}
+	}
 	return out
 }
 

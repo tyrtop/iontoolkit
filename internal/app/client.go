@@ -26,6 +26,14 @@ func NewClient(ctx context.Context, f Flags, logw io.Writer) (*api.Client, error
 		return c
 	}
 
+	if Fixture != nil {
+		// Nothing here may reach the network, so the transport answers the REST
+		// calls and the token is never minted. The request building, status
+		// handling and decoding are still the production ones.
+		fmt.Fprintln(logw, "using fixtures")
+		fake := &http.Client{Transport: Fixture.Transport(f.TSGID)}
+		return setup(api.NewClient(fake, fake, "fixture", f.Verbose, f.RPS, f.Burst)), nil
+	}
 	if f.Token != "" {
 		fmt.Fprintln(logw, "using SCM_TOKEN")
 		return setup(api.NewClient(httpClient, wsClient, f.Token, f.Verbose, f.RPS, f.Burst)), nil

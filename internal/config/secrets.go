@@ -26,8 +26,11 @@ func Plaintext(s Secrets) bool { return s.Backend() == "file" }
 // SecretsWarning describes the store in a way that does not understate it, so
 // a plaintext fallback is never mistaken for a keyring.
 func SecretsWarning(s Secrets) string {
-	if Plaintext(s) {
+	switch s.Backend() {
+	case "file":
 		return "plaintext file — no OS keyring available"
+	case "memory":
+		return "in memory — nothing is kept past this run"
 	}
 	return "OS keyring"
 }
@@ -146,3 +149,38 @@ func (f *fileSecrets) Delete(key string) error {
 }
 
 var ErrNotFound = fmt.Errorf("secret not found")
+
+// memSecrets is what --debug stores credentials in: a run that must not read or
+// write the real keyring still has to be able to hold a password it was typed.
+type memSecrets struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+func NewMemorySecrets() Secrets { return &memSecrets{m: map[string]string{}} }
+
+func (*memSecrets) Backend() string { return "memory" }
+
+func (s *memSecrets) Get(key string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.m[key]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return v, nil
+}
+
+func (s *memSecrets) Set(key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[key] = value
+	return nil
+}
+
+func (s *memSecrets) Delete(key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, key)
+	return nil
+}

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
@@ -32,6 +33,16 @@ type toolkitDialer struct{ c *api.Client }
 
 func (d toolkitDialer) DialToolkit(ctx context.Context, eid string, cols, rows int) (ionterm.Conn, error) {
 	return d.c.DialToolkit(ctx, eid, cols, rows)
+}
+
+// dialerFor is how a session reaches an element. Fixture mode substitutes a
+// playback device here and nowhere else, so the pane, autologin and the
+// emulator are all still the production ones.
+func (m tuiModel) dialerFor(c *api.Client) ionterm.Dialer {
+	if app.Fixture != nil {
+		return app.Fixture.Dialer()
+	}
+	return toolkitDialer{c}
 }
 
 type sessionDirtyMsg string
@@ -76,7 +87,7 @@ func (m tuiModel) sessionGeometry() (int, int) {
 }
 
 func (m tuiModel) paneSize() (int, int) {
-	return max(20, m.width), max(3, m.height-5-m.slashHeight())
+	return max(20, m.width), max(3, m.height-5-m.slashHeight()-m.statsRows())
 }
 
 func (m tuiModel) openSession(eid, name, tsg string) (tea.Model, tea.Cmd) {
@@ -102,7 +113,7 @@ func (m tuiModel) openOneSession(t sessionTarget) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(
 		m.spinner.Tick,
 		waitForDial(m.dialReports),
-		openSessionCmd(m.ctx, m.sessions, toolkitDialer{c}, t.eid, t.name, t.tsg, cols, rows, m.credsFor(t.tsg)),
+		openSessionCmd(m.ctx, m.sessions, m.dialerFor(c), t.eid, t.name, t.tsg, cols, rows, m.credsFor(t.tsg)),
 	)
 }
 
@@ -147,7 +158,7 @@ func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 		}
 		reportDialsTo(c, m.dialReports)
 		m.markDialing(t.eid)
-		cmds = append(cmds, openSessionCmd(m.ctx, m.sessions, toolkitDialer{c},
+		cmds = append(cmds, openSessionCmd(m.ctx, m.sessions, m.dialerFor(c),
 			t.eid, t.name, t.tsg, cols, rows, m.credsFor(t.tsg)))
 	}
 	if len(cmds) == 2 {
@@ -338,6 +349,12 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 	cols, rows := m.paneSize()
 	view := s.View(cols, rows)
 	b.WriteString(view.Content + "\n")
+
+	// Above the palette as well as above the footer, so the frame keeps its
+	// height whichever is showing.
+	if m.stats {
+		b.WriteString(m.statsPane() + "\n")
+	}
 
 	if m.slash != slashOff {
 		b.WriteString(m.viewSlash())
