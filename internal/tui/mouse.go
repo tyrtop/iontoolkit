@@ -6,7 +6,7 @@ import (
 
 func (m tuiModel) mouseMode() tea.MouseMode {
 	switch m.phase {
-	case phaseSession, phaseData:
+	case phaseSession:
 		return tea.MouseModeCellMotion
 	}
 	return tea.MouseModeNone
@@ -30,17 +30,6 @@ func (m tuiModel) onWheel(up bool) (tea.Model, tea.Cmd) {
 			next, _ = next.onScrollKey(s, key)
 		}
 		return next, nil
-
-	case phaseData:
-		key := "down"
-		if up {
-			key = "up"
-		}
-		var model tea.Model = m
-		for range wheelStep {
-			model, _ = model.(tuiModel).onDataKey(key)
-		}
-		return model, nil
 	}
 	return m, nil
 }
