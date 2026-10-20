@@ -1,5 +1,5 @@
-# Colour schemes. A theme is a table of roles, not of widgets: nothing in iontk
-# asks for "blue", it asks for the colour an element name is drawn in.
+# Color schemes. A theme is a table of roles, not of widgets: nothing in iontk
+# asks for "blue", it asks for the color an element name is drawn in.
 #
 # A themes.yaml in the config root is appended to these, and a scheme of the
 # same name replaces the built-in one; --themes points somewhere else, which is
@@ -17,37 +17,37 @@
 #   divider  the rule between two panes
 #   bg       the terminal's own background, set while iontk runs and put back
 #            when it exits; unset leaves the terminal as the user has it
-#   fg       the default text colour, for anything no role has coloured
+#   fg       the default text color, for anything no role has colored
 #   spinner  the spinner's shape, one of the names iontk ships
 #   spinner_color  what it is drawn in, including in the bubbles widget
-#   tabs     the rotation tabs take their colour from; none of them may be a
-#            status colour, since a tab is identity rather than state
-#   tab_mode how that rotation is read, which the theme editor's "tab colours"
+#   tabs     the rotation tabs take their color from; none of them may be a
+#            status color, since a tab is identity rather than state
+#   tab_mode how that rotation is read, which the theme editor's "tab colors"
 #            page sets. One of:
-#              rotate  a colour per position in the bar (the default, and
+#              rotate  a color per position in the bar (the default, and
 #                      what iontk has always done)
-#              type    one colour for shells, one for rich-data tabs
+#              type    one color for shells, one for rich-data tabs
 #              both    a rotation of its own per kind
 #              shared  one rotation, counted within the kind -- so the first
-#                      shell and the first data tab are the same colour
+#                      shell and the first data tab are the same color
 #   tab_shell, tab_data
 #            the per-kind rotations the type and both modes draw from. Unset
 #            borrows the rotation, offset by kind so the two do not start on
-#            the same colour. The element list's tab is always the first
-#            colour of the rotation, in every mode
-#   mono     true drops colour entirely for bold, faint, italic and reverse
+#            the same color. The element list's tab is always the first
+#            color of the rotation, in every mode
+#   mono     true drops color entirely for bold, faint, italic and reverse
 #
 # bg and fg go out as OSC 11 and 10, which only take a hex: an index written
 # there is resolved to xterm's value for it, not the terminal's own.
 #
 # Every scheme here sets a background except **classic** and **mono**, and
 # those two leave it out on purpose: classic is the default and is the
-# terminal's own sixteen colours, so it must not repaint the terminal of
-# someone who never chose a scheme, and mono's whole premise is no colour at
+# terminal's own sixteen colors, so it must not repaint the terminal of
+# someone who never chose a scheme, and mono's whole premise is no color at
 # all. Everything else carries the background its palette was drawn for -- the
 # blurbs were already describing one.
 #
-# A colour is an ANSI index 0-255 or a #rrggbb. An index under 16 is remapped by
+# A color is an ANSI index 0-255 or a #rrggbb. An index under 16 is remapped by
 # the terminal's own theme, which is why classic stays there; anything else is
 # emitted as asked and downsampled by the renderer to what the terminal has.
 # "dim" is not in the table: it is the faint attribute, and a scheme that made
@@ -55,7 +55,7 @@
 
 themes:
   - name: classic
-    blurb: your terminal's own 16 colours
+    blurb: your terminal's own 16 colors
     ok: "2"
     err: "1"
     warn: "3"
@@ -87,7 +87,7 @@ themes:
     tabs: ["15", "12", "14", "13", "4", "6", "7"]
 
   - name: mono
-    blurb: "no colour: bold, faint, reverse"
+    blurb: "no color: bold, faint, reverse"
     spinner: line
     mono: true
 
@@ -109,7 +109,7 @@ themes:
     tabs: ["#d8dee9", "#81a1c1", "#88c0d0", "#b48ead", "#5e81ac", "#8fbcbb", "#eceff4"]
 
   # The six below are after vim's own schemes rather than ports of them: vim
-  # colours syntax groups and iontk colours roles, so what carries over is the
+  # colors syntax groups and iontk colors roles, so what carries over is the
   # palette and the mood, not a mapping.
   - name: desert
     blurb: wheat and khaki on warm grey, after vim's desert
@@ -216,7 +216,7 @@ themes:
 
   # catppuccin mocha, lifted from the palette the user's own nvim loads
   # (lemo-o/nvim -> catppuccin-mocha). Roles follow catppuccin's own use of it:
-  # green/red/yellow for state, blue for the "doing" colour, mauve for the
+  # green/red/yellow for state, blue for the "doing" color, mauve for the
   # selection, peach for the one that means "about to go".
   - name: "Ben's Theme"
     blurb: catppuccin mocha, from Ben's nvim

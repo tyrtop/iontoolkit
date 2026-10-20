@@ -152,7 +152,7 @@ func TestEditPasswordFromSettingsUsers(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection = secUsers
 	m.setFocus = focusContent
-	m.setCursor = 0
+	m.setCursor = 1
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'p', Text: "p"}))
 	f := mm.(tuiModel)
@@ -234,8 +234,9 @@ func TestAddUserFromSettingsReturnsToSettings(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection = secUsers
 	m.setFocus = focusContent
+	m.setCursor = 0
 
-	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Text: "a"}))
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	f := mm.(tuiModel)
 	if f.formReturn != phaseSettings {
 		t.Errorf("formReturn = %v, want phaseSettings", f.formReturn)
@@ -302,6 +303,32 @@ func TestSettingsUsersPaneKeepsTheWholeRow(t *testing.T) {
 	}
 }
 
+func TestSettingsUsersSectionOpensForATenantWithNoUsers(t *testing.T) {
+	m := settingsModel(t)
+	m.tenant = m.cfg.Tenants[1]
+	m.setSection = secUsers
+	m.setFocus = focusNav
+
+	if got := plain(m.viewSettings()); !strings.Contains(got, "+ New ION User") {
+		t.Errorf("no new-user row to put the cursor on:\n%s", got)
+	}
+
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	f := mm.(tuiModel)
+	if f.setFocus != focusContent {
+		t.Fatal("section could not be entered, so nothing could add the first user")
+	}
+
+	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	g := mm.(tuiModel)
+	if g.formKind != formUser {
+		t.Fatalf("formKind = %d, want the add-user form", g.formKind)
+	}
+	if g.formTenantName != "Lab" {
+		t.Errorf("formTenantName = %q, want Lab", g.formTenantName)
+	}
+}
+
 func TestDefaultUserSwitchesRepeatedlyInSettings(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection = secUsers
@@ -311,7 +338,7 @@ func TestDefaultUserSwitchesRepeatedlyInSettings(t *testing.T) {
 		cursor int
 		want   string
 	}{
-		{1, "cisops"}, {0, "readonly"}, {1, "cisops"},
+		{2, "cisops"}, {1, "readonly"}, {2, "cisops"},
 	} {
 		m.setCursor = step.cursor
 		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
@@ -365,6 +392,7 @@ func TestDefaultUserSwitchViaNavigationKeys(t *testing.T) {
 		return out.(tuiModel)
 	}
 
+	m = press(m, tea.Key{Code: tea.KeyDown})
 	m = press(m, tea.Key{Code: tea.KeyDown})
 	t.Logf("after down: setCursor=%d focus=%d rows=%d", m.setCursor, m.setFocus, m.sectionRows())
 	m = press(m, tea.Key{Code: 'd', Text: "d"})
@@ -556,7 +584,7 @@ func TestEditUserRenameKeepsDefaultAndMovesPassword(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection = secUsers
 	m.setFocus = focusContent
-	m.setCursor = 0
+	m.setCursor = 1
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	f := mm.(tuiModel)

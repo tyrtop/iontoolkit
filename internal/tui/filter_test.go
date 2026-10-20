@@ -318,6 +318,50 @@ func TestSeveralMatchesJustApplyTheFilter(t *testing.T) {
 	}
 }
 
+func TestEscapeAfterApplyingTheQueryLeavesTheList(t *testing.T) {
+	m := filterModel(t)
+	m.phase = phasePicking
+	m.filterOn = true
+	m.filter.SetValue("s0100")
+	m.applyFilter()
+
+	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), "enter")
+	applied := mm.(tuiModel)
+	if applied.filterOn || applied.filter.Value() != "s0100" {
+		t.Fatalf("enter left on=%v query=%q, want the query applied and the input closed",
+			applied.filterOn, applied.filter.Value())
+	}
+
+	mm, _ = applied.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}), "esc")
+	got := mm.(tuiModel)
+	if got.phase != phaseMenu {
+		t.Errorf("phase = %v, want esc to go back rather than clear the query", got.phase)
+	}
+	if got.filter.Value() != "s0100" {
+		t.Errorf("filter = %q, want the query left alone", got.filter.Value())
+	}
+}
+
+func TestEscapeWhileTypingStillClearsTheQuery(t *testing.T) {
+	m := filterModel(t)
+	m.phase = phasePicking
+	m.filterOn = true
+	m.filter.SetValue("s0100")
+	m.applyFilter()
+
+	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}), "esc")
+	got := mm.(tuiModel)
+	if got.phase != phasePicking {
+		t.Errorf("phase = %v, want to stay on the list", got.phase)
+	}
+	if got.filterOn || got.filter.Value() != "" {
+		t.Errorf("on=%v query=%q, want esc to clear and close the input", got.filterOn, got.filter.Value())
+	}
+	if len(got.matches) != len(got.all) {
+		t.Errorf("matched %d of %d, want the whole list back", len(got.matches), len(got.all))
+	}
+}
+
 func TestASingleMatchBeatsAnEarlierSelection(t *testing.T) {
 	m := searchEnterModel(t)
 	m.mode = modeShell
@@ -922,7 +966,7 @@ func TestConnectedRowsAreGreenAndOfflineKeepsRed(t *testing.T) {
 		t.Errorf("the state of a connected element is not green:\n%q", out)
 	}
 	if strings.Contains(plain(out), "offline") && strings.Contains(out, ui.StyleErr.Render("offline")) {
-		t.Error("the row under the cursor kept its own colour, which breaks the highlight")
+		t.Error("the row under the cursor kept its own color, which breaks the highlight")
 	}
 
 	m.moveCursorTo(1)
@@ -934,7 +978,7 @@ func TestConnectedRowsAreGreenAndOfflineKeepsRed(t *testing.T) {
 		t.Error("the row under the cursor is still green, which breaks the highlight")
 	}
 	if strings.Contains(out, ui.StyleErr.Render("connected")) {
-		t.Error("connected is rendered in the error colour")
+		t.Error("connected is rendered in the error color")
 	}
 }
 

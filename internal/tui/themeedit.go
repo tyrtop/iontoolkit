@@ -55,7 +55,7 @@ func (m tuiModel) remember(before ui.Theme) tuiModel {
 
 func (m tuiModel) onThemeEditKey(key string) (tea.Model, tea.Cmd) {
 	if m.tabEdit {
-		return m.onTabColoursKey(key)
+		return m.onTabColorsKey(key)
 	}
 	if m.pick.on {
 		return m.onPickerKey(key)
@@ -93,7 +93,7 @@ func (m tuiModel) onThemeEditKey(key string) (tea.Model, tea.Cmd) {
 		case spinnerRole:
 			return m.stepRole(role, 1)
 		case tabsRow:
-			return m.openTabColours()
+			return m.openTabColors()
 		case animRow:
 			m.status = "animations are not wired up yet"
 			return m, nil
@@ -127,7 +127,7 @@ func (m tuiModel) onThemeEditKey(key string) (tea.Model, tea.Cmd) {
 		if role == spinnerRole || role == animRow || role == tabsRow || isAction(role) {
 			return m, nil
 		}
-		return m.openColourForm(role)
+		return m.openColorForm(role)
 
 	case "ctrl+d", "x":
 		if isAction(role) || role == animRow || role == tabsRow {
@@ -150,11 +150,11 @@ func (m tuiModel) randomiseDraft() (tea.Model, tea.Cmd) {
 		case "other":
 			_ = m.themeDraft.SetRole(role, fg)
 		default:
-			_ = m.themeDraft.SetRole(role, ui.RandomColour(onLight))
+			_ = m.themeDraft.SetRole(role, ui.RandomColor(onLight))
 		}
 	}
 	for i := range m.themeDraft.Tabs {
-		m.themeDraft.Tabs[i] = ui.RandomColour(onLight)
+		m.themeDraft.Tabs[i] = ui.RandomColor(onLight)
 	}
 	m.themeDraft.Spinner = ui.RandomSpinner()
 	return m.saveDraft()
@@ -166,7 +166,7 @@ func (m tuiModel) randomiseRole(role string) (tea.Model, tea.Cmd) {
 		m.themeDraft.Spinner = ui.RandomSpinner()
 		return m.saveDraft()
 	}
-	if err := m.themeDraft.SetRole(role, ui.RandomColour(m.draftIsLight())); err != nil {
+	if err := m.themeDraft.SetRole(role, ui.RandomColor(m.draftIsLight())); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
@@ -181,14 +181,14 @@ func (m tuiModel) nudgeDraft() (tea.Model, tea.Cmd) {
 		if cur == "" {
 			continue
 		}
-		next := ui.SimilarColour(cur, 1)
+		next := ui.SimilarColor(cur, 1)
 		if role == "background" {
 			next = ui.SimilarBackground(cur, 1)
 		}
 		_ = m.themeDraft.SetRole(role, next)
 	}
 	for i, c := range m.themeDraft.Tabs {
-		m.themeDraft.Tabs[i] = ui.SimilarColour(c, 1)
+		m.themeDraft.Tabs[i] = ui.SimilarColor(c, 1)
 	}
 	return m.saveDraft()
 }
@@ -203,7 +203,7 @@ func (m tuiModel) nudgeRole(role string) (tea.Model, tea.Cmd) {
 	if cur == "" {
 		return m.randomiseRole(role)
 	}
-	next := ui.SimilarColour(cur, 1)
+	next := ui.SimilarColor(cur, 1)
 	if role == "background" {
 		next = ui.SimilarBackground(cur, 1)
 	}
@@ -274,14 +274,14 @@ func (m tuiModel) resetRole(role string) (tea.Model, tea.Cmd) {
 	return m.saveDraft()
 }
 
-func (m tuiModel) openColourForm(role string) (tea.Model, tea.Cmd) {
+func (m tuiModel) openColorForm(role string) (tea.Model, tea.Cmd) {
 	f := newField(role, "#89b4fa or 0-255", false)
 	f.input.SetValue(m.themeDraft.Role(role))
 	m.formThemeRole = role
-	return m.openForm(formColour, "Colour for "+role, phaseAddUser, []formField{f})
+	return m.openForm(formColor, "Color for "+role, phaseAddUser, []formField{f})
 }
 
-func (m tuiModel) submitColour() (tea.Model, tea.Cmd) {
+func (m tuiModel) submitColor() (tea.Model, tea.Cmd) {
 	m = m.remember(m.themeDraft)
 	if err := m.themeDraft.SetRole(m.formThemeRole, m.formValue(0)); err != nil {
 		m.status = err.Error()
@@ -320,7 +320,7 @@ func (m tuiModel) saveDraft() (tea.Model, tea.Cmd) {
 
 func (m tuiModel) themeEditContent() []string {
 	if m.tabEdit {
-		return m.tabColoursContent()
+		return m.tabColorsContent()
 	}
 	if m.pick.on {
 		return m.pickerContent()
@@ -350,8 +350,8 @@ func (m tuiModel) themeEditContent() []string {
 			mode := m.tabModeName()
 			out = append(out, cursor+ui.Label(role)+
 				ui.StyleElement.Render(fmt.Sprintf("%-8s", mode))+
-				ui.StyleDim.Render(fmt.Sprintf("%d colour(s) · enter opens them",
-					len(m.tabColours(listTabs)))))
+				ui.StyleDim.Render(fmt.Sprintf("%d color(s) · enter opens them",
+					len(m.tabColors(listTabs)))))
 			continue
 		}
 
@@ -387,7 +387,7 @@ func (m tuiModel) actionRow(row string) string {
 	switch row {
 	case randomRow:
 		return ui.StyleCmd.Render(row) +
-			ui.StyleDim.Render("   every colour, the tabs and the spinner")
+			ui.StyleDim.Render("   every color, the tabs and the spinner")
 	case similarRow:
 		return ui.StyleCmd.Render(row) +
 			ui.StyleDim.Render("           the same scheme, shifted")
@@ -410,6 +410,6 @@ var roleHelp = map[string]string{
 	"border":        "a modal's frame",
 	"divider":       "the rule between panes",
 	"background":    "the terminal's own background",
-	"other":         "text no role has coloured",
+	"other":         "text no role has colored",
 	"spinner_color": "every spinner",
 }

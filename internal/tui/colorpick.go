@@ -10,7 +10,7 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-type colourPick struct {
+type colorPick struct {
 	on   bool
 	role string
 	was  string
@@ -43,20 +43,20 @@ func (m tuiModel) wheelSize() (cols, rows int) {
 }
 
 func (m tuiModel) openTabPicker(list string, i int, label string) (tea.Model, tea.Cmd) {
-	next, cmd := m.openPickerOn(colourPick{
+	next, cmd := m.openPickerOn(colorPick{
 		on: true, list: list, idx: i, label: label,
-		was: m.tabColourAt(list, i),
+		was: m.tabColorAt(list, i),
 	})
 	return next, cmd
 }
 
 func (m tuiModel) openPicker(role string) (tea.Model, tea.Cmd) {
-	return m.openPickerOn(colourPick{
+	return m.openPickerOn(colorPick{
 		on: true, role: role, label: ui.RoleLabel(role), was: m.themeDraft.Role(role),
 	})
 }
 
-func (m tuiModel) openPickerOn(p colourPick) (tea.Model, tea.Cmd) {
+func (m tuiModel) openPickerOn(p colorPick) (tea.Model, tea.Cmd) {
 	cols, rows := m.wheelSize()
 
 	p.grid = !ui.TrueColor()
@@ -81,8 +81,8 @@ func (m tuiModel) onPickerKey(key string) (tea.Model, tea.Cmd) {
 			nm.status = err.Error()
 		}
 		m = nm
-		m.pick = colourPick{}
-		m.status = label + " left as " + describeColour(was)
+		m.pick = colorPick{}
+		m.status = label + " left as " + describeColor(was)
 		return m.applyWorking()
 
 	case "enter":
@@ -92,7 +92,7 @@ func (m tuiModel) onPickerKey(key string) (tea.Model, tea.Cmd) {
 			m = m.remember(back.themeDraft)
 		}
 		m.themeDraft = kept
-		m.pick = colourPick{}
+		m.pick = colorPick{}
 		return m.saveDraft()
 
 	case "tab":
@@ -111,10 +111,10 @@ func (m tuiModel) onPickerKey(key string) (tea.Model, tea.Cmd) {
 
 	case "t":
 		if m.pick.list != "" {
-			m.status = "tab a colour off the chart, or type one into a role"
+			m.status = "tab a color off the chart, or type one into a role"
 			return m, nil
 		}
-		return m.openColourForm(m.pick.role)
+		return m.openColorForm(m.pick.role)
 
 	case "ctrl+d", "x":
 		if m.pick.list != "" {
@@ -213,14 +213,14 @@ func (m tuiModel) applyPicked() (tea.Model, tea.Cmd) {
 
 func (m tuiModel) setPicked(v string) (tuiModel, error) {
 	if m.pick.list != "" {
-		return m.setTabColour(m.pick.list, m.pick.idx, v)
+		return m.setTabColor(m.pick.list, m.pick.idx, v)
 	}
 	return m, m.themeDraft.SetRole(m.pick.role, v)
 }
 
 func (m tuiModel) pickedCurrent() string {
 	if m.pick.list != "" {
-		return m.tabColourAt(m.pick.list, m.pick.idx)
+		return m.tabColorAt(m.pick.list, m.pick.idx)
 	}
 	return m.themeDraft.Role(m.pick.role)
 }
@@ -235,12 +235,12 @@ func (m tuiModel) applyWorking() (tea.Model, tea.Cmd) {
 
 func (m tuiModel) pickedStyle() lipgloss.Style {
 	if m.pick.list != "" {
-		return ui.ColourStyle(m.pickedCurrent())
+		return ui.ColorStyle(m.pickedCurrent())
 	}
 	return m.themeDraft.RoleStyle(m.pick.role)
 }
 
-func describeColour(spec string) string {
+func describeColor(spec string) string {
 	if strings.TrimSpace(spec) == "" {
 		return "unset"
 	}

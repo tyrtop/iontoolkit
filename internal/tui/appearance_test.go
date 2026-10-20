@@ -80,41 +80,89 @@ func TestTheCycleKeepsTheTypedZone(t *testing.T) {
 	}
 }
 
-func TestEnterOnTheTimesRowOpensTheZoneForm(t *testing.T) {
+func TestEnterOnTheTimesRowOpensTheZonePicker(t *testing.T) {
 	pinZone(t)
 	m := settingsModel(t)
 	m.setSection, m.setFocus, m.setCursor = secGeneral, focusContent, zoneRow
 
 	mm, _ := m.onGeneralKey("enter")
 	m = mm.(tuiModel)
-	if m.formKind != formZone {
-		t.Fatalf("formKind = %v, want the zone form", m.formKind)
+	if m.phase != phaseZone {
+		t.Fatalf("phase = %v, want the zone picker", m.phase)
+	}
+	if len(m.zonePick.items) < 100 {
+		t.Fatalf("the picker offers %d zones, want the whole list to choose from", len(m.zonePick.items))
 	}
 
-	m.form[0].input.SetValue("Europe/London")
-	mm, _ = m.submitZone()
+	m = typeString(t, m, "london")
+	if len(m.zonePick.items) == 0 {
+		t.Fatal("a fuzzy query matched no zone at all")
+	}
+	if got, _ := m.zonePick.current(); got != "Europe/London" {
+		t.Errorf("highlighted %q, want Europe/London first for %q", got, "london")
+	}
+
+	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = mm.(tuiModel)
-	if m.formKind != formNone {
-		t.Error("the form stayed open after a zone that loads")
+	if m.phase != phaseSettings {
+		t.Errorf("phase = %v, want to return to settings", m.phase)
 	}
 	if clock.Name() != "Europe/London" {
-		t.Errorf("clock.Name() = %q, want the typed zone", clock.Name())
+		t.Errorf("clock.Name() = %q, want the picked zone", clock.Name())
+	}
+	if m.cfg.Zone != "Europe/London" {
+		t.Errorf("cfg.Zone = %q, want the pick persisted", m.cfg.Zone)
 	}
 }
 
-func TestAZoneThatWillNotLoadIsRefusedByTheForm(t *testing.T) {
+func TestTheZonePickerScrollsAndPreviewsTheHighlightedZone(t *testing.T) {
 	pinZone(t)
 	m := settingsModel(t)
 	m.setSection, m.setFocus, m.setCursor = secGeneral, focusContent, zoneRow
-
 	mm, _ := m.onGeneralKey("enter")
 	m = mm.(tuiModel)
-	m.form[0].input.SetValue("Mars/Olympus_Mons")
-	mm, _ = m.submitZone()
+
+	first, _ := m.zonePick.current()
+	for i := 0; i < suggestRows+2; i++ {
+		mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+		m = mm.(tuiModel)
+	}
+	later, ok := m.zonePick.current()
+	if !ok || later == first {
+		t.Errorf("the list did not move with the cursor: %q then %q", first, later)
+	}
+
+	start, end := m.zonePick.window(suggestRows)
+	if m.zonePick.cursor < start || m.zonePick.cursor >= end {
+		t.Errorf("cursor %d is outside the shown window %d..%d, so it scrolled off screen",
+			m.zonePick.cursor, start, end)
+	}
+
+	out := plain(m.viewZonePick())
+	if !strings.Contains(out, later) {
+		t.Errorf("the highlighted zone is not on the page:\n%s", out)
+	}
+	if !strings.Contains(out, "now") {
+		t.Errorf("no clock preview to check the pick against:\n%s", out)
+	}
+}
+
+func TestAZoneThatWillNotLoadIsRefusedByThePicker(t *testing.T) {
+	pinZone(t)
+	m := settingsModel(t)
+	m.setSection, m.setFocus, m.setCursor = secGeneral, focusContent, zoneRow
+	mm, _ := m.onGeneralKey("enter")
 	m = mm.(tuiModel)
 
-	if m.formKind != formZone {
-		t.Error("the form closed on a zone that does not exist")
+	m = typeString(t, m, "Mars/Olympus_Mons")
+	if _, ok := m.zonePick.current(); ok {
+		t.Fatal("a zone that does not exist matched the list")
+	}
+
+	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	m = mm.(tuiModel)
+	if m.phase != phaseZone {
+		t.Error("the picker closed on a zone that does not exist")
 	}
 	if m.status == "" {
 		t.Error("nothing said why the zone was refused")
@@ -177,7 +225,7 @@ func TestPickingAThemeAppliesAndPersistsIt(t *testing.T) {
 		t.Error("picking a theme issued no command, so the spinner kept the old one")
 	}
 	if ui.StyleOK.Render("x") != "x" {
-		t.Errorf("mono still colours StyleOK: %q", ui.StyleOK.Render("x"))
+		t.Errorf("mono still colors StyleOK: %q", ui.StyleOK.Render("x"))
 	}
 }
 
@@ -241,7 +289,7 @@ func TestThePreviewRendersInTheSchemeItNames(t *testing.T) {
 		t.Errorf("the nord preview has no truecolor in it:\n%q", nordLines)
 	}
 	if strings.Contains(monoLines, "38;2;") {
-		t.Errorf("the mono preview emitted colour:\n%q", monoLines)
+		t.Errorf("the mono preview emitted color:\n%q", monoLines)
 	}
 	if !strings.Contains(plain(monoLines), mono.Spinner) {
 		t.Errorf("the preview does not name mono's spinner %q", mono.Spinner)

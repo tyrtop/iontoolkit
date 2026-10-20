@@ -238,7 +238,7 @@ func GridCell(spec string) (row, col int, ok bool) {
 	return 0, 0, false
 }
 
-func RandomColour(onLight bool) string {
+func RandomColor(onLight bool) string {
 	h := rand.Float64() * 360
 	s := 0.45 + rand.Float64()*0.5
 	v := 0.62 + rand.Float64()*0.38
@@ -260,7 +260,7 @@ func RandomBackground() (bg, fg string, onLight bool) {
 		HexFromHSV(h, 0.05+rand.Float64()*0.15, 0.82+rand.Float64()*0.14), false
 }
 
-func SimilarColour(spec string, spread float64) string {
+func SimilarColor(spec string, spread float64) string {
 	c, ok := RGBOf(spec)
 	if !ok {
 		return spec

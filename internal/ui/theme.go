@@ -146,8 +146,8 @@ const (
 func TabModes() []string { return []string{TabRotate, TabByType, TabBoth, TabShared} }
 
 var TabModeBlurb = map[string]string{
-	TabRotate: "a colour per position in the bar",
-	TabByType: "one colour for shells, one for data",
+	TabRotate: "a color per position in the bar",
+	TabByType: "one color for shells, one for data",
 	TabBoth:   "a rotation of its own per kind",
 	TabShared: "one rotation, counted within the kind",
 }
@@ -163,7 +163,7 @@ func TabFallback(kind TabKind) int {
 	return 0
 }
 
-func (t Theme) TabColours(kind TabKind) []string {
+func (t Theme) TabColors(kind TabKind) []string {
 	switch kind {
 	case TabShell:
 		if len(t.TabShell) > 0 {
@@ -179,7 +179,7 @@ func (t Theme) TabColours(kind TabKind) []string {
 
 var fallback = Theme{
 	Name:  "classic",
-	Blurb: "your terminal's own 16 colours",
+	Blurb: "your terminal's own 16 colors",
 	OK:    "2", Err: "1", Warn: "3", Cmd: "6", Element: "4",
 	Row: "5", Hot: "9", Border: "3", Divider: "8",
 	Spinner: DefaultSpinner, SpinnerColor: "5",
@@ -331,22 +331,22 @@ func ParseThemes(b []byte) ([]Theme, error) {
 	return set.Themes, nil
 }
 
-// lipgloss renders an unparseable colour as nothing, not as wrong
+// lipgloss renders an unparseable color as nothing, not as wrong
 func (t Theme) validate() error {
 	if strings.TrimSpace(t.Name) == "" {
 		return fmt.Errorf("a theme needs a name")
 	}
 	for _, role := range RoleNames() {
-		if err := checkColour(t.Role(role)); err != nil {
+		if err := checkColor(t.Role(role)); err != nil {
 			return fmt.Errorf("theme %s: %s: %w", t.Name, role, err)
 		}
 	}
 	for _, set := range []struct {
-		what    string
-		colours []string
+		what   string
+		colors []string
 	}{{"tab", t.Tabs}, {"tab_shell", t.TabShell}, {"tab_data", t.TabData}} {
-		for i, c := range set.colours {
-			if err := checkColour(c); err != nil {
+		for i, c := range set.colors {
+			if err := checkColor(c); err != nil {
 				return fmt.Errorf("theme %s: %s %d: %w", t.Name, set.what, i+1, err)
 			}
 		}
@@ -362,9 +362,9 @@ func (t Theme) validate() error {
 	return nil
 }
 
-func CheckColour(spec string) error { return checkColour(spec) }
+func CheckColor(spec string) error { return checkColor(spec) }
 
-func checkColour(spec string) error {
+func checkColor(spec string) error {
 	switch {
 	case spec == "":
 		return nil
@@ -373,7 +373,7 @@ func checkColour(spec string) error {
 			return fmt.Errorf("%q is not #rgb or #rrggbb", spec)
 		}
 		if _, err := strconv.ParseUint(spec[1:], 16, 32); err != nil {
-			return fmt.Errorf("%q is not a hex colour", spec)
+			return fmt.Errorf("%q is not a hex color", spec)
 		}
 		return nil
 	}
@@ -580,11 +580,11 @@ func atTab(set []lipgloss.Style, i int) lipgloss.Style {
 
 func BorderColor() color.Color { return styles.Border }
 
-func Background() color.Color { return terminalColour(current.Bg) }
+func Background() color.Color { return terminalColor(current.Bg) }
 
-func Foreground() color.Color { return terminalColour(current.Fg) }
+func Foreground() color.Color { return terminalColor(current.Fg) }
 
-func terminalColour(spec string) color.Color {
+func terminalColor(spec string) color.Color {
 	c, ok := RGBOf(spec)
 	if !ok {
 		return nil
@@ -607,11 +607,11 @@ func ProfileName() string {
 	case colorprofile.TrueColor:
 		return "truecolor"
 	case colorprofile.ANSI256:
-		return "256 colours"
+		return "256 colors"
 	case colorprofile.ANSI:
-		return "16 colours"
+		return "16 colors"
 	case colorprofile.ASCII, colorprofile.NoTTY:
-		return "no colour"
+		return "no color"
 	}
 	return ""
 }
@@ -639,7 +639,7 @@ var roleLabels = map[string]string{
 	"ok": "OK", "err": "Err", "warn": "Warn", "cmd": "Cmd",
 	"element": "Element", "row": "Row", "hot": "Hot", "border": "Border",
 	"divider": "Divider", "other": "Other", "background": "Background",
-	"spinner_color": "Spinner Colour",
+	"spinner_color": "Spinner Color",
 }
 
 func RoleLabel(role string) string {
@@ -681,7 +681,7 @@ func (t Theme) Role(name string) string {
 
 func (t *Theme) SetRole(name, spec string) error {
 	spec = strings.TrimSpace(spec)
-	if err := checkColour(spec); err != nil {
+	if err := checkColor(spec); err != nil {
 		return err
 	}
 	switch name {
@@ -710,7 +710,7 @@ func (t *Theme) SetRole(name, spec string) error {
 	case "spinner_color":
 		t.SpinnerColor = spec
 	default:
-		return fmt.Errorf("no colour called %q", name)
+		return fmt.Errorf("no color called %q", name)
 	}
 	return nil
 }
@@ -797,7 +797,7 @@ func SaveUserTheme(path string, t Theme) error {
 		return fmt.Errorf("encode themes: %w", err)
 	}
 	header := "# Written by iontk's theme editor. A scheme here replaces the built-in\n" +
-		"# one of the same name; anything not set falls back to no colour.\n"
+		"# one of the same name; anything not set falls back to no color.\n"
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, append([]byte(header), b...), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", tmp, err)
@@ -841,7 +841,7 @@ func (t Theme) Equal(o Theme) bool {
 	return true
 }
 
-func ColourStyle(spec string) lipgloss.Style {
+func ColorStyle(spec string) lipgloss.Style {
 	if spec == "" {
 		return lipgloss.NewStyle()
 	}

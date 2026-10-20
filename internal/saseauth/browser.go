@@ -60,18 +60,30 @@ func (o Options) timeout() time.Duration {
 }
 
 func Login(ctx context.Context, tsg string, opt Options) (*Token, error) {
-	if opt.DataDir != "" {
-		if fi, err := os.Stat(opt.DataDir); err == nil && fi.IsDir() {
-			tok, err := login(ctx, tsg, opt, true)
-			if err == nil {
-				return tok, nil
-			}
-			if ctx.Err() != nil {
-				return nil, err
-			}
-		}
+	tok, err := LoginSilent(ctx, tsg, opt)
+	if err == nil {
+		return tok, nil
+	}
+	if ctx.Err() != nil {
+		return nil, err
 	}
 	return login(ctx, tsg, opt, false)
+}
+
+var silentRefused sync.Map
+
+func refusalKey(dir, tsg string) string { return dir + "\x00" + tsg }
+
+func clearRefusals(dir string) {
+	if dir == "" {
+		return
+	}
+	silentRefused.Range(func(k, _ any) bool {
+		if s, ok := k.(string); ok && strings.HasPrefix(s, dir+"\x00") {
+			silentRefused.Delete(k)
+		}
+		return true
+	})
 }
 
 func LoginSilent(ctx context.Context, tsg string, opt Options) (*Token, error) {
@@ -81,15 +93,25 @@ func LoginSilent(ctx context.Context, tsg string, opt Options) (*Token, error) {
 	if fi, err := os.Stat(opt.DataDir); err != nil || !fi.IsDir() {
 		return nil, ErrNoSession
 	}
+	key := refusalKey(opt.DataDir, tsg)
+	if _, refused := silentRefused.Load(key); refused {
+		return nil, fmt.Errorf("%w: a silent sign-in was already refused for this profile", ErrNoSession)
+	}
 	tok, err := login(ctx, tsg, opt, true)
 	if err != nil && ctx.Err() == nil {
+		silentRefused.Store(key, struct{}{})
 		return nil, fmt.Errorf("%w: %v", ErrNoSession, err)
 	}
 	return tok, err
 }
 
 func login(ctx context.Context, tsg string, opt Options, silent bool) (*Token, error) {
-	return loginToken(ctx, tsg, opt, silent)
+	tok, err := loginToken(ctx, tsg, opt, silent)
+	if err != nil {
+		return nil, err
+	}
+	clearRefusals(opt.DataDir)
+	return tok, nil
 }
 
 func loginToken(ctx context.Context, tsg string, opt Options, silent bool) (*Token, error) {

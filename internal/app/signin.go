@@ -35,33 +35,60 @@ func SignIn(ctx context.Context, st *config.Store, w io.Writer) (saseauth.Discov
 	return d, nil
 }
 
-func WarmTenants(ctx context.Context, st *config.Store, tenants []config.Tenant, w io.Writer) error {
-	httpClient := &http.Client{Timeout: Defaults.HTTPTimeout}
-	var failed int
+type TenantWarm struct {
+	Tenant  config.Tenant
+	Skipped bool
+	Err     error
+}
 
+// rotated as it is redeemed, so it narrows to one tenant
+func WarmEach(ctx context.Context, st *config.Store, tenants []config.Tenant) []TenantWarm {
+	httpClient := &http.Client{Timeout: Defaults.HTTPTimeout}
+	out := make([]TenantWarm, 0, len(tenants))
 	for _, t := range tenants {
 		if !t.UsesBrowser() {
-			fmt.Fprintf(w, "  %-28s service account, nothing to sign in\n", t.Name)
+			out = append(out, TenantWarm{Tenant: t, Skipped: true})
 			continue
 		}
-		src := saseauth.NewSource(t.TSGID, "", BrowserOptions(httpClient, st),
-			func(rt string) error { return st.Secrets.Set(config.RefreshTokenKey(t.TSGID), rt) })
-		if _, _, err := src.Token(ctx); err != nil {
+		_, _, err := tenantSource(st, httpClient, t.TSGID).Token(ctx)
+		out = append(out, TenantWarm{Tenant: t, Err: err})
+		if ctx.Err() != nil {
+			return out
+		}
+	}
+	return out
+}
+
+func WarmTenants(ctx context.Context, st *config.Store, tenants []config.Tenant, w io.Writer) error {
+	var failed, browser int
+
+	for _, r := range WarmEach(ctx, st, tenants) {
+		if r.Skipped {
+			fmt.Fprintf(w, "  %-28s service account, nothing to sign in\n", r.Tenant.Name)
+			continue
+		}
+		browser++
+		if r.Err != nil {
 			failed++
-			fmt.Fprintf(w, "  %-28s %s\n", t.Name, ShortAuthError(err))
+			fmt.Fprintf(w, "  %-28s %s\n", r.Tenant.Name, ShortAuthError(r.Err))
 			continue
 		}
-		fmt.Fprintf(w, "  %-28s ready\n", t.Name)
+		fmt.Fprintf(w, "  %-28s ready\n", r.Tenant.Name)
 	}
 
-	if failed > 0 && failed == len(tenants) {
-		return fmt.Errorf("no tenant could be signed in")
+	if failed > 0 && failed == browser {
+		return fmt.Errorf("no tenant could be signed in: every one failed the same way, " +
+			"so it is the browser sign-in that did not take and not access to any one tenant")
 	}
 	if failed > 0 {
 		fmt.Fprintf(w, "%d of %d tenants could not be signed in; this account may not have access to them\n",
 			failed, len(tenants))
 	}
 	return nil
+}
+
+func tenantSource(st *config.Store, httpClient *http.Client, tsg string) *saseauth.Source {
+	return BrowserSource(Flags{TSGID: tsg, BrowserAuth: true}, httpClient, st)
 }
 
 func SessionLeft(st *config.Store, tsg string) (time.Duration, bool) {

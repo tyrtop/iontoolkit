@@ -55,22 +55,6 @@ func (m tuiModel) applyZone(spec string) (tuiModel, bool) {
 	return m, true
 }
 
-func (m tuiModel) openZoneForm() (tea.Model, tea.Cmd) {
-	f := newField("zone", "America/Chicago", false)
-	f.input.SetValue(m.cfg.Zone)
-	return m.openForm(formZone, "Zone for printed times", phaseAddUser, []formField{f})
-}
-
-func (m tuiModel) submitZone() (tea.Model, tea.Cmd) {
-	nm, ok := m.applyZone(m.formValue(0))
-	if !ok {
-		return nm, nil
-	}
-	nm.form, nm.formKind = nil, formNone
-	nm.phase = nm.formReturn
-	return nm, nil
-}
-
 func (m tuiModel) themeAt(cursor int) (ui.Theme, bool) {
 	themes := ui.Themes()
 	if cursor < 1 || cursor > len(themes) {

@@ -64,7 +64,10 @@ func (m tuiModel) sectionRows() int {
 	case secTenants:
 		return len(m.cfg.Tenants)
 	case secUsers:
-		return len(m.tenant.Users)
+		if !m.hasTenant {
+			return 0
+		}
+		return len(m.tenant.Users) + 1
 	case secSession:
 		return 2
 	case secDebug:
@@ -227,7 +230,7 @@ func (m tuiModel) onGeneralKey(key string) (tea.Model, tea.Cmd) {
 	switch m.setCursor {
 	case zoneRow:
 		if key == "enter" {
-			return m.openZoneForm()
+			return m.openZonePick()
 		}
 		return m.cycleZone()
 	case modeRow:
@@ -306,19 +309,20 @@ func (m tuiModel) onTenantsKey(key string) (tea.Model, tea.Cmd) {
 func (m tuiModel) onUsersSectionKey(key string) (tea.Model, tea.Cmd) {
 	users := m.tenant.Users
 
-	switch key {
-	case "a":
-		if m.tenantIndex() >= 0 {
-			return m.openUserFormFor(m.tenant)
+	if m.setCursor == 0 {
+		if key == "enter" {
+			if m.tenantIndex() >= 0 {
+				return m.openUserFormFor(m.tenant)
+			}
+			m.status = "no tenant selected"
 		}
-		m.status = "no tenant selected"
 		return m, nil
 	}
 
-	if m.setCursor >= len(users) {
+	if m.setCursor > len(users) {
 		return m, nil
 	}
-	name := users[m.setCursor].Name
+	name := users[m.setCursor-1].Name
 
 	switch key {
 	case "p":
@@ -350,7 +354,7 @@ func (m tuiModel) onUsersSectionKey(key string) (tea.Model, tea.Cmd) {
 			if m.ionUser == name {
 				m.ionUser = t.DefaultUser()
 			}
-			m.setCursor = max(0, min(m.setCursor, len(t.Users)-1))
+			m.setCursor = max(0, min(m.setCursor, len(t.Users)))
 		}
 	}
 	return m, nil
@@ -470,9 +474,7 @@ func (m tuiModel) sectionContent() []string {
 			out = append(out, ui.StyleDim.Render("no tenant selected"))
 			break
 		}
-		if len(m.tenant.Users) == 0 {
-			out = append(out, ui.StyleDim.Render("no ion users — press a to add one"))
-		}
+		out = append(out, ui.StyleGhost.Render("+ New ION User"))
 		for _, u := range m.tenant.Users {
 			tags := ""
 			if u.Default {
@@ -499,7 +501,7 @@ func (m tuiModel) sectionContent() []string {
 	case secReset:
 		out = append(out, ui.StyleWarn.Render("Factory Reset"))
 		out = append(out, ui.StyleWarn.Render("Restore Themes")+
-			ui.StyleDim.Render("   the schemes iontk ships; your own are untouched"))
+			ui.StyleDim.Render("   restores default iontk themes - user themes are untouched"))
 		if m.resetArmed {
 			what := "delete every tenant, ION password, token and scheme"
 			if m.setCursor == themeRestoreRow {
@@ -517,8 +519,8 @@ func (m tuiModel) sectionContent() []string {
 			ui.Label("Secrets")+ui.StyleDim.Render(m.store.Secrets.Backend()),
 			ui.Label("Version")+ui.StyleDim.Render(Version),
 			ui.Label("Stats")+ui.StyleDim.Render("alt+i overlays live counters"),
-			ui.Label("Colours")+ui.StyleDim.Render(ui.CurrentTheme().Name+"  "+profileLabel()),
-			ui.Label("Terminal")+ui.StyleDim.Render(termColourLine()),
+			ui.Label("Colors")+ui.StyleDim.Render(ui.CurrentTheme().Name+"  "+profileLabel()),
+			ui.Label("Terminal")+ui.StyleDim.Render(termColorLine()),
 			ui.Label("Times")+ui.StyleDim.Render(clock.Name()),
 			"",
 			ui.Label("Tenant")+ui.StyleDim.Render(m.tenant.Name+"  tsg "+m.tenant.TSGID),
@@ -564,7 +566,7 @@ func (m tuiModel) sectionHint() string {
 	case secTenants:
 		return "↑↓ row · space include · a add · enter edit · s switch · u add user · x forget"
 	case secUsers:
-		return "↑↓ row · enter edit · r run as · a add · p password · d default · x remove · tab back"
+		return "↑↓ row · enter new/edit · r run as · p password · d default · x remove · tab back"
 	case secSession:
 		return "↑↓ row · enter type · -/+ adjust · tab back"
 	case secDebug:

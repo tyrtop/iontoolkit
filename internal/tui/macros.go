@@ -304,6 +304,7 @@ func (m tuiModel) openMacroForm(mac config.Macro) (tea.Model, tea.Cmd) {
 	fields = append(fields, newMacroCommand(len(mac.Commands)))
 
 	m.formMacroName = mac.Name
+	m.cmdPick = newSuggest(nil, "")
 	title := "New macro"
 	if mac.Name != "" {
 		title = "Edit " + mac.Name
@@ -315,7 +316,7 @@ func (m tuiModel) addMacroCommand() (tea.Model, tea.Cmd) {
 	m.form[m.formCursor].input.Blur()
 	m.form = append(m.form, newMacroCommand(len(m.form)-1))
 	m.formCursor = len(m.form) - 1
-	return m, m.form[m.formCursor].input.Focus()
+	return m.syncMacroSuggestions(), m.form[m.formCursor].input.Focus()
 }
 
 func (m tuiModel) removeMacroCommand() (tea.Model, tea.Cmd) {
@@ -329,7 +330,7 @@ func (m tuiModel) removeMacroCommand() (tea.Model, tea.Cmd) {
 	m.formCursor = max(1, min(m.formCursor, len(m.form)-1))
 	in := &m.form[m.formCursor].input
 	in.SetCursor(len(in.Value()))
-	return m, in.Focus()
+	return m.syncMacroSuggestions(), in.Focus()
 }
 
 func (m tuiModel) macroFormCommands() []string {
@@ -424,7 +425,7 @@ func (m tuiModel) viewMacros() string {
 
 	b.WriteString("\n")
 	b.WriteString(ui.Footer(m.status,
-		"↑↓ move · e edit · x delete · u undo · / filter · esc menu"))
+		"↑↓ move · e edit · x delete · u undo · / filter · esc back"))
 	return b.String()
 }
 
@@ -451,7 +452,7 @@ func (m tuiModel) pasteMacroCommands(cmds []string) (tea.Model, tea.Cmd) {
 	m.formCursor = len(m.form) - 1
 	in := &m.form[m.formCursor].input
 	in.SetCursor(len(in.Value()))
-	return m, in.Focus()
+	return m.syncMacroSuggestions(), in.Focus()
 }
 
 func (m tuiModel) listReturn() tuiPhase {

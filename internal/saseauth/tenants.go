@@ -96,7 +96,7 @@ type Discovery struct {
 }
 
 func Discover(ctx context.Context, opt Options, tenancyURL string) (Discovery, error) {
-	tok, err := loginToken(ctx, "", opt, false)
+	tok, err := login(ctx, "", opt, false)
 	if err != nil {
 		return Discovery{}, err
 	}

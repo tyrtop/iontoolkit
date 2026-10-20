@@ -1,8 +1,11 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,6 +192,24 @@ func TestAccountSeedIsSharedBetweenTenants(t *testing.T) {
 	}
 }
 
+func TestWarmingATenantSpendsTheCredentialsAlreadyHeld(t *testing.T) {
+	st := testStore(t)
+	if err := st.Secrets.Set(config.AccountRefreshTokenKey(), "account-rt"); err != nil {
+		t.Fatalf("seed account token: %v", err)
+	}
+	if err := st.Secrets.Set(config.RefreshTokenKey("1"), "tenant-rt"); err != nil {
+		t.Fatalf("seed tenant token: %v", err)
+	}
+
+	src := tenantSource(st, nil, "1")
+	if got := src.RefreshToken(); got != "tenant-rt" {
+		t.Errorf("RefreshToken() = %q, want the stored token tried before any browser", got)
+	}
+	if src.Seed() == nil {
+		t.Error("Seed() = nil, want the account token offered too, or login opens a second window")
+	}
+}
+
 func TestATenantsOwnTokenComesFirstButTheSeedIsStillThere(t *testing.T) {
 	st := testStore(t)
 	if err := st.Secrets.Set(config.AccountRefreshTokenKey(), "account-rt"); err != nil {
@@ -275,6 +296,72 @@ func TestFixturesSeedTenantsThatResolveWithoutASignIn(t *testing.T) {
 	}
 }
 
+func TestATenantWithNoSignInReadsTheSameWhateverTheAccountCredentialDid(t *testing.T) {
+	const (
+		good = "1984021017"
+		bad  = "1538107912"
+	)
+
+	tests := []struct {
+		name string
+		seed func(t *testing.T, tokenURL string, client *http.Client) *saseauth.Seed
+	}{
+		{
+			name: "no account credential at all",
+			seed: func(*testing.T, string, *http.Client) *saseauth.Seed { return nil },
+		},
+		{
+			name: "another tenant narrowed it first",
+			seed: func(t *testing.T, tokenURL string, client *http.Client) *saseauth.Seed {
+				s := saseauth.NewSeed("acct")
+				opt := saseauth.Options{TokenURL: tokenURL, Client: client, Seed: s}
+				if _, _, err := saseauth.NewSource(good, "", opt, nil).Token(context.Background()); err != nil {
+					t.Fatalf("the first tenant could not narrow the account credential: %v", err)
+				}
+				return s
+			},
+		},
+		{
+			name: "it was refused outright",
+			seed: func(*testing.T, string, *http.Client) *saseauth.Seed {
+				return saseauth.NewSeed("dead")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.ParseForm()
+				if r.PostFormValue("refresh_token") == "acct" {
+					w.Write([]byte(`{"access_token":"at","refresh_token":"narrowed","expires_in":899}`))
+					return
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(`{"error":"invalid_grant"}`))
+			}))
+			defer srv.Close()
+
+			opt := saseauth.Options{
+				TokenURL: srv.URL,
+				Client:   srv.Client(),
+				Seed:     tt.seed(t, srv.URL, srv.Client()),
+			}
+			_, _, err := saseauth.NewSource(bad, "", opt, nil).Token(context.Background())
+			if err == nil {
+				t.Fatal("Token() succeeded for a tenant with no sign-in of its own")
+			}
+			if got := ShortAuthError(err); got != "no sign-in for this tenant" {
+				t.Errorf("ShortAuthError() = %q, want %q — the message must not report what the "+
+					"shared account credential did as a verdict on this tenant", got, "no sign-in for this tenant")
+			}
+			if !errors.Is(err, saseauth.ErrInteractiveRequired) {
+				t.Errorf("Token() error = %v, want it to still wrap ErrInteractiveRequired so the TUI offers a sign-in", err)
+			}
+		})
+	}
+}
+
 func TestShortAuthErrorSaysWhatToDoAboutIt(t *testing.T) {
 	tests := []struct {
 		name string
@@ -290,9 +377,27 @@ func TestShortAuthErrorSaysWhatToDoAboutIt(t *testing.T) {
 			want: "sign-in expired",
 		},
 		{
-			name: "no access to the tenant",
-			err: fmt.Errorf("%w: no existing browser session: authorization failed: interaction_required",
-				saseauth.ErrInteractiveRequired),
+			name: "never signed in to this tenant",
+			err: fmt.Errorf("%w: %w; %w: authorization failed: interaction_required",
+				saseauth.ErrInteractiveRequired, saseauth.ErrNoCredential, saseauth.ErrNoSession),
+			want: "no sign-in for this tenant",
+		},
+		{
+			name: "another tenant had already spent the account credential",
+			err: fmt.Errorf("%w: %w; account credential rejected: token: status 400 Bad Request: "+
+				`{"error":"invalid_grant"}`+"; %w: authorization failed: interaction_required",
+				saseauth.ErrInteractiveRequired, saseauth.ErrNoCredential, saseauth.ErrNoSession),
+			want: "no sign-in for this tenant",
+		},
+		{
+			name: "nothing silent is left to try",
+			err: fmt.Errorf("%w: %w: authorization failed: interaction_required",
+				saseauth.ErrInteractiveRequired, saseauth.ErrNoSession),
+			want: "sign-in needed",
+		},
+		{
+			name: "the authorization server refused an interactive sign-in",
+			err:  errors.New("authorization failed: login_required: no access to this tsg"),
 			want: "not accessible with this sign-in",
 		},
 		{

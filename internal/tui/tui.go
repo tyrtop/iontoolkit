@@ -51,8 +51,10 @@ const (
 	phaseSignedIn
 	phaseDiscover
 	phaseTenantPick
+	phaseWarming
 	phaseData
 	phaseMacros
+	phaseZone
 )
 
 type pickMode int
@@ -120,8 +122,7 @@ const (
 	formGeometry
 	formFavourite
 	formMacro
-	formZone
-	formColour
+	formColor
 	formNewTheme
 )
 
@@ -182,6 +183,8 @@ type tuiModel struct {
 	setCursor       int
 	tokenDead       string
 	authMode        authMode
+	browserAuthDone bool
+	warming         int
 	tenantIssues    map[string]string
 	runAs           map[string]string
 	usersTSG        string
@@ -230,7 +233,7 @@ type tuiModel struct {
 	switchUndo    []config.Tenant
 	tabEdit       bool
 	tabRow        int
-	pick          colourPick
+	pick          colorPick
 	spinTick      int
 	formThemeRole string
 	typedZone     string
@@ -263,6 +266,11 @@ type tuiModel struct {
 	listValues     [][]string
 
 	cmdInput textinput.Model
+	cmdPick  suggest
+
+	zoneInput  textinput.Model
+	zonePick   suggest
+	zoneReturn tuiPhase
 
 	events    <-chan sase.Event
 	ran       []string
@@ -354,7 +362,7 @@ func Run(ctx context.Context) error {
 	model := newTUIModel(ctx, store, cfg)
 	defer model.sessions.CloseAll()
 	// bubbletea's own reset is OSC 111, which not every terminal implements
-	defer restoreTermColour(os.Stdout)
+	defer restoreTermColor(os.Stdout)
 
 	_, err = tea.NewProgram(model, tea.WithContext(ctx)).Run()
 	if err != nil && !errors.Is(err, tea.ErrProgramKilled) {
@@ -508,7 +516,7 @@ func (m tuiModel) Init() tea.Cmd {
 			cmds = cmds[:1]
 		}
 	}
-	cmds = append(cmds, probeTermColour())
+	cmds = append(cmds, probeTermColor())
 	return tea.Batch(cmds...)
 }
 
@@ -590,15 +598,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.BackgroundColorMsg:
-		rememberTermColour(msg.Color, nil)
+		rememberTermColor(msg.Color, nil)
 		return m, nil
 
 	case tea.ForegroundColorMsg:
-		rememberTermColour(nil, msg.Color)
+		rememberTermColor(nil, msg.Color)
 		return m, nil
 
-	case colourProbeDoneMsg:
-		termColour.probed = true
+	case colorProbeDoneMsg:
+		termColor.probed = true
 		return m, nil
 
 	case tea.MouseWheelMsg:
@@ -653,7 +661,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.signInResume = true
-		return m.startSignIn()
+		return m.startSignInAuto()
+
+	case tenantsWarmedMsg:
+		return m.onTenantsWarmed(msg)
 
 	case discoveredMsg:
 		if msg.err != nil {
@@ -662,6 +673,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.ident = msg.d.Identity
+		m.browserAuthDone = true
 		if msg.d.RefreshToken != "" {
 			if err := m.store.Secrets.Set(config.AccountRefreshTokenKey(), msg.d.RefreshToken); err != nil {
 				m.status = err.Error()
@@ -689,7 +701,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if errors.Is(msg.err, saseauth.ErrInteractiveRequired) {
 				m.tokenDead = "sign-in expired"
 				m.signInResume = false
-				return m.startSignIn()
+				return m.startSignInAuto()
 			}
 			m.status = "token refresh failed: " + msg.err.Error()
 			return m, nil
@@ -712,6 +724,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.client = msg.client
 		m.pool.set(m.tenant.TSGID, msg.client)
+		m.browserAuthDone = true
 		m.status = ""
 		m.tokenDead = ""
 		watch := watchToken(msg.client.TokenErrors())
@@ -756,7 +769,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if app.IsAuthFailure(string(msg)) {
 			m.tokenDead = "sign-in expired"
 			m.signInResume = true
-			return m.startSignIn()
+			return m.startSignInAuto()
 		}
 		m.status = string(msg)
 		m.cacheState = cacheFailed
@@ -944,7 +957,7 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.form[m.formCursor].input, cmd = m.form[m.formCursor].input.Update(msg)
-		return m, cmd
+		return m.syncMacroSuggestions(), cmd
 
 	case phasePicking:
 		if m.filterOn {
@@ -965,6 +978,12 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.cmdInput, cmd = m.cmdInput.Update(msg)
+		return m.refilterCommands(lastSegment(m.cmdInput.Value())), cmd
+
+	case phaseZone:
+		var cmd tea.Cmd
+		m.zoneInput, cmd = m.zoneInput.Update(msg)
+		m.zonePick = m.zonePick.refilter(clock.Zones(), m.zoneInput.Value())
 		return m, cmd
 
 	case phaseMacros:
@@ -997,7 +1016,7 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) wantsSpinner() bool {
 	switch m.phase {
-	case phaseLoading, phaseRunning, phaseSettings, phaseSignIn, phaseDiscover:
+	case phaseLoading, phaseRunning, phaseSettings, phaseSignIn, phaseDiscover, phaseWarming:
 		return true
 	case phasePicking:
 		return m.cacheState == cacheUpdating
@@ -1402,6 +1421,8 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.onDataKey(key)
 	case phaseMacros:
 		return m.onMacroKey(msg, key)
+	case phaseZone:
+		return m.onZoneKey(msg, key)
 	case phaseMenu:
 		return m.onMenuKey(key)
 	case phaseSwitch:
@@ -1415,6 +1436,8 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case phaseTenantPick:
 		return m.onTenantPickKey(key)
+	case phaseWarming:
+		return m, nil
 	case phaseDiscover:
 		if key == "esc" || key == "q" {
 			m.status = "cancelled"
@@ -1469,7 +1492,7 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		if key == "q" && m.filterOn {
 			break
 		}
-		if m.filterOn || m.filter.Value() != "" {
+		if m.filterOn {
 			m.filterOn = false
 			m.filter.SetValue("")
 			m.filter.Blur()
@@ -1729,6 +1752,7 @@ func (m tuiModel) onPickTargets(targets []sessionTarget) (tea.Model, tea.Cmd) {
 
 	m.status = ""
 	m.phase = phaseCommand
+	m.cmdPick = newSuggest(m.catalog(), lastSegment(m.cmdInput.Value()))
 	return m, m.cmdInput.Focus()
 }
 
@@ -1738,7 +1762,16 @@ func (m tuiModel) onCommandKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		m.cmdInput.Blur()
 		m.phase = phasePicking
 		return m, nil
+	case "ctrl+n", "down":
+		m.cmdPick = m.cmdPick.move(1)
+		return m, nil
+	case "ctrl+p", "up":
+		m.cmdPick = m.cmdPick.move(-1)
+		return m, nil
 	case "tab":
+		if pick, ok := m.cmdPick.current(); ok {
+			return m.insertBatchCommand(pick), nil
+		}
 		if n := len(m.tenant.Users); n > 1 {
 			for i, u := range m.tenant.Users {
 				if u.Name == m.ionUser {
@@ -1759,6 +1792,7 @@ func (m tuiModel) onCommandKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 	}
 	var cmd tea.Cmd
 	m.cmdInput, cmd = m.cmdInput.Update(msg)
+	m = m.refilterCommands(lastSegment(m.cmdInput.Value()))
 	return m, cmd
 }
 
@@ -1901,6 +1935,8 @@ func (m tuiModel) View() tea.View {
 		v = tea.NewView(m.viewDiscover())
 	case phaseTenantPick:
 		v = tea.NewView(m.viewTenantPick())
+	case phaseWarming:
+		v = tea.NewView(m.viewWarming())
 	case phaseSignIn:
 		v = tea.NewView(m.viewSignIn())
 	case phaseSignedIn:
@@ -1912,6 +1948,8 @@ func (m tuiModel) View() tea.View {
 		v = tea.NewView(m.viewPicking())
 	case phaseCommand:
 		v = tea.NewView(m.viewCommand())
+	case phaseZone:
+		v = tea.NewView(m.viewZonePick())
 	case phaseRunning:
 		v = tea.NewView(m.viewRunning())
 	case phaseResults:
@@ -1934,7 +1972,7 @@ func (m tuiModel) View() tea.View {
 	v.Content = ui.ClipFrame(v.Content, m.height)
 	v.AltScreen = true
 	v.MouseMode = m.mouseMode()
-	v.BackgroundColor, v.ForegroundColor = frameColours()
+	v.BackgroundColor, v.ForegroundColor = frameColors()
 	return v
 }
 
@@ -1987,7 +2025,7 @@ func (m tuiModel) viewPicking() string {
 		if len(m.lastCleared) > 0 {
 			clear = "alt+z undo clear"
 		}
-		back := "menu"
+		back := "back"
 		if m.listReturn() == phaseMacros {
 			back = "macros"
 		}
@@ -2029,6 +2067,7 @@ func (m tuiModel) viewCommand() string {
 	b.WriteString("\n\n")
 
 	b.WriteString(m.cmdInput.View() + "\n\n")
+	b.WriteString(m.cmdSuggestBlock() + "\n")
 	b.WriteString(ui.StyleDim.Render("comma separated · read-only commands only") + "\n")
 	if m.status != "" {
 		b.WriteString(ui.StyleErr.Render(m.status) + "\n")
