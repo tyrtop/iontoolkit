@@ -347,6 +347,35 @@ func TestScrollingAPaneStaysInsideIt(t *testing.T) {
 	}
 }
 
+func TestABareArrowScrollsTheDataPage(t *testing.T) {
+	m, set := fixtureTUIWith(t, haFixtureYAML)
+	m.phase = phasePicking
+	m.mode = modeData
+	m.rebuildRows()
+
+	el := set.Tenants[0].Elements[0]
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	m = runDataLoads(t, next.(tuiModel), cmd)
+	m.phase = phaseData
+	m.height = 12
+
+	next, _ = m.onDataKey("down")
+	down := next.(tuiModel)
+	at := down.data[0].scroll
+	if at == 0 {
+		t.Fatal("down did not scroll the page; the wheel has nothing else to arrive as")
+	}
+	next, _ = down.onDataKey("up")
+	if got := next.(tuiModel).data[0].scroll; got >= at {
+		t.Errorf("scroll = %d after up, want below %d", got, at)
+	}
+
+	if got := m.mouseMode(); got != tea.MouseModeNone {
+		t.Errorf("mouseMode() = %v; asking for the mouse here costs click-to-select and buys "+
+			"nothing, since a notch already arrives as the arrow key above", got)
+	}
+}
+
 func paneRows(m tuiModel) int {
 	_, rows := m.dataPaneSize()
 	return rows
