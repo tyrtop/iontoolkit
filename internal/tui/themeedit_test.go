@@ -81,37 +81,37 @@ func TestEditingAThemeWritesAnOverrideAndAppliesIt(t *testing.T) {
 	}
 }
 
-func TestTypingAColourIsValidated(t *testing.T) {
+func TestTypingAColorIsValidated(t *testing.T) {
 	m := editorOn(t, "nord")
 	next, _ := m.onSettingsKey("down")
 	m = next.(tuiModel)
 	next, _ = m.onSettingsKey("t")
 	m = next.(tuiModel)
-	if m.formKind != formColour {
-		t.Fatalf("formKind = %v, want the colour form", m.formKind)
+	if m.formKind != formColor {
+		t.Fatalf("formKind = %v, want the color form", m.formKind)
 	}
 
 	m.form[0].input.SetValue("chartreuse")
-	next, _ = m.submitColour()
+	next, _ = m.submitColor()
 	m = next.(tuiModel)
-	if m.formKind != formColour {
-		t.Error("the form closed on a colour that will not parse")
+	if m.formKind != formColor {
+		t.Error("the form closed on a color that will not parse")
 	}
 	if m.status == "" {
-		t.Error("nothing said why the colour was refused")
+		t.Error("nothing said why the color was refused")
 	}
 
 	m.form[0].input.SetValue("#ff00aa")
-	next, _ = m.submitColour()
+	next, _ = m.submitColor()
 	m = next.(tuiModel)
 	if m.formKind != formNone {
-		t.Errorf("the form stayed open on a good colour: %s", m.status)
+		t.Errorf("the form stayed open on a good color: %s", m.status)
 	}
 	if got := m.themeDraft.Err; got != "#ff00aa" {
-		t.Errorf("err = %q, want the typed colour", got)
+		t.Errorf("err = %q, want the typed color", got)
 	}
 	if got := ui.CurrentTheme().Err; got != "#ff00aa" {
-		t.Errorf("CurrentTheme().Err = %q, want the typed colour applied", got)
+		t.Errorf("CurrentTheme().Err = %q, want the typed color applied", got)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestTheEditorNamesEveryRoleAndPreviewsTheDraft(t *testing.T) {
 		t.Errorf("sectionRows() = %d while editing, want 0", got)
 	}
 	if !strings.Contains(out, "enter pick") {
-		t.Errorf("the hint does not say how to change a colour:\n%s", out)
+		t.Errorf("the hint does not say how to change a color:\n%s", out)
 	}
 
 	next, _ := m.onSettingsKey("esc")
@@ -317,7 +317,7 @@ func TestUndoWalksBackOneChangeAtATime(t *testing.T) {
 	}
 }
 
-func TestPickingAColourIsOneUndoStep(t *testing.T) {
+func TestPickingAColorIsOneUndoStep(t *testing.T) {
 	m := pickerOn(t, "nord", "cmd")
 	before := m.themeDraft.Cmd
 
@@ -341,7 +341,7 @@ func TestPickingAColourIsOneUndoStep(t *testing.T) {
 	}
 }
 
-func TestRandomizeRollsEveryColourAndKeepsItReadable(t *testing.T) {
+func TestRandomizeRollsEveryColorAndKeepsItReadable(t *testing.T) {
 	m := editorOn(t, "classic")
 	m.themeRow = slices.Index(editRoles(), randomRow)
 
@@ -379,7 +379,7 @@ func TestRandomizeRollsEveryColourAndKeepsItReadable(t *testing.T) {
 	}
 }
 
-func TestSimilarShiftsEveryColourWithoutLosingTheScheme(t *testing.T) {
+func TestSimilarShiftsEveryColorWithoutLosingTheScheme(t *testing.T) {
 	m := editorOn(t, "Ben's Theme")
 	start := m.themeDraft
 	m.themeRow = slices.Index(editRoles(), similarRow)
@@ -400,7 +400,7 @@ func TestSimilarShiftsEveryColourWithoutLosingTheScheme(t *testing.T) {
 			d = -d
 		}
 		if d > 60 && d < 300 {
-			t.Errorf("%s moved %.0f degrees of hue, which is a different colour", role, d)
+			t.Errorf("%s moved %.0f degrees of hue, which is a different color", role, d)
 		}
 	}
 

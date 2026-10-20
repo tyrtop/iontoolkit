@@ -293,12 +293,80 @@ func (m tuiModel) saveTenantPick() (tea.Model, tea.Cmd) {
 	m.discovered, m.picked = nil, nil
 	m.menuCursor = 0
 	m.status = ""
+
+	if warm := m.cfg.AddedTenants(); m.browserAuthDone && len(warm) > 0 {
+		m.warming = len(warm)
+		m.phase = phaseWarming
+		return m, tea.Batch(m.spinner.Tick, warmTenants(m.ctx, m.store, warm))
+	}
+
 	m.phase = phaseMenu
 	m.loadFromCache()
 	if m.cacheState != cacheCached {
 		return m.refreshActive()
 	}
 	return m, nil
+}
+
+type tenantsWarmedMsg struct {
+	results []app.TenantWarm
+}
+
+func warmTenants(ctx context.Context, st *config.Store, tenants []config.Tenant) tea.Cmd {
+	return func() tea.Msg {
+		return tenantsWarmedMsg{results: app.WarmEach(ctx, st, tenants)}
+	}
+}
+
+func (m tuiModel) viewWarming() string {
+	var b strings.Builder
+	b.WriteString(ui.Banner(m.width, m.height))
+	b.WriteString(ui.StyleOK.Render(ui.MarkCheck.String()+" signed in as "+m.ident.Display()) + "\n")
+	b.WriteString(fmt.Sprintf("  %s signing in to each tenant\n\n", m.spinner.View()))
+	b.WriteString("  " + ui.StyleDim.Render(fmt.Sprintf(
+		"%d tenants, one at a time -- this is what makes one sign-in last", m.warming)) + "\n")
+	b.WriteString("\n")
+	b.WriteString(ui.Footer(m.status, "please wait"))
+	return b.String()
+}
+
+func (m tuiModel) onTenantsWarmed(msg tenantsWarmedMsg) (tea.Model, tea.Cmd) {
+	m.phase = phaseMenu
+	m.warming = 0
+
+	var failed []string
+	for _, r := range msg.results {
+		if r.Skipped {
+			continue
+		}
+		if r.Err != nil {
+			if m.tenantIssues == nil {
+				m.tenantIssues = map[string]string{}
+			}
+			m.tenantIssues[r.Tenant.TSGID] = shortTenantErr(r.Err)
+			failed = append(failed, r.Tenant.Name+": "+shortTenantErr(r.Err))
+			continue
+		}
+		delete(m.tenantIssues, r.Tenant.TSGID)
+		if r.Tenant.TSGID == m.tenant.TSGID {
+			m.tokenDead = ""
+		}
+	}
+
+	note := strings.Join(failed, "; ")
+	m.status = note
+
+	m.loadFromCache()
+	if m.cacheState == cacheCached {
+		return m, nil
+	}
+
+	next, cmd := m.refreshActive()
+	mm := next.(tuiModel)
+	if note != "" {
+		mm.status = note
+	}
+	return mm, cmd
 }
 
 func (m tuiModel) viewTenantPick() string {

@@ -123,7 +123,7 @@ func init() {
 	pf.BoolVar(&app.Debug, "debug", false, "run against a throwaway config with no saved tenants and secrets held only in memory")
 	pf.StringVar(&flagFixtures, "fixtures", "", "YAML file of fake tenants, elements and CLI responses to run against instead of real hardware")
 	pf.StringVar(&flagViews, "views", "", "YAML file of rich-data views to use instead of views.yaml in the config directory")
-	pf.StringVar(&flagThemes, "themes", "", "YAML file of colour schemes to add to the built-in ones, instead of themes.yaml in the config directory")
+	pf.StringVar(&flagThemes, "themes", "", "YAML file of color schemes to add to the built-in ones, instead of themes.yaml in the config directory")
 	pf.StringVar(&app.Defaults.TSGID, "tsg", "", "tenant service group ID (overrides SCM_TSG_ID)")
 	pf.StringVar(&flagFormat, "format", "", `batch output format: "json", "jsonl", "text", "table" or "csv" (default from settings, else json)`)
 	pf.StringVar(&flagOrient, "orientation", "", `row order for "table" and "csv": "ion" groups each element's commands, "command" puts one command across the fleet together (default from settings, else ion)`)

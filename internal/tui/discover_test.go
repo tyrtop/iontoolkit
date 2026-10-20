@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/saseauth"
@@ -468,6 +470,29 @@ func TestSwitchingActuallyFetchesForTheNewTenant(t *testing.T) {
 	}
 }
 
+func TestAddingATenantFetchesEvenBesideAFreshlyCachedOne(t *testing.T) {
+	m := discoverModel(t)
+	m.discovered = discoveredTenants
+	m.picked = map[string]bool{"1643707006": true, "1984021017": true}
+
+	if err := m.store.SaveCache(&config.ElementCache{
+		TSGID: "1643707006", FetchedAt: time.Now().Add(-2 * time.Minute),
+		Elements: []api.Element{{ID: "e1", Name: "s0001-rtr-01"}},
+	}); err != nil {
+		t.Fatalf("SaveCache() error = %v", err)
+	}
+
+	mm, cmd := m.saveTenantPick()
+	got := mm.(tuiModel)
+
+	if cmd == nil {
+		t.Error("nothing was fetched, so the tenant just added has no elements until a manual refresh")
+	}
+	if got.cacheState != cacheUpdating {
+		t.Errorf("cacheState = %v, want cacheUpdating with a tenant still unread", got.cacheState)
+	}
+}
+
 func TestSwitchingToATenantWithNoUsableCredentialSaysSo(t *testing.T) {
 	m := discoverModel(t)
 	m.cfg = &config.Config{Tenants: []config.Tenant{
@@ -693,5 +718,97 @@ func TestABrowserTenantIsNeverListedAsAServiceAccount(t *testing.T) {
 	}
 	if _, ok := m.switchAt(1); ok {
 		t.Error("there is a selectable row below the action row")
+	}
+}
+
+func TestThePickWarmsEveryTenantSoOneSignInLasts(t *testing.T) {
+	m := multiModel(t)
+	m.browserAuthDone = true
+	m.discovered = []saseauth.Tenant{
+		{ID: "111", Name: "Tractor Supply"},
+		{ID: "222", Name: "Niagara Bottling"},
+	}
+	m.picked = map[string]bool{"111": true, "222": true}
+	m.spinner = ui.NewSpinner("")
+
+	next, cmd := m.saveTenantPick()
+	mm := next.(tuiModel)
+	if mm.phase != phaseWarming {
+		t.Errorf("phase = %v, want phaseWarming so each tenant gets a credential of its own", mm.phase)
+	}
+	if mm.warming != 2 {
+		t.Errorf("warming = %d, want 2 tenants", mm.warming)
+	}
+	if cmd == nil {
+		t.Fatal("saveTenantPick() returned no command, so nothing warms the tenants")
+	}
+}
+
+func TestThePickDoesNotWarmWithoutABrowserSignIn(t *testing.T) {
+	m := multiModel(t)
+	m.discovered = []saseauth.Tenant{{ID: "111", Name: "Tractor Supply"}}
+	m.picked = map[string]bool{"111": true}
+
+	next, _ := m.saveTenantPick()
+	if mm := next.(tuiModel); mm.phase == phaseWarming {
+		t.Error("a service-account-only pick went warming; there is no browser session to warm from")
+	}
+}
+
+func TestAWarmFailureIsRecordedWithoutKillingTheSignIn(t *testing.T) {
+	m := multiModel(t)
+	m.browserAuthDone = true
+	m.spinner = ui.NewSpinner("")
+
+	next, _ := m.onTenantsWarmed(tenantsWarmedMsg{results: []app.TenantWarm{
+		{Tenant: m.cfg.Tenants[0]},
+		{Tenant: m.cfg.Tenants[1], Err: fmt.Errorf("%w: %w; %w",
+			saseauth.ErrInteractiveRequired, saseauth.ErrNoCredential, saseauth.ErrNoSession)},
+	}})
+	mm := next.(tuiModel)
+
+	if mm.tenantIssues["222"] == "" {
+		t.Error("the tenant that could not be warmed carries no issue, so nothing will say why")
+	}
+	if mm.tenantIssues["111"] != "" {
+		t.Errorf("the warmed tenant carries %q, want nothing", mm.tenantIssues["111"])
+	}
+	if mm.tokenDead != "" {
+		t.Errorf("tokenDead = %q; one tenant refusing must not mark the whole sign-in dead", mm.tokenDead)
+	}
+	if !strings.Contains(mm.status, "Niagara Bottling") {
+		t.Errorf("status = %q, want it to name the tenant that failed", mm.status)
+	}
+	if mm.phase == phaseWarming {
+		t.Error("still warming after the results arrived")
+	}
+}
+
+func TestASecondBrowserSignInIsNotOfferedForATenantItAlreadyFailed(t *testing.T) {
+	m := multiModel(t)
+	m.browserAuthDone = true
+	m.tenantIssues = map[string]string{"111": "no sign-in for this tenant"}
+	m.phase = phaseLoading
+	m.spinner = ui.NewSpinner("")
+
+	next, _ := m.startSignInAuto()
+	mm := next.(tuiModel)
+	if mm.phase == phaseSignIn {
+		t.Error("iontk reopened the browser for a tenant a fresh sign-in had just failed to reach")
+	}
+	if !strings.Contains(mm.status, "will not help") {
+		t.Errorf("status = %q, want it to say another sign-in will not help", mm.status)
+	}
+}
+
+func TestAnExpiredTenantStillGetsABrowserSignIn(t *testing.T) {
+	m := multiModel(t)
+	m.browserAuthDone = true
+	m.tokenDead = "sign-in expired"
+	m.spinner = ui.NewSpinner("")
+
+	next, _ := m.startSignInAuto()
+	if mm := next.(tuiModel); mm.phase != phaseSignIn {
+		t.Errorf("phase = %v, want phaseSignIn: a tenant with no recorded issue has only aged out", mm.phase)
 	}
 }

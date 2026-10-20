@@ -53,6 +53,14 @@ func Valid(spec string) error {
 	return err
 }
 
+func StampIn(spec string, t time.Time) (string, error) {
+	l, _, err := load(spec)
+	if err != nil {
+		return "", err
+	}
+	return t.In(l).Format(layout), nil
+}
+
 func Zone() *time.Location {
 	mu.RLock()
 	defer mu.RUnlock()

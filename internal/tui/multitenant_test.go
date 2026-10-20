@@ -1257,7 +1257,7 @@ func TestAltWClosesWhatYouAreIn(t *testing.T) {
 		m.spinner = ui.NewSpinner("")
 
 		out := plain(m.viewPicking())
-		if !strings.Contains(out, "alt+w menu") {
+		if !strings.Contains(out, "alt+w back") {
 			t.Errorf("the element list does not advertise alt+w as the way back:\n%s", out)
 		}
 		if strings.Contains(out, "alt+w quit") {

@@ -56,7 +56,7 @@ func TestAuthLineNamesTheCredentialKind(t *testing.T) {
 	}
 }
 
-func TestAuthLineColourTracksTheSessionLeft(t *testing.T) {
+func TestAuthLineColorTracksTheSessionLeft(t *testing.T) {
 	const (
 		red    = "\x1b[31m"
 		green  = "\x1b[32m"
@@ -85,7 +85,7 @@ func TestAuthLineColourTracksTheSessionLeft(t *testing.T) {
 
 			line := m.authLine()
 			if !strings.Contains(line, tt.wantCode) {
-				t.Errorf("authLine() = %q, want colour %q", line, strings.TrimPrefix(tt.wantCode, "\x1b"))
+				t.Errorf("authLine() = %q, want color %q", line, strings.TrimPrefix(tt.wantCode, "\x1b"))
 			}
 			text := plain(line)
 			hasTimer := strings.Contains(text, "left")

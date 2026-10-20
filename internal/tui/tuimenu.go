@@ -318,6 +318,21 @@ func (m tuiModel) openPasswordForm(t config.Tenant, user string) (tea.Model, tea
 }
 
 func (m tuiModel) onFormKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
+	if m.formKind == formMacro && m.formCursor >= 1 {
+		switch key {
+		case "ctrl+n":
+			m.cmdPick = m.cmdPick.move(1)
+			return m, nil
+		case "ctrl+p":
+			m.cmdPick = m.cmdPick.move(-1)
+			return m, nil
+		case "tab":
+			if pick, ok := m.cmdPick.current(); ok {
+				return m.insertMacroCommand(pick), nil
+			}
+		}
+	}
+
 	switch key {
 	case "esc":
 		m.form = nil
@@ -334,12 +349,12 @@ func (m tuiModel) onFormKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		}
 		m.form[m.formCursor].input.Blur()
 		m.formCursor = (m.formCursor + 1) % len(m.form)
-		return m, m.form[m.formCursor].input.Focus()
+		return m.syncMacroSuggestions(), m.form[m.formCursor].input.Focus()
 
 	case "shift+tab", "up":
 		m.form[m.formCursor].input.Blur()
 		m.formCursor = (m.formCursor - 1 + len(m.form)) % len(m.form)
-		return m, m.form[m.formCursor].input.Focus()
+		return m.syncMacroSuggestions(), m.form[m.formCursor].input.Focus()
 
 	case "enter":
 		return m.submitForm()
@@ -352,7 +367,7 @@ func (m tuiModel) onFormKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 
 	var cmd tea.Cmd
 	m.form[m.formCursor].input, cmd = m.form[m.formCursor].input.Update(msg)
-	return m, cmd
+	return m.syncMacroSuggestions(), cmd
 }
 
 func (m tuiModel) formValue(i int) string {
@@ -551,11 +566,8 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 		m.phase = m.formReturn
 		return m, nil
 
-	case formZone:
-		return m.submitZone()
-
-	case formColour:
-		return m.submitColour()
+	case formColor:
+		return m.submitColor()
 
 	case formNewTheme:
 		return m.submitNewTheme()
@@ -764,6 +776,7 @@ func (m tuiModel) viewForm() string {
 
 	if m.formKind == formMacro {
 		b.WriteString("  " + strings.Repeat(" ", 16) + ui.StyleGhost.Render("+ another command") + "\n")
+		b.WriteString("\n" + m.cmdSuggestBlock())
 	}
 
 	if w := m.plaintextWarning(); w != "" {
@@ -975,6 +988,21 @@ func (m tuiModel) moveUserSecret(tsg, from, to string) {
 	}
 }
 
+func (m tuiModel) startSignInAuto() (tea.Model, tea.Cmd) {
+	why := m.tenantIssues[m.tenant.TSGID]
+	if !m.browserAuthDone || why == "" {
+		return m.startSignIn()
+	}
+	m.signInResume = false
+	m.cacheState = cacheFailed
+	m.status = m.tenantName(m.tenant.TSGID) + ": " + why +
+		" — already signed in, so another browser sign-in will not help"
+	if m.phase == phaseLoading || m.phase == phaseSignIn {
+		m.phase = phaseMenu
+	}
+	return m, nil
+}
+
 func (m tuiModel) startSignIn() (tea.Model, tea.Cmd) {
 	if !m.hasTenant {
 		m.status = "no tenant to sign in to"
@@ -1042,7 +1070,7 @@ func (m tuiModel) viewSignedIn() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(ui.Footer(m.status, "enter continue · esc menu"))
+	b.WriteString(ui.Footer(m.status, "enter continue · esc back"))
 	return b.String()
 }
 

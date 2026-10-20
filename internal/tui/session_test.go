@@ -655,7 +655,7 @@ func TestAltWOnElementsReturnsToTheMenu(t *testing.T) {
 	}
 
 	hint := plain(m.viewPicking())
-	if !strings.Contains(hint, "alt+w menu") {
+	if !strings.Contains(hint, "alt+w back") {
 		t.Errorf("the element list does not advertise alt+w as the way back:\n%s", hint)
 	}
 }
@@ -977,7 +977,7 @@ func TestStatusSitsAboveTheKeybindLine(t *testing.T) {
 	if !strings.Contains(got, "detached S0100-RTR-01") {
 		t.Fatalf("status missing:\n%s", got)
 	}
-	if !strings.Contains(got, "alt+w menu") {
+	if !strings.Contains(got, "alt+w back") {
 		t.Fatalf("keybind line was overwritten by the status:\n%s", got)
 	}
 
@@ -987,7 +987,7 @@ func TestStatusSitsAboveTheKeybindLine(t *testing.T) {
 		if strings.Contains(ln, "detached S0100-RTR-01") {
 			statusAt = i
 		}
-		if strings.Contains(ln, "alt+w menu") {
+		if strings.Contains(ln, "alt+w back") {
 			hintAt = i
 		}
 	}

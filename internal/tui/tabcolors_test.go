@@ -13,12 +13,12 @@ func tabPageOn(t *testing.T, theme string) tuiModel {
 	m := editorOn(t, theme)
 	m.themeRow = slices.Index(editRows(), tabsRow)
 	if m.themeRow < 0 {
-		t.Fatal("there is no tab colours row in the editor")
+		t.Fatal("there is no tab colors row in the editor")
 	}
 	next, _ := m.onSettingsKey("enter")
 	m = next.(tuiModel)
 	if !m.tabEdit {
-		t.Fatal("enter did not open the tab colours page")
+		t.Fatal("enter did not open the tab colors page")
 	}
 	return m
 }
@@ -27,7 +27,7 @@ func TestTheTabPageListsTheRowsItsModeNeeds(t *testing.T) {
 	m := tabPageOn(t, "nord")
 
 	out := plain(m.viewSettings())
-	for _, want := range []string{"Tab Colours · nord", "Mode", "rotate", "Tab 1", "+ Another Tab"} {
+	for _, want := range []string{"Tab Colors · nord", "Mode", "rotate", "Tab 1", "+ Another Tab"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the page does not show %q:\n%s", want, out)
 		}
@@ -81,10 +81,10 @@ func TestTheRotationGrowsAndShrinks(t *testing.T) {
 	next, _ := m.onSettingsKey("enter")
 	m = next.(tuiModel)
 	if got := len(m.themeDraft.Tabs); got != before+1 {
-		t.Fatalf("the rotation has %d colours, want %d", got, before+1)
+		t.Fatalf("the rotation has %d colors, want %d", got, before+1)
 	}
 	if last := m.themeDraft.Tabs[len(m.themeDraft.Tabs)-1]; last == "" {
-		t.Error("the new entry is unset, which renders as no colour")
+		t.Error("the new entry is unset, which renders as no color")
 	}
 	if at := m.tabTargets()[m.tabRow]; at.idx != before {
 		t.Errorf("the cursor is on %+v, want the row that appeared", at)
@@ -93,7 +93,7 @@ func TestTheRotationGrowsAndShrinks(t *testing.T) {
 	next, _ = m.onSettingsKey("ctrl+d")
 	m = next.(tuiModel)
 	if got := len(m.themeDraft.Tabs); got != before {
-		t.Errorf("the rotation has %d colours after a drop, want %d", got, before)
+		t.Errorf("the rotation has %d colors after a drop, want %d", got, before)
 	}
 
 	for range before + 2 {
@@ -102,14 +102,14 @@ func TestTheRotationGrowsAndShrinks(t *testing.T) {
 		m = next.(tuiModel)
 	}
 	if got := len(m.themeDraft.Tabs); got != 1 {
-		t.Errorf("the rotation has %d colours, want it stopped at one", got)
+		t.Errorf("the rotation has %d colors, want it stopped at one", got)
 	}
-	if !strings.Contains(m.status, "needs one colour") {
+	if !strings.Contains(m.status, "needs one color") {
 		t.Errorf("status = %q, want it to say why", m.status)
 	}
 }
 
-func TestSettingAShellColourMaterialisesTheList(t *testing.T) {
+func TestSettingAShellColorMaterialisesTheList(t *testing.T) {
 	m := tabPageOn(t, "nord")
 	next, _ := m.onSettingsKey("right")
 	m = next.(tuiModel)
@@ -121,18 +121,18 @@ func TestSettingAShellColourMaterialisesTheList(t *testing.T) {
 	next, _ = m.onSettingsKey("R")
 	m = next.(tuiModel)
 	if len(m.themeDraft.TabShell) == 0 {
-		t.Fatal("rolling the shell colour did not write the list")
+		t.Fatal("rolling the shell color did not write the list")
 	}
 	if m.themeDraft.TabShell[0] == "" {
-		t.Error("the shell colour is unset")
+		t.Error("the shell color is unset")
 	}
 	reloaded, _ := ui.ThemeByName("nord")
 	if !slices.Equal(reloaded.Tabs, m.themeDraft.Tabs) {
-		t.Error("setting a shell colour changed the rotation")
+		t.Error("setting a shell color changed the rotation")
 	}
 }
 
-func TestATabColourIsPickedWithTheSamePicker(t *testing.T) {
+func TestATabColorIsPickedWithTheSamePicker(t *testing.T) {
 	m := tabPageOn(t, "nord")
 	m.tabRow = 1
 	before := m.themeDraft.Tabs[0]
@@ -143,7 +143,7 @@ func TestATabColourIsPickedWithTheSamePicker(t *testing.T) {
 		t.Fatal("enter did not open the picker")
 	}
 	if m.pick.list != listTabs || m.pick.idx != 0 {
-		t.Fatalf("the picker is on %+v, want the first tab colour", m.pick)
+		t.Fatalf("the picker is on %+v, want the first tab color", m.pick)
 	}
 	if out := plain(m.viewSettings()); !strings.Contains(out, "Picking Tab 1") {
 		t.Errorf("the picker does not name what it is on:\n%s", out)
@@ -154,7 +154,7 @@ func TestATabColourIsPickedWithTheSamePicker(t *testing.T) {
 		m = next.(tuiModel)
 	}
 	if m.themeDraft.Tabs[0] == before {
-		t.Error("moving on the disc did not change the tab colour")
+		t.Error("moving on the disc did not change the tab color")
 	}
 	next, _ = m.onSettingsKey("enter")
 	m = next.(tuiModel)
@@ -213,7 +213,7 @@ func TestThePreviewBarShowsTwoOfEachKind(t *testing.T) {
 	}
 }
 
-func TestRenderTheTabColoursPage(t *testing.T) {
+func TestRenderTheTabColorsPage(t *testing.T) {
 	m := tabPageOn(t, "Ben's Theme")
 	t.Log("\n" + m.viewSettings())
 	for range 2 {

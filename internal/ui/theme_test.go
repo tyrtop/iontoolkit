@@ -78,7 +78,7 @@ func TestTabPalettesCarryNoStatusMeaning(t *testing.T) {
 			continue
 		}
 		if len(th.Tabs) < 4 {
-			t.Errorf("%s has %d tab colours, want enough to tell tabs apart", th.Name, len(th.Tabs))
+			t.Errorf("%s has %d tab colors, want enough to tell tabs apart", th.Name, len(th.Tabs))
 		}
 		status := map[string]string{th.OK: "ok", th.Err: "err", th.Warn: "warn"}
 		for _, c := range th.Tabs {
@@ -86,7 +86,7 @@ func TestTabPalettesCarryNoStatusMeaning(t *testing.T) {
 				t.Errorf("%s uses %s (%s) for a tab, which carries status meaning", th.Name, c, name)
 			}
 			if role, clash := status[c]; clash {
-				t.Errorf("%s uses its %s colour (%s) for a tab", th.Name, role, c)
+				t.Errorf("%s uses its %s color (%s) for a tab", th.Name, role, c)
 			}
 		}
 	}
@@ -155,11 +155,11 @@ func TestABrokenThemeFileIsRefusedAndTheBuiltinsSurvive(t *testing.T) {
 		yaml string
 		want string
 	}{
-		{"a colour that is not one", "themes:\n  - name: x\n    ok: \"blue\"\n", "ANSI index"},
+		{"a color that is not one", "themes:\n  - name: x\n    ok: \"blue\"\n", "ANSI index"},
 		{"an index past 255", "themes:\n  - name: x\n    ok: \"300\"\n", "ANSI index"},
-		{"half a hex colour", "themes:\n  - name: x\n    ok: \"#12345\"\n", "#rrggbb"},
+		{"half a hex color", "themes:\n  - name: x\n    ok: \"#12345\"\n", "#rrggbb"},
 		{"a spinner nobody has", "themes:\n  - name: x\n    spinner: wheel\n", "spinner"},
-		{"a misspelled key", "themes:\n  - name: x\n    colour: \"2\"\n", "field colour"},
+		{"a misspelled key", "themes:\n  - name: x\n    color: \"2\"\n", "field color"},
 		{"a theme with no name", "themes:\n  - blurb: nameless\n", "needs a name"},
 	}
 	for _, tc := range tests {
@@ -221,7 +221,7 @@ func TestApplyRestylesTheMarks(t *testing.T) {
 	mono, _ := ThemeByName("mono")
 	Apply(mono)
 	if got := MarkCheck.String(); strings.Contains(got, "[3") {
-		t.Errorf("MarkCheck = %q, want no colour under mono", got)
+		t.Errorf("MarkCheck = %q, want no color under mono", got)
 	}
 	nord, _ := ThemeByName("nord")
 	Apply(nord)
@@ -230,7 +230,7 @@ func TestApplyRestylesTheMarks(t *testing.T) {
 	}
 }
 
-func TestMonoKeepsRolesApartWithoutColour(t *testing.T) {
+func TestMonoKeepsRolesApartWithoutColor(t *testing.T) {
 	mono, _ := ThemeByName("mono")
 	s := mono.Styles()
 	if s.Err.Render("x") == s.Warn.Render("x") {
@@ -262,12 +262,12 @@ func TestThemeNoteOnlyWarnsWhenItMatters(t *testing.T) {
 
 	SetProfile(colorprofile.ANSI256)
 	if got := ThemeNote(nord); got == "" {
-		t.Error("ThemeNote() says nothing about nord on a 256-colour terminal")
+		t.Error("ThemeNote() says nothing about nord on a 256-color terminal")
 	}
 	if got := ThemeNote(Default()); got != "" {
 		t.Errorf("ThemeNote() = %q for a 0-15 scheme, which needs no warning", got)
 	}
-	if got := ProfileName(); got != "256 colours" {
+	if got := ProfileName(); got != "256 colors" {
 		t.Errorf("ProfileName() = %q", got)
 	}
 }
@@ -281,7 +281,7 @@ func TestStyleTabMarksTheActiveOne(t *testing.T) {
 	StyleTab(TabShell, len(styles.Tabs)+3, len(styles.Tabs)+3, false)
 }
 
-func TestTheTabModesColourDifferently(t *testing.T) {
+func TestTheTabModesColorDifferently(t *testing.T) {
 	restore(t)
 	base := Theme{
 		Name: "tabs", OK: "2",
@@ -400,8 +400,8 @@ func TestEveryShippedSchemeSetsABackgroundExceptTwo(t *testing.T) {
 	loaded, loadErr = nil, ""
 
 	bare := map[string]string{
-		"classic": "the default, and the terminal's own sixteen colours",
-		"mono":    "no colour at all is the whole premise",
+		"classic": "the default, and the terminal's own sixteen colors",
+		"mono":    "no color at all is the whole premise",
 	}
 
 	for _, th := range Themes() {
@@ -413,7 +413,7 @@ func TestEveryShippedSchemeSetsABackgroundExceptTwo(t *testing.T) {
 		case th.Bg == "":
 			t.Errorf("%s sets no bg, so choosing it leaves the terminal unchanged", th.Name)
 		case th.Fg == "":
-			t.Errorf("%s sets a bg but no fg, so uncoloured text keeps the old colour", th.Name)
+			t.Errorf("%s sets a bg but no fg, so uncolored text keeps the old color", th.Name)
 		}
 
 		for _, role := range []string{"background", "other"} {
@@ -545,7 +545,7 @@ func TestOneBadFileLeavesTheRestLoaded(t *testing.T) {
 		t.Error("the good scheme was lost with the bad one")
 	}
 	if _, ok := ThemeByName("bad"); ok {
-		t.Error("the scheme with an unparseable colour was loaded anyway")
+		t.Error("the scheme with an unparseable color was loaded anyway")
 	}
 	if ThemesErr() == "" {
 		t.Error("nothing is on the settings page about it")

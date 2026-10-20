@@ -115,13 +115,18 @@ func ShortAuthError(err error) string {
 	switch {
 	case strings.Contains(text, "did not complete within"):
 		return "sign-in timed out"
+	case errors.Is(err, saseauth.ErrNoCredential):
+		return "no sign-in for this tenant"
 	case strings.Contains(text, "invalid_grant"),
 		strings.Contains(text, "stored refresh token rejected"):
 		return "sign-in expired"
-	case errors.Is(err, saseauth.ErrInteractiveRequired),
-		strings.Contains(text, "interaction_required"),
+	case errors.Is(err, saseauth.ErrNoSession):
+		return "sign-in needed"
+	case strings.Contains(text, "interaction_required"),
 		strings.Contains(text, "login_required"):
 		return "not accessible with this sign-in"
+	case errors.Is(err, saseauth.ErrInteractiveRequired):
+		return "sign-in needed"
 	case IsAuthFailure(text):
 		return "credential rejected"
 	}

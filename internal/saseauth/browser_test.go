@@ -2,6 +2,7 @@ package saseauth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -329,6 +330,53 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 	}
 	if !strings.Contains(scopes[2], "tsg_id:1538107912") {
 		t.Errorf("third scope = %q, want the other tenant", scopes[2])
+	}
+}
+
+func TestARefusedSilentLegIsNotLaunchedAgain(t *testing.T) {
+	profile := t.TempDir()
+	count := filepath.Join(t.TempDir(), "launches")
+	fake := filepath.Join(t.TempDir(), "fake-chrome")
+	script := "#!/bin/sh\necho x >> " + count + "\nexit 1\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	launches := func() int {
+		b, err := os.ReadFile(count)
+		if err != nil {
+			return 0
+		}
+		return strings.Count(string(b), "x")
+	}
+
+	opt := Options{Chrome: fake, DataDir: profile, NoSandbox: true, Timeout: 10 * time.Second}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	if _, err := LoginSilent(ctx, "1984021017", opt); err == nil {
+		t.Fatal("LoginSilent() succeeded with a browser that cannot start")
+	}
+	first := launches()
+	if first == 0 {
+		t.Fatalf("the browser was never launched, so this test proves nothing")
+	}
+
+	_, err := LoginSilent(ctx, "1984021017", opt)
+	if !errors.Is(err, ErrNoSession) {
+		t.Errorf("second LoginSilent() error = %v, want it to wrap ErrNoSession", err)
+	}
+	if got := launches(); got != first {
+		t.Errorf("the browser was launched %d times over two silent legs, want %d — a refused "+
+			"prompt=none does not start answering differently on its own", got, first)
+	}
+
+	if _, err := LoginSilent(ctx, "1538107912", opt); err == nil {
+		t.Fatal("LoginSilent() succeeded for the other tenant")
+	}
+	if got := launches(); got <= first {
+		t.Errorf("another tenant's silent leg was skipped after %d launches; the refusal is "+
+			"per tenant, since prompt=none can refuse one tenant of a live session", first)
 	}
 }
 

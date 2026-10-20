@@ -34,7 +34,7 @@ func pickerOn(t *testing.T, theme, role string) tuiModel {
 	return m
 }
 
-func TestMovingOnTheDiscAppliesTheColourWithoutSavingIt(t *testing.T) {
+func TestMovingOnTheDiscAppliesTheColorWithoutSavingIt(t *testing.T) {
 	m := pickerOn(t, "nord", "ok")
 	before := m.themeDraft.OK
 
@@ -47,7 +47,7 @@ func TestMovingOnTheDiscAppliesTheColourWithoutSavingIt(t *testing.T) {
 		t.Errorf("the disc gave %q, want a hex", m.themeDraft.OK)
 	}
 	if got := ui.CurrentTheme().OK; got != m.themeDraft.OK {
-		t.Errorf("CurrentTheme().OK = %q, want the colour under the cursor %q",
+		t.Errorf("CurrentTheme().OK = %q, want the color under the cursor %q",
 			got, m.themeDraft.OK)
 	}
 
@@ -71,7 +71,7 @@ func TestMovingOnTheDiscAppliesTheColourWithoutSavingIt(t *testing.T) {
 	}
 }
 
-func TestEscapingThePickerPutsTheOldColourBack(t *testing.T) {
+func TestEscapingThePickerPutsTheOldColorBack(t *testing.T) {
 	m := pickerOn(t, "nord", "warn")
 	original := m.themeDraft.Warn
 
@@ -117,11 +117,11 @@ func TestTheChartStoresAnIndexRatherThanAHex(t *testing.T) {
 		t.Errorf("element = %q off the chart, want an index 0-255", got)
 	}
 	if got := ui.CurrentTheme().Element; got != m.themeDraft.Element {
-		t.Errorf("the chart colour was not applied: frame has %q", got)
+		t.Errorf("the chart color was not applied: frame has %q", got)
 	}
 }
 
-func TestBrightnessChangesTheColourUnderTheCursor(t *testing.T) {
+func TestBrightnessChangesTheColorUnderTheCursor(t *testing.T) {
 	m := pickerOn(t, "nord", "cmd")
 	next, _ := m.onSettingsKey("left")
 	m = next.(tuiModel)
@@ -175,7 +175,7 @@ func TestTheDiscFitsTheTerminalItIsDrawnIn(t *testing.T) {
 	}
 }
 
-func TestRenderTheColourPicker(t *testing.T) {
+func TestRenderTheColorPicker(t *testing.T) {
 	m := pickerOn(t, "Ben's Theme", "element")
 	t.Log("\n" + m.viewSettings())
 	next, _ := m.onSettingsKey("tab")
@@ -203,7 +203,7 @@ func TestTheFrameCarriesTheSchemesBackground(t *testing.T) {
 	if got := dark.View().BackgroundColor; got != nil {
 		t.Errorf("the background went out before the terminal was asked: %v", got)
 	}
-	answered, _ := dark.Update(colourProbeDoneMsg{})
+	answered, _ := dark.Update(colorProbeDoneMsg{})
 	dark = answered.(tuiModel)
 
 	v := dark.View()
@@ -211,7 +211,7 @@ func TestTheFrameCarriesTheSchemesBackground(t *testing.T) {
 		t.Error("the frame carries no background for a scheme that sets one")
 	}
 	if v.ForegroundColor == nil {
-		t.Error("the frame carries no default text colour")
+		t.Error("the frame carries no default text color")
 	}
 
 	plainTheme := use("classic")
@@ -246,7 +246,7 @@ func TestTheBackgroundIsPickedLikeAnyOtherRole(t *testing.T) {
 	}
 }
 
-func TestSwitchingViewsDoesNotChangeTheColour(t *testing.T) {
+func TestSwitchingViewsDoesNotChangeTheColor(t *testing.T) {
 	m := pickerOn(t, "Ben's Theme", "element")
 	before := m.themeDraft.Element
 
@@ -283,86 +283,86 @@ func TestSwitchingViewsDoesNotChangeTheColour(t *testing.T) {
 
 func probeAnswered(t *testing.T) {
 	t.Helper()
-	before := termColour
-	t.Cleanup(func() { termColour = before })
-	termColour.probed = true
+	before := termColor
+	t.Cleanup(func() { termColor = before })
+	termColor.probed = true
 }
 
-func TestTheTerminalsOwnColoursAreSetRatherThanReset(t *testing.T) {
+func TestTheTerminalsOwnColorsAreSetRatherThanReset(t *testing.T) {
 	pinTheme(t)
-	before := termColour
-	t.Cleanup(func() { termColour = before })
+	before := termColor
+	t.Cleanup(func() { termColor = before })
 
-	termColour = termColourState{}
-	if bg, fg := frameColours(); bg != nil || fg != nil {
-		t.Errorf("frameColours() = %v/%v before the terminal answered", bg, fg)
+	termColor = termColorState{}
+	if bg, fg := frameColors(); bg != nil || fg != nil {
+		t.Errorf("frameColors() = %v/%v before the terminal answered", bg, fg)
 	}
 
-	rememberTermColour(colourOf(0x12, 0x34, 0x56), colourOf(0xab, 0xcd, 0xef))
-	if termColour.hexBg != "#123456" || termColour.hexFg != "#abcdef" {
-		t.Fatalf("the report was not kept: %q / %q", termColour.hexBg, termColour.hexFg)
+	rememberTermColor(colorOf(0x12, 0x34, 0x56), colorOf(0xab, 0xcd, 0xef))
+	if termColor.hexBg != "#123456" || termColor.hexFg != "#abcdef" {
+		t.Fatalf("the report was not kept: %q / %q", termColor.hexBg, termColor.hexFg)
 	}
-	if !termColour.probed {
-		t.Error("both halves answered, so the frame should stop holding its colours")
+	if !termColor.probed {
+		t.Error("both halves answered, so the frame should stop holding its colors")
 	}
 
 	if ok := ui.UseTheme("classic"); !ok {
 		t.Fatal("classic is not in the set")
 	}
-	bg, _ := frameColours()
-	if got := hexOfColour(bg); got != "#123456" {
+	bg, _ := frameColors()
+	if got := hexOfColor(bg); got != "#123456" {
 		t.Errorf("on classic the frame carries %q, want the terminal's own #123456", got)
 	}
 
 	if ok := ui.UseTheme("Ben's Theme"); !ok {
 		t.Fatal("Ben's Theme is not in the set")
 	}
-	bg, _ = frameColours()
-	if got := hexOfColour(bg); got != "#1e1e2e" {
+	bg, _ = frameColors()
+	if got := hexOfColor(bg); got != "#1e1e2e" {
 		t.Errorf("on Ben's Theme the frame carries %q, want the scheme's own", got)
 	}
 
 	var buf strings.Builder
-	restoreTermColour(&buf)
+	restoreTermColor(&buf)
 	if got := buf.String(); got != "\x1b]11;#123456\x07\x1b]10;#abcdef\x07" {
 		t.Errorf("restore wrote %q", got)
 	}
 
-	rememberTermColour(colourOf(0, 0, 0), nil)
-	if termColour.hexBg != "#123456" {
-		t.Errorf("bg = %q, want the colour from before iontk set one", termColour.hexBg)
+	rememberTermColor(colorOf(0, 0, 0), nil)
+	if termColor.hexBg != "#123456" {
+		t.Errorf("bg = %q, want the color from before iontk set one", termColor.hexBg)
 	}
 
-	termColour = termColourState{probed: true}
+	termColor = termColorState{probed: true}
 	ui.UseTheme("classic")
 	buf.Reset()
-	if bg, fg := frameColours(); bg != nil || fg != nil {
-		t.Errorf("frameColours() = %v/%v with no answer and a bare scheme", bg, fg)
+	if bg, fg := frameColors(); bg != nil || fg != nil {
+		t.Errorf("frameColors() = %v/%v with no answer and a bare scheme", bg, fg)
 	}
-	restoreTermColour(&buf)
+	restoreTermColor(&buf)
 	if got := buf.String(); got != "" {
 		t.Errorf("restore wrote %q with no answer to go on", got)
 	}
 }
 
 func TestTheDebugPageSaysWhatTheTerminalReported(t *testing.T) {
-	before := termColour
-	t.Cleanup(func() { termColour = before })
+	before := termColor
+	t.Cleanup(func() { termColor = before })
 
-	termColour = termColourState{}
-	if got := termColourLine(); !strings.Contains(got, "asking") {
+	termColor = termColorState{}
+	if got := termColorLine(); !strings.Contains(got, "asking") {
 		t.Errorf("before an answer the line reads %q", got)
 	}
-	termColour = termColourState{probed: true}
-	if got := termColourLine(); !strings.Contains(got, "did not answer") {
+	termColor = termColorState{probed: true}
+	if got := termColorLine(); !strings.Contains(got, "did not answer") {
 		t.Errorf("with no answer the line reads %q", got)
 	}
-	termColour = termColourState{probed: true, hexBg: "#1a1b26", hexFg: "#c0caf5"}
-	if got := termColourLine(); !strings.Contains(got, "#1a1b26") || !strings.Contains(got, "#c0caf5") {
-		t.Errorf("the line reads %q, want both colours", got)
+	termColor = termColorState{probed: true, hexBg: "#1a1b26", hexFg: "#c0caf5"}
+	if got := termColorLine(); !strings.Contains(got, "#1a1b26") || !strings.Contains(got, "#c0caf5") {
+		t.Errorf("the line reads %q, want both colors", got)
 	}
 }
 
-func colourOf(r, g, b uint8) color.Color {
+func colorOf(r, g, b uint8) color.Color {
 	return color.RGBA{R: r, G: g, B: b, A: 0xff}
 }

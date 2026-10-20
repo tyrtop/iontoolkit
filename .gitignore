@@ -2,6 +2,8 @@
 /iontk
 .env
 *.txt
+# go:embed cannot find a file git never took, and *.txt is blanket-ignored.
+!internal/clock/zones.txt
 *.json
 *.md
 # The release job builds into dist/, and a local reproduction of it leaves

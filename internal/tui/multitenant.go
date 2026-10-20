@@ -153,9 +153,11 @@ func (m *tuiModel) mergeTenantElements(tsg, tenant string, els []api.Element) {
 func (m *tuiModel) loadFromCache() {
 	var rows []elementRow
 	oldest := time.Duration(0)
+	missing := false
 	for _, t := range m.aggregateTenants() {
 		c, err := m.store.Cache(t.TSGID)
 		if err != nil || !c.Usable() {
+			missing = true
 			continue
 		}
 		for _, el := range c.Elements {
@@ -184,7 +186,7 @@ func (m *tuiModel) loadFromCache() {
 	m.cacheCount = len(rows)
 	m.cacheAt = time.Now().Add(-oldest)
 	m.cacheState = cacheCached
-	if oldest >= cacheFresh {
+	if missing || oldest >= cacheFresh {
 		m.cacheState = cacheUpdating
 	}
 }

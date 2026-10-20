@@ -104,11 +104,11 @@ func TestTheWheelIsADisc(t *testing.T) {
 	dim := WheelAt(cx+2, cy, cols, rows, 0.3)
 	bright := WheelAt(cx+2, cy, cols, rows, 1)
 	if dim == bright {
-		t.Error("the brightness did not change the colour")
+		t.Error("the brightness did not change the color")
 	}
 }
 
-func TestWheelCellFindsTheColourItWasGiven(t *testing.T) {
+func TestWheelCellFindsTheColorItWasGiven(t *testing.T) {
 	const cols, rows = 22, 11
 	for _, spec := range []string{"#ff0000", "#00ff00", "#0000ff", "#89b4fa"} {
 		x, y, v := WheelCell(spec, cols, rows)
@@ -138,7 +138,7 @@ func TestTheChartHoldsEveryIndexOnce(t *testing.T) {
 		}
 	}
 	if len(seen) != 256 {
-		t.Errorf("the chart holds %d colours, want 256", len(seen))
+		t.Errorf("the chart holds %d colors, want 256", len(seen))
 	}
 
 	row, col, ok := GridCell("111")

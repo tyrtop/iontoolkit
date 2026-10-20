@@ -10,6 +10,8 @@ import (
 
 var ErrInteractiveRequired = errors.New("interactive sign-in required")
 
+var ErrNoCredential = errors.New("no stored sign-in for this tenant")
+
 type Source struct {
 	tsg  string
 	opt  Options
@@ -62,7 +64,7 @@ func (s *Source) accept(tok *Token) (string, time.Duration, error) {
 }
 
 func (s *Source) Token(ctx context.Context) (string, time.Duration, error) {
-	var stored error
+	var stored, account error
 
 	if rt := s.RefreshToken(); rt != "" {
 		tok, err := Refresh(ctx, s.opt.httpClient(), s.opt.token(), rt, s.tsg)
@@ -82,9 +84,7 @@ func (s *Source) Token(ctx context.Context) (string, time.Duration, error) {
 		if ctx.Err() != nil {
 			return "", 0, err
 		}
-		if stored == nil {
-			stored = fmt.Errorf("account credential rejected: %w", err)
-		}
+		account = fmt.Errorf("account credential rejected: %w", err)
 	}
 
 	tok, err := LoginSilent(ctx, s.tsg, s.opt)
@@ -95,9 +95,13 @@ func (s *Source) Token(ctx context.Context) (string, time.Duration, error) {
 		return "", 0, err
 	}
 	if stored != nil {
-		return "", 0, permanentError{fmt.Errorf("%w: %v; %v", ErrInteractiveRequired, stored, err)}
+		return "", 0, permanentError{fmt.Errorf("%w: %v; %w", ErrInteractiveRequired, stored, err)}
 	}
-	return "", 0, permanentError{fmt.Errorf("%w: %v", ErrInteractiveRequired, err)}
+	if account != nil {
+		return "", 0, permanentError{fmt.Errorf("%w: %w; %v; %w",
+			ErrInteractiveRequired, ErrNoCredential, account, err)}
+	}
+	return "", 0, permanentError{fmt.Errorf("%w: %w; %w", ErrInteractiveRequired, ErrNoCredential, err)}
 }
 
 type permanentError struct{ err error }

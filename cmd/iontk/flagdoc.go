@@ -68,7 +68,7 @@ var flagGroups = []struct {
 	{"Rich data", "The TUI's third element mode reads the portal instead of opening a session. Its panes are defined in YAML: `--views` points at a file instead of `views.yaml` in the config directory, which is also how a `--fixtures` run gets views of its own.", []string{
 		"views",
 	}},
-	{"Appearance", "Colour schemes are YAML too: `--themes` points at a file whose schemes are added to the built-in ones, or replace one of the same name, instead of `themes.yaml` in the config directory. The same escape hatch as `--views`, for the same reason.", []string{
+	{"Appearance", "Color schemes are YAML too: `--themes` points at a file whose schemes are added to the built-in ones, or replace one of the same name, instead of `themes.yaml` in the config directory. The same escape hatch as `--views`, for the same reason.", []string{
 		"themes",
 	}},
 }
