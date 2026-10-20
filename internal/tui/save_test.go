@@ -35,7 +35,6 @@ func TestBatchOutDirIsOnlyUsedWhenFileOutputIsOn(t *testing.T) {
 	if got := cfg.BatchOutDir(); got != "/tmp/reports" {
 		t.Errorf("BatchOutDir() = %q, want the folder once file output is on", got)
 	}
-	// Turning it back off must not lose the path the user typed.
 	cfg.BatchToFile = false
 	if cfg.BatchDir != "/tmp/reports" {
 		t.Errorf("BatchDir = %q, want the path kept", cfg.BatchDir)
@@ -56,7 +55,7 @@ func TestSaveBatchResults(t *testing.T) {
 		store: st,
 		results: []sase.Result{
 			sampleResult("1", "s0001"),
-			{}, // an element that never ran
+			{},
 			sampleResult("3", "s0003"),
 		},
 	}
@@ -146,7 +145,6 @@ func TestBatchSettingsCycleAndToggle(t *testing.T) {
 		height:     30,
 	}
 
-	// Row 0 cycles the format and persists it.
 	m.setCursor = 0
 	mm, _ := m.onBatchKey("enter")
 	m = mm.(tuiModel)
@@ -159,7 +157,6 @@ func TestBatchSettingsCycleAndToggle(t *testing.T) {
 		t.Errorf("saved BatchFormat = %q, want it persisted", saved.BatchFormat)
 	}
 
-	// Row 1 cycles the row orientation.
 	m.setCursor = 1
 	mm, _ = m.onBatchKey("enter")
 	m = mm.(tuiModel)
@@ -172,7 +169,6 @@ func TestBatchSettingsCycleAndToggle(t *testing.T) {
 		t.Errorf("saved BatchOrient = %q, want it persisted", saved.BatchOrient)
 	}
 
-	// Row 2 toggles the destination.
 	m.setCursor = 2
 	mm, _ = m.onBatchKey("enter")
 	m = mm.(tuiModel)
@@ -185,7 +181,6 @@ func TestBatchSettingsCycleAndToggle(t *testing.T) {
 		t.Error("BatchToFile = true, want the toggle to go back to stdout")
 	}
 
-	// Row 3 opens the folder form.
 	m.setCursor = 3
 	mm, _ = m.onBatchKey("enter")
 	m = mm.(tuiModel)

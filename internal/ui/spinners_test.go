@@ -2,9 +2,6 @@ package ui
 
 import "testing"
 
-// A theme names its spinner, so a name that is not one has to be catchable at
-// load: SpinnerName itself falls back to the default, which in a config file
-// would look like the name being ignored.
 func TestSpinnerNamesAreCheckable(t *testing.T) {
 	if got := SpinnerName("nonsense"); got != DefaultSpinner {
 		t.Errorf("unknown name = %q, want %q", got, DefaultSpinner)

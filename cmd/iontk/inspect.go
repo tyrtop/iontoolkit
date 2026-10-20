@@ -63,8 +63,6 @@ func runInspect(ctx context.Context, eid string) error {
 	}
 
 	snap := client.ElementSnapshot(ctx, el)
-	// The record is the one body the snapshot does not fetch for itself, and
-	// the one the widened element fields are read off.
 	snap.Raw[api.ElementURL(eid)] = body
 
 	enc := json.NewEncoder(os.Stdout)
@@ -72,9 +70,6 @@ func runInspect(ctx context.Context, eid string) error {
 	if flagInspectRaw {
 		return enc.Encode(snap.Raw)
 	}
-	// Every part that failed is reported on stderr as well as in the JSON: a
-	// snapshot of an element whose status endpoint refused is still worth
-	// printing, but not worth mistaking for a complete one.
 	if err := snap.Err(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
@@ -102,9 +97,6 @@ type statusReport struct {
 	Channels            []channelReport `json:"channels"`
 }
 
-// The utc integers are printed as both the number and a time, because the
-// unit is the part of these shapes least proven against hardware: a wrong
-// scale shows up as a date in the wrong century.
 type channelReport struct {
 	Name           string `json:"name"`
 	Connected      bool   `json:"connected"`

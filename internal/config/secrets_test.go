@@ -139,7 +139,6 @@ func TestMemorySecretsNeverTouchDisk(t *testing.T) {
 		t.Errorf("Get() after Delete error = %v, want ErrNotFound", err)
 	}
 
-	// --debug exists so a run cannot leave credentials behind.
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		t.Fatal(err)

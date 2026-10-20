@@ -192,7 +192,6 @@ func TestCodeFromCallback(t *testing.T) {
 	}
 }
 
-// tokenServer records the last posted form and replies with body.
 func tokenServer(t *testing.T, status int, body string) (*httptest.Server, *url.Values) {
 	t.Helper()
 	var got url.Values

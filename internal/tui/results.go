@@ -28,9 +28,6 @@ func newResultsTable() table.Model {
 	return t
 }
 
-// moveResultCursor has the same reason as the element list's: the widget's
-// MoveUp scrolls its viewport away from the cursor, so moving up rebuilds the
-// scroll state and walks down to the row.
 func (m *tuiModel) moveResultCursor(delta int) {
 	rows := m.resTable.Rows()
 	if len(rows) == 0 {
@@ -51,18 +48,11 @@ func (m *tuiModel) moveResultCursor(delta int) {
 	m.resTable = fresh
 }
 
-// resOutputRoom is how many lines of an open result fit under the table. The
-// keys and the view both ask, so neither can disagree about where the window
-// ends.
 func (m tuiModel) resOutputRoom() int {
-	// header, filter line, the table, the divider and the element name.
 	used := 4 + m.resTableHeight()
 	return max(2, m.height-used-2-m.statsRows())
 }
 
-// moveResLine moves the highlight through an open result's output and keeps
-// the window on it. The output scrolls like the list above it rather than
-// being a block of text with no cursor in it.
 func (m tuiModel) moveResLine(delta int) tuiModel {
 	idx, ok := m.currentResult()
 	if !ok {
@@ -102,11 +92,6 @@ func (m tuiModel) completedCount() int {
 }
 
 func (m *tuiModel) applyResultFilter() {
-	// The ION the cursor is on, not the row it is on. Results arrive in
-	// whatever order the elements finish and the table is in run order, so an
-	// earlier element landing after a later one moves every row below it --
-	// which used to slide the highlight onto a different ION under the user's
-	// hands, and take an open output pane with it.
 	was := m.cursorResultID()
 
 	q := strings.ToLower(strings.TrimSpace(m.resFilter.Value()))
@@ -135,7 +120,6 @@ func (m *tuiModel) applyResultFilter() {
 	m.keepResultCursorOn(was)
 }
 
-// cursorResultID is the element under the cursor, empty when there is none.
 func (m tuiModel) cursorResultID() string {
 	if idx, ok := m.currentResult(); ok {
 		return m.results[idx].ElementID
@@ -143,9 +127,6 @@ func (m tuiModel) cursorResultID() string {
 	return ""
 }
 
-// keepResultCursorOn puts the cursor back on an element wherever its row has
-// moved to, and clamps when that element is no longer listed at all -- which a
-// filter can do.
 func (m *tuiModel) keepResultCursorOn(eid string) {
 	if eid != "" {
 		for row, i := range m.resMatches {
@@ -207,11 +188,9 @@ func (m tuiModel) currentResult() (int, bool) {
 
 func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
 	switch key {
-	// Only the main menu's q quits: a key that leaves a page on one screen and
-	// kills the run on the next is one nobody can press with confidence.
 	case "esc", "q":
 		if key == "q" && m.resFilterOn {
-			break // a letter while the filter is being typed
+			break
 		}
 		switch {
 		case m.resOpen:
@@ -230,13 +209,10 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 
 	case "up", "down", "k", "j", "home", "end":
 		if key == "k" || key == "j" {
-			// Letters while the query is being typed are text.
 			if m.resFilterOn {
 				break
 			}
 		}
-		// An open result scrolls on the same keys the list moves on, with the
-		// highlight on the line it is scrolled to.
 		if m.resOpen {
 			switch key {
 			case "up", "k":
@@ -293,16 +269,15 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 
 	case "/":
 		if !m.resFilterOn {
+			m.resFilter.SetValue("")
 			m.resFilterOn = true
 			m.resOpen = false
-			m.rebuildResultRows()
+			m.applyResultFilter()
 			return m, m.resFilter.Focus()
 		}
 	}
 
 	if m.resFilterOn {
-		// Backspace on an already-empty query leaves, as on every other page
-		// that has a filter: the last press deletes the "/".
 		if key == "backspace" && m.resFilter.Value() == "" {
 			m.resFilterOn = false
 			m.resFilter.Blur()
@@ -320,10 +295,6 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 	return m, cmd
 }
 
-// onResultsOutputKey carries the save controls, because changing the format in
-// settings means leaving the results to go and find it. Changing the format
-// writes nothing by itself -- the run was already saved in the old one -- so
-// each of these says that s is what writes a file.
 func (m tuiModel) onResultsOutputKey(key string) (tea.Model, tea.Cmd) {
 	if key == "s" {
 		m.status = m.saveBatchResults()
@@ -387,8 +358,6 @@ func (m tuiModel) viewResults() string {
 	if m.failed > 0 {
 		header += ui.StyleErr.Render(fmt.Sprintf("  %d failed", m.failed))
 	}
-	// The save format belongs on the page it is toggled from; f and o are
-	// otherwise keys with nothing on screen to show they did anything.
 	tag := m.batchFormat()
 	if output.Tabular(m.batchFormat()) {
 		tag += " · " + output.OrientationLabel(m.batchOrient())
@@ -428,9 +397,6 @@ func (m tuiModel) viewResults() string {
 		start := min(m.resScroll, max(0, len(lines)-room))
 		for i := start; i < len(lines) && i-start < room; i++ {
 			if i == m.resLine {
-				// Padded plain and restyled: the line already carries its own
-				// colours, and a highlight wrapped around them would end at
-				// the first reset inside it.
 				row := fmt.Sprintf("%-*s", width, ui.Truncate(ui.Plain(lines[i]), width))
 				b.WriteString(ui.StyleRow.Render(row) + "\n")
 				continue
@@ -452,8 +418,6 @@ func (m tuiModel) viewResults() string {
 	hint := "↑↓/jk move · / filter · enter open · f/o format · s save · " + copyKeyHint + " run as json · esc/q back"
 	if m.resOpen {
 		hint = "↑↓/jk scroll · pgup/pgdn page · home/end ends · " + copyKeyHint + " output · esc/q close"
-		// Where in the output the highlight is, since the pane holds a
-		// fraction of a long run's output.
 		if idx, ok := m.currentResult(); ok {
 			where := fmt.Sprintf("line %d of %d", m.resLine+1, len(m.resultDetail(idx)))
 			if status != "" {
@@ -462,8 +426,6 @@ func (m tuiModel) viewResults() string {
 			status = where + status
 		}
 	}
-	// Truncated rather than wrapped: a hint that takes two rows on a narrow
-	// terminal moves the whole frame.
 	return body + "\n" + ui.Footer(status, ui.Truncate(hint, max(10, m.width-1)))
 }
 

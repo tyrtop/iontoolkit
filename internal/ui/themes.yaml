@@ -15,10 +15,37 @@
 #   hot      a session about to go
 #   border   a modal's frame
 #   divider  the rule between two panes
+#   bg       the terminal's own background, set while iontk runs and put back
+#            when it exits; unset leaves the terminal as the user has it
+#   fg       the default text colour, for anything no role has coloured
 #   spinner  the spinner's shape, one of the names iontk ships
 #   spinner_color  what it is drawn in, including in the bubbles widget
-#   tabs     cycled one per open tab, so none of them may be a status colour
+#   tabs     the rotation tabs take their colour from; none of them may be a
+#            status colour, since a tab is identity rather than state
+#   tab_mode how that rotation is read, which the theme editor's "tab colours"
+#            page sets. One of:
+#              rotate  a colour per position in the bar (the default, and
+#                      what iontk has always done)
+#              type    one colour for shells, one for rich-data tabs
+#              both    a rotation of its own per kind
+#              shared  one rotation, counted within the kind -- so the first
+#                      shell and the first data tab are the same colour
+#   tab_shell, tab_data
+#            the per-kind rotations the type and both modes draw from. Unset
+#            borrows the rotation, offset by kind so the two do not start on
+#            the same colour. The element list's tab is always the first
+#            colour of the rotation, in every mode
 #   mono     true drops colour entirely for bold, faint, italic and reverse
+#
+# bg and fg go out as OSC 11 and 10, which only take a hex: an index written
+# there is resolved to xterm's value for it, not the terminal's own.
+#
+# Every scheme here sets a background except **classic** and **mono**, and
+# those two leave it out on purpose: classic is the default and is the
+# terminal's own sixteen colours, so it must not repaint the terminal of
+# someone who never chose a scheme, and mono's whole premise is no colour at
+# all. Everything else carries the background its palette was drawn for -- the
+# blurbs were already describing one.
 #
 # A colour is an ANSI index 0-255 or a #rrggbb. An index under 16 is remapped by
 # the terminal's own theme, which is why classic stays there; anything else is
@@ -53,6 +80,8 @@ themes:
     hot: "11"
     border: "11"
     divider: "8"
+    bg: "#000000"
+    fg: "#e4e4e4"
     spinner: jump
     spinner_color: "13"
     tabs: ["15", "12", "14", "13", "4", "6", "7"]
@@ -73,6 +102,8 @@ themes:
     hot: "#d08770"
     border: "#ebcb8b"
     divider: "#4c566a"
+    bg: "#2e3440"
+    fg: "#d8dee9"
     spinner: dot
     spinner_color: "#b48ead"
     tabs: ["#d8dee9", "#81a1c1", "#88c0d0", "#b48ead", "#5e81ac", "#8fbcbb", "#eceff4"]
@@ -91,6 +122,8 @@ themes:
     hot: "#ffa07a"
     border: "#cd853f"
     divider: "#6b6b6b"
+    bg: "#33302a"
+    fg: "#f5deb3"
     spinner: ellipsis
     spinner_color: "#bdb76b"
     tabs: ["#f5deb3", "#87ceeb", "#b0c4de", "#d8bfd8", "#deb887", "#c0c0c0", "#add8e6"]
@@ -106,6 +139,8 @@ themes:
     hot: "#ffa500"
     border: "#ffff60"
     divider: "#4e4e4e"
+    bg: "#333333"
+    fg: "#ffffff"
     spinner: moon
     spinner_color: "#ff80ff"
     tabs: ["#ffffff", "#80a0ff", "#60ffff", "#ff80ff", "#c0c0ff", "#a0a0ff", "#d0d0d0"]
@@ -121,6 +156,9 @@ themes:
     hot: "#b85c00"
     border: "#a0522d"
     divider: "#9e9e9e"
+    # dark ink needs the light paper to go with it, or this one is unreadable
+    bg: "#f2ead3"
+    fg: "#303030"
     spinner: points
     spinner_color: "#005f5f"
     tabs: ["#303030", "#00008b", "#005f5f", "#8b008b", "#4b0082", "#2f4f4f", "#555555"]
@@ -136,6 +174,8 @@ themes:
     hot: "#de935f"
     border: "#8abeb7"
     divider: "#5a5a5a"
+    bg: "#262626"
+    fg: "#c5c8c6"
     spinner: meter
     spinner_color: "#b294bb"
     tabs: ["#c5c8c6", "#7aa6da", "#8abeb7", "#b294bb", "#81a2be", "#a3a3a3", "#d0d0d0"]
@@ -151,6 +191,8 @@ themes:
     hot: "#ff8700"
     border: "#d7af00"
     divider: "#585858"
+    bg: "#000000"
+    fg: "#ffffff"
     spinner: hamburger
     spinner_color: "#af5fd7"
     tabs: ["#ffffff", "#5f87ff", "#00d7d7", "#af5fd7", "#8787ff", "#00afaf", "#bcbcbc"]
@@ -166,6 +208,8 @@ themes:
     hot: "#d7875f"
     border: "#d7af87"
     divider: "#585858"
+    bg: "#1c1c1c"
+    fg: "#bcbcbc"
     spinner: pulse
     spinner_color: "#afafd7"
     tabs: ["#bcbcbc", "#afafd7", "#87afaf", "#d7afd7", "#a8a8a8", "#8787af", "#d7d7d7"]
@@ -185,6 +229,9 @@ themes:
     hot: "#fab387"
     border: "#f9e2af"
     divider: "#585b70"
+    # mocha's own base and text, so iontk matches the editor next to it
+    bg: "#1e1e2e"
+    fg: "#cdd6f4"
     spinner: monkey
     spinner_color: "#cba6f7"
     tabs: ["#cdd6f4", "#89b4fa", "#94e2d5", "#cba6f7", "#74c7ec", "#f5c2e7", "#b4befe"]

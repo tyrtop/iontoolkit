@@ -8,10 +8,6 @@ import (
 	"net/http"
 )
 
-// Profile is the operator the current token acts as. For an SSO-backed sign-in
-// the name fields hold the subject rather than a person's name, so the readable
-// identity comes from the token instead; what is useful here is proof the token
-// works, plus the region and roles it resolved to.
 type Profile struct {
 	ID       string   `json:"id"`
 	Email    string   `json:"email"`
@@ -21,7 +17,6 @@ type Profile struct {
 	Roles    []string `json:"-"`
 }
 
-// Fetch decodes roles separately: they arrive as objects, not strings.
 func (p *Profile) UnmarshalJSON(b []byte) error {
 	type plain Profile
 	var raw struct {
@@ -42,8 +37,6 @@ func (p *Profile) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Profile fetches the operator profile. It doubles as a connection test: this
-// is the call that proves a token is accepted by the SD-WAN API.
 func (s *Client) Profile(ctx context.Context) (Profile, error) {
 	if err := s.limiter.Wait(ctx); err != nil {
 		return Profile{}, fmt.Errorf("profile: rate limit wait: %w", err)

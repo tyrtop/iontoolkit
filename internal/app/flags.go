@@ -9,9 +9,6 @@ import (
 	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
-// RootFlags are the knobs the root command binds its command-line flags to.
-// They live here, not in the command, because the TUI reads the same numbers
-// without ever having parsed a flag.
 type RootFlags struct {
 	HTTPTimeout    time.Duration
 	ElementTimeout time.Duration
@@ -29,8 +26,6 @@ type RootFlags struct {
 	PagerPrompts   []string
 }
 
-// Defaults doubles as the flag defaults the root command declares, so the
-// numbers are stated once and a run that never parsed a flag still works.
 var Defaults = RootFlags{
 	HTTPTimeout:    15 * time.Second,
 	ElementTimeout: 60 * time.Second,
@@ -40,12 +35,10 @@ var Defaults = RootFlags{
 	Burst:          20,
 	DialAttempts:   3,
 	DialTimeout:    10 * time.Second,
-	// the portal's own captures peak at 8-9 a second, and a 429 is waited out
-	RPS:          10,
-	PagerPrompts: ioncli.DefaultPagers,
-	// Works on an ion 1200-s running 6.3.4. "terminal length 0", "no paging"
-	// and "set cli pager off" all get rejected there. If a device rejects this
-	// one too, the pager scraper handles the run.
+	RPS:            10,
+	PagerPrompts:   ioncli.DefaultPagers,
+	// works on an ion 1200-s running 6.3.4, where "terminal length 0", "no paging"
+	// and "set cli pager off" are all rejected
 	PagerOff: "set paging off",
 }
 
@@ -107,8 +100,6 @@ func (f Flags) ValidateCreds() error {
 	if f.ClientID != "" && f.ClientSecret != "" && f.TSGID != "" {
 		return nil
 	}
-	// Browser authentication carries the tenant in the token scope, so the
-	// tenant is the only thing it still needs up front.
 	if f.BrowserAuth && f.TSGID != "" {
 		return nil
 	}
@@ -122,9 +113,6 @@ func (f Flags) Validate() error {
 	return f.ValidateRun()
 }
 
-// ValidateRun checks everything but the credentials, for a run whose targets
-// carry their own: a --search can span tenants, and each one signs in for
-// itself.
 func (f Flags) ValidateRun() error {
 	if f.RefreshMargin <= 0 {
 		return fmt.Errorf("refresh margin must be greater than 0")

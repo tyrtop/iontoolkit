@@ -7,32 +7,18 @@ import (
 	"fmt"
 )
 
-// Snapshot is what the portal knows about one element: the record, its
-// back-channels to the controller, and every interface with its live state.
-// One part failing does not cancel the others -- an element with no site has
-// no interfaces to list, and an old controller may not answer for status at
-// all -- so each part carries its own error and the caller renders what
-// arrived.
 type Snapshot struct {
 	Element    Element
 	Status     ElementStatus
 	StatusErr  error
 	Interfaces []InterfaceState
 	IfacesErr  error
-	// Cluster is nil unless the element is in a spoke HA cluster, which its
-	// own record is what says.
 	Cluster    *SpokeClusterStatus
 	ClusterErr error
 
-	// Raw is each response body as it arrived, keyed by URL. These shapes are
-	// modelled from the portal's own field names rather than a published
-	// schema, so the bytes are kept: without them a field that never decodes
-	// looks exactly like a field the server left empty.
 	Raw map[string]json.RawMessage
 }
 
-// InterfaceState pairs what was configured with what the port is doing. The
-// status is a slice because a bypass pair reports one per member.
 type InterfaceState struct {
 	Interface Interface
 	Status    []InterfaceStatus
@@ -47,9 +33,6 @@ func (s Snapshot) Err() error {
 	return errors.Join(errs...)
 }
 
-// ElementSnapshot gathers the portal side of one element. It takes the
-// element record rather than an ID because the interface endpoints are
-// site-scoped, and the site only comes from the record.
 func (s *Client) ElementSnapshot(ctx context.Context, el Element) Snapshot {
 	snap := Snapshot{Element: el, Raw: map[string]json.RawMessage{}}
 

@@ -12,17 +12,13 @@ import (
 
 const TenancyURL = "https://api.apps.paloaltonetworks.com/tenancy/v1/tenant_service_groups"
 
-// Tenant is a tenant service group the signed-in account can reach.
 type Tenant struct {
 	ID       string
 	Name     string
 	ParentID string
-	// Depth is how far down the hierarchy this sits, for indenting a list.
-	Depth int
+	Depth    int
 }
 
-// tsgNode mirrors the tenancy response, which nests children when asked for a
-// hierarchy.
 type tsgNode struct {
 	ID          string    `json:"id"`
 	DisplayName string    `json:"display_name"`
@@ -49,8 +45,6 @@ func flatten(nodes []tsgNode, parent string, depth int, out *[]Tenant, seen map[
 	}
 }
 
-// ListTenants asks which tenants the token can act for. A tenant-less token is
-// enough: this is how the tenant to scope to is chosen in the first place.
 func ListTenants(ctx context.Context, client *http.Client, baseURL, accessToken string) ([]Tenant, error) {
 	if baseURL == "" {
 		baseURL = TenancyURL
@@ -89,30 +83,18 @@ func ListTenants(ctx context.Context, client *http.Client, baseURL, accessToken 
 	if len(tenants) == 0 {
 		return nil, fmt.Errorf("tenants: the account has access to none")
 	}
-	// Hierarchy order is what the portal shows, but a flat alphabetical list is
-	// easier to pick from once it is more than a handful.
 	sort.SliceStable(tenants, func(i, j int) bool {
 		return strings.ToLower(tenants[i].Name) < strings.ToLower(tenants[j].Name)
 	})
 	return tenants, nil
 }
 
-// Discovery is the result of signing in without naming a tenant.
 type Discovery struct {
-	Identity Identity
-	Tenants  []Tenant
-	// RefreshToken is the tenant-less credential the sign-in produced. It is
-	// the seed for every tenant: a refresh grant may narrow its scope to one
-	// tenant, which works where a silent re-authorize does not.
+	Identity     Identity
+	Tenants      []Tenant
 	RefreshToken string
 }
 
-// Discover opens a browser, signs in with no tenant scope, and reports which
-// tenants the account can use. Nothing has to be typed: the tenant ID and its
-// name both come back from the portal.
-//
-// The session cookie this leaves in the browser profile is what lets every
-// later tenant be scoped silently, with no second window.
 func Discover(ctx context.Context, opt Options, tenancyURL string) (Discovery, error) {
 	tok, err := loginToken(ctx, "", opt, false)
 	if err != nil {

@@ -110,7 +110,6 @@ func TestSeedRetiredOnlyWhenTheTokenItselfIsRefused(t *testing.T) {
 		wantSpent bool
 	}{
 		{"token rejected", `{"error":"invalid_grant"}`, true},
-		// A refused scope says nothing about the token.
 		{"scope refused", `{"error":"invalid_scope"}`, false},
 	}
 	for _, tt := range tests {

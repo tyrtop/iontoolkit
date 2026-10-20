@@ -15,8 +15,6 @@ func feedLines(t *testing.T, c *fakeConn, from, to int) {
 	}
 }
 
-// A session whose output has outrun a six-row screen, which is the only state
-// where scrolling back shows anything.
 func scrolledSession(t *testing.T, lines int) (*Session, *fakeConn) {
 	t.Helper()
 	d := &fakeDialer{conn: newFakeConn(nil)}
@@ -52,7 +50,6 @@ func TestScrolledViewReachesLinesThatLeftTheScreen(t *testing.T) {
 		t.Fatalf("the first line is still on screen, so nothing scrolled off:\n%s", plain(live.Content))
 	}
 
-	// Far enough back to reach the first line ever written.
 	back := s.ScrolledView(40, 6, live.Total)
 	if want := live.Total - 6; back.Offset != want {
 		t.Errorf("Offset = %d, want it clamped to %d", back.Offset, want)
@@ -124,8 +121,6 @@ func TestScrolledViewDoesNotRaceDeviceOutput(t *testing.T) {
 	}
 }
 
-// Buffer is what a copy takes, so it has to reach past the screen: the whole
-// point of copying a session is the output that has already scrolled away.
 func TestBufferHoldsTheScrollbackAndTheScreen(t *testing.T) {
 	s, _ := scrolledSession(t, 30)
 

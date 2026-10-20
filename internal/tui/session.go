@@ -24,9 +24,6 @@ func (d toolkitDialer) DialToolkit(ctx context.Context, eid string, cols, rows i
 	return d.c.DialToolkit(ctx, eid, cols, rows)
 }
 
-// dialerFor is how a session reaches an element. Fixture mode substitutes a
-// playback device here and nowhere else, so the pane, autologin and the
-// emulator are all still the production ones.
 func (m tuiModel) dialerFor(c *api.Client) ionterm.Dialer {
 	if app.Fixture != nil {
 		return app.Fixture.Dialer()
@@ -86,8 +83,6 @@ func (m tuiModel) openSession(eid, name, tsg string) (tea.Model, tea.Cmd) {
 func (m tuiModel) openOneSession(t sessionTarget) (tea.Model, tea.Cmd) {
 	c := m.tenantClient(t.tsg)
 	if c == nil {
-		// ensureClients already tried; reaching here means that tenant could
-		// not authenticate, and tenantErr has said why.
 		if m.status == "" {
 			m.status = "could not reach " + m.tenantName(t.tsg)
 		}
@@ -110,15 +105,10 @@ func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	if len(targets) == 0 {
 		return m, nil
 	}
-	// Remembered so a credential failure can replay exactly this request after
-	// signing in.
 	m.lastTargets = targets
 	if m.needsSignIn(tsgsOf(targets)) {
 		return m.signInThenSessions(targets)
 	}
-	// Any tenant without a client is authenticated first and the request
-	// replayed. This has to come before the single-target path below, which
-	// would otherwise report a disconnected tenant instead of connecting it.
 	if conn := m.ensureClients(tsgsOf(targets)); len(conn) > 0 {
 		m.resumeSessions = targets
 		m.connectWait = len(conn)
@@ -158,16 +148,11 @@ func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 		m.status = "skipped " + strings.Join(unreachable, ", ") + ": tenant unreachable"
 	}
 
-	// Opening several at once stays on the list: the tabs fill in behind, and
-	// jumping to whichever finished last hid the rest of them.
 	m.connecting = ""
 	m.rebuildRows()
 	return m, tea.Batch(cmds...)
 }
 
-// The tab ring is the element list, then the shells, then the data panes.
-// Sessions keep their numbers as data tabs come and go, which they would not
-// if the two kinds interleaved by the order they were opened.
 func (m tuiModel) tabCount() int { return 1 + m.sessions.Count() + len(m.data) }
 
 func (m tuiModel) currentTab() int {
@@ -200,13 +185,11 @@ func (m tuiModel) selectTab(i int) tuiModel {
 
 func (m tuiModel) onTabKey(key string) (tuiModel, bool) {
 	switch key {
-	// hjkl's own pair for the tab ring, since the lists move on hjkl too.
 	case "alt+right", "alt+l":
 		return m.selectTab(m.currentTab() + 1), true
 	case "alt+left", "alt+h":
 		return m.selectTab(m.currentTab() - 1), true
 	case "alt+w", "alt+k":
-		// A data pane has no connection to detach, so both keys close it.
 		if m.phase == phaseData {
 			return m.closeDataTab(), true
 		}
@@ -252,8 +235,6 @@ func (m tuiModel) onSessionKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		return m.openFavourites()
 	}
 
-	// Before the session checks below: a favourite is worth reaching on a tab
-	// whose connection has died, if only to copy it into a fresh one.
 	if n, ok := altDigit(key); ok {
 		return m.useFavourite(n)
 	}
@@ -263,24 +244,14 @@ func (m tuiModel) onSessionKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		return m, nil
 	}
 
-	// Before the checks below, like the favourites: what a tab last said is
-	// the reason anyone is looking at a dead one.
 	if key == "alt+y" {
 		return m.copySession()
 	}
 
-	// A redial is a new CLI session: enable and config context are gone, so
-	// it is never automatic for a shell someone is sitting in front of. It
-	// has to cover a tab that failed as well as one that went quiet -- a torn
-	// connection is the common way to lose a session, and alt+r used to do
-	// nothing at all on one.
 	if key == "alt+r" {
 		if s.Err() != nil || s.Hung() || s.Ended() {
 			return m.redialActive()
 		}
-		// Swallowed rather than typed at the device: the footer offers this
-		// key, so sending it as an escape sequence is the one thing it must
-		// not do.
 		m.status = "this session is still answering — alt+k closes it"
 		return m, nil
 	}
@@ -297,12 +268,8 @@ func (m tuiModel) onSessionKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		return next, nil
 	}
 
-	// Anything typed belongs at the live bottom: the device is about to answer
-	// it, and a pane held above that would not show what it said.
 	m.sesScroll = 0
 
-	// Counted before the key is forwarded: sending it clears the line, and
-	// the device echoes it away.
 	var save tea.Cmd
 	if key == "enter" {
 		save = m.recordSessionLine()
@@ -311,9 +278,6 @@ func (m tuiModel) onSessionKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 	return m, save
 }
 
-// onScrollKey holds the pane above its live bottom. The device has no
-// scrollback of its own, so these are iontk's keys and have to be ones a CLI
-// would not want: shift and alt chords, never a bare key.
 func (m tuiModel) onScrollKey(s *ionterm.Session, key string) (tuiModel, bool) {
 	_, rows := m.paneSize()
 	switch key {
@@ -334,10 +298,6 @@ func (m tuiModel) onScrollKey(s *ionterm.Session, key string) (tuiModel, bool) {
 	return m, true
 }
 
-// reopenLastTab brings back the most recent tab: the detached session itself
-// when it is still alive, otherwise a fresh session to the same element. A
-// shell that was left with "exit", or that died while detached, has nothing to
-// reattach to, so dialling again is the only thing that can honour alt+t.
 func (m tuiModel) reopenLastTab() (tea.Model, tea.Cmd) {
 	if _, ok := m.sessions.Reattach(); ok {
 		m.status = ""
@@ -353,7 +313,6 @@ func (m tuiModel) reopenLastTab() (tea.Model, tea.Cmd) {
 	return m.openSession(eid, name, m.tsgForElement(eid))
 }
 
-// redialActive replaces a hung tab with a fresh session on the same element.
 func (m tuiModel) redialActive() (tea.Model, tea.Cmd) {
 	s := m.sessions.Active()
 	if s == nil {
@@ -362,16 +321,9 @@ func (m tuiModel) redialActive() (tea.Model, tea.Cmd) {
 	eid, name := s.ElementID, s.Name
 	tsg := m.tsgForElement(eid)
 	if tsg == "" {
-		// An element the list no longer holds -- a reattached tab after a
-		// cache drop -- would otherwise redial with no tenant and report that
-		// nothing could be reached.
 		tsg = m.tenant.TSGID
 	}
 
-	// The dead tab stays until the new session is actually up. It is the only
-	// record of what the session said and how it failed, and closing it first
-	// left the user looking at another ION's pane with nothing to say a dial
-	// was even running. onSessionOpened swaps them over.
 	m.status = ""
 	next, cmd := m.openSession(eid, name, tsg)
 	nm, ok := next.(tuiModel)
@@ -383,8 +335,6 @@ func (m tuiModel) redialActive() (tea.Model, tea.Cmd) {
 	return nm, cmd
 }
 
-// onSessionOpened finishes a redial by taking the dead tab away, now that
-// there is a live one on the same element to put in its place.
 func (m tuiModel) onSessionOpened(eid string) tuiModel {
 	m.connecting = ""
 	m.dialDone(eid)
@@ -400,13 +350,11 @@ func (m tuiModel) onSessionOpened(eid string) tuiModel {
 
 func (m tuiModel) tabBar() string {
 	cur := m.currentTab()
-	render := func(i int, label string) string {
-		return ui.StyleTab(i, i == cur).Render(label)
+	render := func(kind ui.TabKind, ring, nth int, label string) string {
+		return ui.StyleTab(kind, ring, nth, ring == cur).Render(label)
 	}
 
-	// No numbers any more: alt+N is a favourite command, and a number on a
-	// tab is an invitation to press the chord that no longer selects it.
-	parts := []string{render(0, fmt.Sprintf(" elements (%s) ", m.mode))}
+	parts := []string{render(ui.TabList, 0, 0, fmt.Sprintf(" elements (%s) ", m.mode))}
 	for i, s := range m.sessions.All() {
 		mark := ""
 		switch {
@@ -415,7 +363,7 @@ func (m tuiModel) tabBar() string {
 		case s.Hung():
 			mark = "~ "
 		}
-		parts = append(parts, render(i+1, fmt.Sprintf(" %s%s ", mark, s.Name)))
+		parts = append(parts, render(ui.TabShell, i+1, i, fmt.Sprintf(" %s%s ", mark, s.Name)))
 	}
 	for i, t := range m.data {
 		n := 1 + m.sessions.Count() + i
@@ -423,7 +371,7 @@ func (m tuiModel) tabBar() string {
 		if t.failed() {
 			mark = ui.MarkCross.String() + " "
 		}
-		parts = append(parts, render(n, fmt.Sprintf(" %s%s · data ", mark, t.name)))
+		parts = append(parts, render(ui.TabData, n, i, fmt.Sprintf(" %s%s · data ", mark, t.name)))
 	}
 	bar := strings.Join(parts, " ")
 	if n := m.sessions.DetachedCount(); n > 0 {
@@ -455,8 +403,6 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 	view := s.ScrolledView(cols, rows, m.sesScroll)
 	b.WriteString(view.Content + "\n")
 
-	// Above the palette as well as above the footer, so the frame keeps its
-	// height whichever is showing.
 	if m.stats {
 		b.WriteString(m.statsPane() + "\n")
 	}
@@ -471,20 +417,13 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 
 	status := m.status
 	switch {
-	// While a redial is running, the footer says that rather than offering
-	// the key that started it again.
 	case m.redialing == s.ElementID:
 	case s.Err() != nil:
-		// The key is on the error too: a torn connection is the usual way to
-		// lose a session, and the error alone said nothing about what to do.
 		status = s.Err().Error() + " — alt+r opens a new session on this ION"
 	case s.Hung():
 		status = "connection stopped answering — alt+r opens a new session on this ION"
 	}
 
-	// The marker goes in front of whatever else the footer was saying, and
-	// does not replace it: a hung session is still worth reading while someone
-	// is scrolled back through what it last said.
 	if view.Offset > 0 {
 		marker := fmt.Sprintf("scrolled back %d of %d lines — alt+end for live", view.Offset, view.Total)
 		if status != "" {
@@ -493,14 +432,9 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 		status = marker + status
 	}
 
-	// Truncated plain, before the footer styles it: a status or hint that takes
-	// a second row moves the whole frame.
 	width := max(10, m.width-1)
 	b.WriteString(ui.Footer(ui.Truncate(status, width), ui.Truncate(hint, width)))
 
-	// No cursor unless the pane is live. Pointing it at frozen output, at a
-	// session that has stopped answering, or at a pane with the slot picker
-	// over it says something is being typed there.
 	if m.favPick {
 		return m.overlayFavourites(b.String()), nil
 	}
@@ -515,8 +449,6 @@ func (m tuiModel) viewSession() string {
 	return content
 }
 
-// signInThenSessions reopens the browser and, once signed in, opens the
-// sessions that were interrupted. With nothing to replay it just reports.
 func (m tuiModel) signInThenSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	if len(targets) == 0 {
 		m.signInResume = true
@@ -526,11 +458,6 @@ func (m tuiModel) signInThenSessions(targets []sessionTarget) (tea.Model, tea.Cm
 	return m.startSignIn()
 }
 
-// needsSignIn reports whether the credential is already known to be dead, so
-// an action can re-auth before attempting a dial that would only fail.
-//
-// It asks the tenants the action touches; the browsed tenant need not be one of
-// them.
 func (m tuiModel) needsSignIn(tsgs []string) bool {
 	if m.tokenDead == "" {
 		return false
@@ -545,7 +472,6 @@ func (m tuiModel) needsSignIn(tsgs []string) bool {
 			}
 			continue
 		}
-		// Unrecorded but in the list: only a browser sign-in found it.
 		return true
 	}
 	return false

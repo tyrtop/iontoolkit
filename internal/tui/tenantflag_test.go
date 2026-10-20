@@ -26,8 +26,6 @@ func TestTenantFlagOpensOnThatTenant(t *testing.T) {
 	if !m.hasTenant {
 		t.Fatal("hasTenant = false, want --tenant to resolve")
 	}
-	// Otherwise --tenant gets accepted and ignored, which is more confusing
-	// than just rejecting it.
 	if m.tenant.Name != "Acme Co" {
 		t.Errorf("tenant = %q, want --tenant to win over last_tenant %q", m.tenant.Name, cfg.LastTenant)
 	}

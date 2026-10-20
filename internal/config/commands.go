@@ -10,34 +10,17 @@ import (
 	"time"
 )
 
-// HistoryMax bounds the file. History is written on every command a session
-// sends, so without a cap it grows for the life of the install; the least
-// recently used entries go first, which keeps a rarely-run favourite that is
-// still in use over a one-off typed last month.
 const HistoryMax = 200
 
-// FavouriteSlots is alt+1 to alt+9.
 const FavouriteSlots = 9
 
-// CommandStore is history, favourites and macros in one file. They share it
-// because they are the same thing at different lifetimes: something typed
-// once, something worth a key, and something worth a name.
-//
-// It is separate from config.json because it churns -- a line per command sent
-// -- and a tenant list should not be rewritten for that.
 type CommandStore struct {
-	History    []CommandUse `json:"history,omitempty"`
-	Favourites []Favourite  `json:"favourites,omitempty"`
-	Macros     []Macro      `json:"macros,omitempty"`
-	// Acknowledged is the warnings dismissed for good, by ID rather than a
-	// field apiece: this is the first of several, and a factory reset takes
-	// them with the rest of the file.
-	Acknowledged []string `json:"acknowledged,omitempty"`
+	History      []CommandUse `json:"history,omitempty"`
+	Favourites   []Favourite  `json:"favourites,omitempty"`
+	Macros       []Macro      `json:"macros,omitempty"`
+	Acknowledged []string     `json:"acknowledged,omitempty"`
 }
 
-// CommandUse is one command as run on one model. The model is part of the
-// identity rather than a label: `dump interface status 5` is a different
-// command on an ion 1200, which has no port 5.
 type CommandUse struct {
 	Command  string    `json:"command"`
 	Model    string    `json:"model,omitempty"`
@@ -48,20 +31,15 @@ type CommandUse struct {
 type Favourite struct {
 	Slot    int    `json:"slot"`
 	Command string `json:"command"`
-	// Model is what the command was captured on, so one that only exists on
-	// that model can be flagged rather than silently failing elsewhere.
-	Model string `json:"model,omitempty"`
+	Model   string `json:"model,omitempty"`
 }
 
 type Macro struct {
 	Name     string   `json:"name"`
 	Commands []string `json:"commands"`
-	// Model is kept for the same reason a favourite's is.
-	Model string `json:"model,omitempty"`
+	Model    string   `json:"model,omitempty"`
 }
 
-// Record counts one use. The clock is passed in so a caller can be tested
-// without sleeping.
 func (c *CommandStore) Record(command, model string, at time.Time) {
 	command = strings.TrimSpace(command)
 	if c == nil || command == "" {
@@ -88,10 +66,6 @@ func (c *CommandStore) trimHistory() {
 	c.History = c.History[:HistoryMax]
 }
 
-// Ranked is the history to offer on a model: what has been run on this one
-// most often first, then what was run on another. The second group is still
-// worth offering -- most commands are the same across models -- and is what
-// Model is kept to tell apart.
 func (c *CommandStore) Ranked(model string) []CommandUse {
 	if c == nil {
 		return nil
@@ -114,8 +88,6 @@ func (c *CommandStore) Ranked(model string) []CommandUse {
 	return out
 }
 
-// Forget drops one entry, which is what makes a list of mistyped commands
-// recoverable.
 func (c *CommandStore) Forget(command, model string) bool {
 	if c == nil {
 		return false
@@ -174,8 +146,6 @@ func (c *CommandStore) ClearFavourite(slot int) bool {
 	return false
 }
 
-// FavouriteList is every slot that is filled, in slot order: the file keeps
-// them in the order they were set.
 func (c *CommandStore) FavouriteList() []Favourite {
 	if c == nil {
 		return nil
@@ -231,7 +201,6 @@ func (c *CommandStore) RemoveMacro(name string) bool {
 	return false
 }
 
-// Ack records a warning as answered for good.
 func (c *CommandStore) Ack(id string) {
 	if c == nil || id == "" || c.Acked(id) {
 		return
@@ -253,8 +222,6 @@ func (c *CommandStore) Acked(id string) bool {
 
 func (s *Store) commandsPath() string { return filepath.Join(s.Root, "commands.json") }
 
-// Commands returns the saved store, or an empty one. A first run has no file,
-// which is not an error.
 func (s *Store) Commands() (*CommandStore, error) {
 	b, err := os.ReadFile(s.commandsPath())
 	if os.IsNotExist(err) {
@@ -265,8 +232,6 @@ func (s *Store) Commands() (*CommandStore, error) {
 	}
 	var c CommandStore
 	if err := json.Unmarshal(b, &c); err != nil {
-		// The caller gets a usable store either way: a corrupt history should
-		// cost the history, not the session someone is trying to open.
 		return &CommandStore{}, fmt.Errorf("parse commands: %w", err)
 	}
 	return &c, nil

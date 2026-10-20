@@ -16,9 +16,6 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// compareState is a tab's device half. It is tab-wide rather than per pane
-// because every view's commands run in one session, and keyed by view for
-// rendering, because each view asks its own questions.
 type compareState struct {
 	loading bool
 	err     string
@@ -34,16 +31,10 @@ type compareDoneMsg struct {
 	byView map[string]dataview.Comparison
 }
 
-// deviceRunner is the CLI half of a comparison. ToolkitSession is what a batch
-// run uses, so this inherits the dial retry and the pager handling instead of
-// growing a second copy of either.
 type deviceRunner interface {
 	ToolkitSession(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error)
 }
 
-// runnerFor is fixture mode's one substitution, the same place dialerFor makes
-// it: the playback device, reached through the real ioncli code, so autologin
-// and the pager scraper are exercised rather than skipped.
 func (m tuiModel) runnerFor(c *api.Client) deviceRunner {
 	if app.Fixture != nil {
 		return app.Fixture.SessionClient(app.Defaults.PagerOff, app.Defaults.PagerPrompts)
@@ -51,9 +42,6 @@ func (m tuiModel) runnerFor(c *api.Client) deviceRunner {
 	return c
 }
 
-// startCompare is the explicit keypress. The rest of rich-data mode asks for
-// no device login at all, which is the point of the mode; this one action
-// dials the appliance and logs in, so it never happens on its own.
 func (m tuiModel) startCompare() (tea.Model, tea.Cmd) {
 	tab, ok := m.activeData()
 	if !ok || tab.cmp.loading || m.views == nil {
@@ -83,9 +71,6 @@ func (m tuiModel) startCompare() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(compareCmd(m.ctx, m.runnerFor(c), c, views, tab, creds), m.spinner.Tick)
 }
 
-// compareCmd runs the device commands in one session, then reads the portal
-// side. The portal is fetched again rather than taken off the page: a page can
-// be minutes old, and a comparison between two different moments is not one.
 func compareCmd(ctx context.Context, r deviceRunner, g dataview.Getter, views []dataview.View, t dataTab, creds ionterm.Credentials) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(ctx, app.Defaults.ElementTimeout)
@@ -128,8 +113,6 @@ func (m tuiModel) onCompareDone(msg compareDoneMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// compareSummary is what the footer says once a comparison lands, because the
-// marks that matter may be further down the page than the window reaches.
 func compareSummary(byView map[string]dataview.Comparison) string {
 	var differ, unknown, total int
 	for _, cmp := range byView {
@@ -155,8 +138,6 @@ func compareSummary(byView map[string]dataview.Comparison) string {
 	}
 }
 
-// comparePane is the device half under a view's own sections, so a reading and
-// its check are read together. Its heading is a jump target like any other.
 func (m tuiModel) comparePane(p *dataPage, tab dataTab, view string, width int) {
 	if m.views == nil {
 		return
@@ -191,21 +172,14 @@ func (m tuiModel) comparePane(p *dataPage, tab dataTab, view string, width int) 
 	p.lines = append(p.lines, m.compareLines(cmp, width)...)
 }
 
-// compareLines lays each row out as portal then device with a mark. Padded
-// plain and styled afterwards: padding a styled cell counts its escape bytes
-// toward the width and the columns drift apart row by row.
 func (m tuiModel) compareLines(cmp dataview.Comparison, width int) []string {
 	colw := max(10, (width-ui.LabelWidth-8)/2)
 	cell := func(s string, w int) string { return fmt.Sprintf("%-*s", w, ui.Truncate(s, w)) }
 
-	// Four columns of gutter: the mark and its space sit where the header has
-	// nothing to say.
 	out := []string{ui.StyleDim.Render(fmt.Sprintf("    %s  %s  %s",
 		cell("CHECK", ui.LabelWidth), cell("PORTAL", colw), "DEVICE"))}
 	for _, row := range cmp.Rows {
 		mark, style := compareMark(row.Verdict)
-		// Only the device cell takes the verdict's colour: it is the answer
-		// the mark is about, and colouring both makes a row shout twice.
 		out = append(out, fmt.Sprintf("  %s %s  %s  %s", mark,
 			ui.StyleDim.Render(cell(row.Label, ui.LabelWidth)),
 			cell(dashed(row.Portal), colw),
@@ -224,7 +198,6 @@ func compareMark(v dataview.Verdict) (string, lipgloss.Style) {
 	case dataview.Differ:
 		return ui.MarkCross.String(), ui.StyleErr
 	}
-	// Nothing to compare, which is not a disagreement.
 	return ui.StyleDim.Render("·"), ui.StyleDim
 }
 

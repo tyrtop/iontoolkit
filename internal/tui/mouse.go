@@ -4,6 +4,43 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Reporting costs the terminal's own select-and-copy and buys only the wheel,
-// which works anyway: the alt screen sends arrow keys for a notch.
-func (m tuiModel) mouseMode() tea.MouseMode { return tea.MouseModeNone }
+func (m tuiModel) mouseMode() tea.MouseMode {
+	switch m.phase {
+	case phaseSession, phaseData:
+		return tea.MouseModeCellMotion
+	}
+	return tea.MouseModeNone
+}
+
+const wheelStep = 3
+
+func (m tuiModel) onWheel(up bool) (tea.Model, tea.Cmd) {
+	switch m.phase {
+	case phaseSession:
+		s := m.sessions.Active()
+		if s == nil {
+			return m, nil
+		}
+		key := "alt+down"
+		if up {
+			key = "alt+up"
+		}
+		next := m
+		for range wheelStep {
+			next, _ = next.onScrollKey(s, key)
+		}
+		return next, nil
+
+	case phaseData:
+		key := "down"
+		if up {
+			key = "up"
+		}
+		var model tea.Model = m
+		for range wheelStep {
+			model, _ = model.(tuiModel).onDataKey(key)
+		}
+		return model, nil
+	}
+	return m, nil
+}

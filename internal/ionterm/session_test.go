@@ -777,8 +777,6 @@ func TestAQuietButLiveSessionIsNotHung(t *testing.T) {
 	eventually(t, "the session to be pinged", func() bool { return conn.pings.Load() > 0 })
 	time.Sleep(80 * time.Millisecond)
 
-	// An idle ION prompt sends nothing for hours; a flat timer would have
-	// killed this session.
 	if s.Hung() {
 		t.Error("Hung() = true for a connection answering pings")
 	}
@@ -801,7 +799,6 @@ func TestASessionThatStopsAnsweringIsHung(t *testing.T) {
 	defer s.Close()
 
 	eventually(t, "the hang to be noticed", s.Hung)
-	// Hung is apart from Err because it is recoverable: the user redials.
 	if err := s.Err(); err != nil {
 		t.Errorf("Err() = %v, want a hang not to read as a failure", err)
 	}
@@ -813,7 +810,6 @@ func TestASessionThatStopsAnsweringIsHung(t *testing.T) {
 func TestAHangIsNoticedWithoutWaitingOutAFlatDeadline(t *testing.T) {
 	oldPing, oldPong, oldHS := pingEvery, pongWait, handshakeDeadline
 	pingEvery, pongWait = 20*time.Millisecond, 30*time.Millisecond
-	// The old behaviour waited this out regardless; the ping answers sooner.
 	handshakeDeadline = 10 * time.Second
 	t.Cleanup(func() { pingEvery, pongWait, handshakeDeadline = oldPing, oldPong, oldHS })
 
@@ -844,7 +840,6 @@ func TestTrafficAloneKeepsASessionAliveWithoutPinging(t *testing.T) {
 	}
 	defer s.Close()
 
-	// Output arriving is proof enough, so a busy session costs no pings.
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		conn.feed <- []byte(".")

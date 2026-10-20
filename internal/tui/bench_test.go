@@ -9,16 +9,6 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-// These exist because a search went from snappy to unusable and nobody could
-// say which change did it. Measured on the fleet this is actually used on:
-// 5600 elements, nearly all of them in HA pairs.
-//
-//	keystroke   40ms  before any of this
-//	            137ms after the green line and the content-sized columns
-//	            13ms  after the per-row helpers stopped copying tuiModel
-//
-// A fleet the size of the one this is used on: 5600 elements, nearly all of
-// them in HA pairs.
 func fleetModel(b *testing.B, n int) tuiModel {
 	b.Helper()
 	m := benchModel(b)
@@ -68,7 +58,6 @@ func BenchmarkCursorMove(b *testing.B) {
 	}
 }
 
-// benchModel is pickModel's model without the *testing.T.
 func benchModel(b *testing.B) tuiModel {
 	b.Helper()
 	root := b.TempDir()

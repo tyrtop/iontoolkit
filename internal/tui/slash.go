@@ -69,9 +69,6 @@ func resolveVerb(word string) (string, bool) {
 			return v, true
 		}
 	}
-	// A prefix before a fuzzy match, so one letter still picks a verb: "c" is
-	// a subsequence of both "commands" and "fc", and the fuzzy match alone
-	// would call that ambiguous and resolve nothing.
 	if hits := prefixVerbs(word); len(hits) == 1 {
 		return hits[0], true
 	}
@@ -191,8 +188,6 @@ func (m tuiModel) activateSlash() (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case slashFreq:
-		// The command itself, not the row: a row carries its count and, when
-		// it was run on another model, which one.
 		use, ok := m.freqAt(m.slashCursor)
 		if !ok {
 			return m.closeSlash(), nil
@@ -212,9 +207,6 @@ func (m tuiModel) activateSlash() (tea.Model, tea.Cmd) {
 	return m.closeSlash(), nil
 }
 
-// insertCommand puts a command on the device line without sending it, which is
-// what makes the palette safe to browse: nothing runs until the user presses
-// enter at the device prompt.
 func (m tuiModel) insertCommand(text string) (tea.Model, tea.Cmd) {
 	if !app.Defaults.AllowWrites && !m.cfg.AllowWrites && !ioncli.IsReadOnly(text) {
 		m.status = "not read-only: " + text
@@ -254,8 +246,6 @@ func (m tuiModel) onSlashKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cm
 		return m, nil
 
 	case "ctrl+d":
-		// Only here: the reference catalog is not the user's to delete from,
-		// but a history of typos is worth being rid of.
 		if m.slash == slashFreq {
 			return m.forgetFreq()
 		}
@@ -326,11 +316,11 @@ func (m tuiModel) viewSlash() string {
 		} else {
 			bc, br := s.Size()
 			cx, cy := s.Cursor()
-			b.WriteString("  " + ui.Label("buffer") + fmt.Sprintf("%d x %d\n", bc, br))
-			b.WriteString("  " + ui.Label("pane") + fmt.Sprintf("%d x %d\n", cols, rows))
-			b.WriteString("  " + ui.Label("cursor") + fmt.Sprintf("%d, %d\n", cx, cy))
-			b.WriteString("  " + ui.Label("terminal") + fmt.Sprintf("%d x %d\n", m.width, m.height))
-			b.WriteString("  " + ui.Label("line") + fmt.Sprintf("%q\n", s.Line()))
+			b.WriteString("  " + ui.Label("Buffer") + fmt.Sprintf("%d x %d\n", bc, br))
+			b.WriteString("  " + ui.Label("Pane") + fmt.Sprintf("%d x %d\n", cols, rows))
+			b.WriteString("  " + ui.Label("Cursor") + fmt.Sprintf("%d, %d\n", cx, cy))
+			b.WriteString("  " + ui.Label("Terminal") + fmt.Sprintf("%d x %d\n", m.width, m.height))
+			b.WriteString("  " + ui.Label("Line") + fmt.Sprintf("%q\n", s.Line()))
 		}
 		b.WriteString(ui.StyleDim.Render("esc back"))
 		return b.String()

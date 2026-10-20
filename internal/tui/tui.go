@@ -61,13 +61,9 @@ const (
 	modeShell pickMode = iota
 	modeBatch
 	modeData
-	// modeMacro is the element list with a macro already chosen. It is not in
-	// the cycle below: it means nothing without a macro, so it is entered
-	// from the macro page and left by cycling out.
 	modeMacro
 )
 
-// pickModes is the cycle alt+m walks. Adding a mode means adding it here.
 var pickModes = []pickMode{modeShell, modeBatch, modeData}
 
 func (p pickMode) String() string {
@@ -126,6 +122,7 @@ const (
 	formMacro
 	formZone
 	formColour
+	formNewTheme
 )
 
 const cacheTTL = time.Hour
@@ -134,21 +131,13 @@ type elementsErrMsg string
 type clientReadyMsg struct{ client *api.Client }
 type clientErrMsg string
 
-// needsSignInMsg says the tenant's stored credentials are spent and only a
-// browser can renew them.
 type needsSignInMsg struct{}
 
-// discoveredMsg carries the tenants a browser sign-in found.
 type discoveredMsg struct {
 	d   saseauth.Discovery
 	err error
 }
 
-// signedInMsg carries the outcome of a browser sign-in, including the facts
-// that prove it worked: a client that authenticated from the stored refresh
-// token, and a profile fetched with it.
-// tokenErrMsg is a refresh failure reported by the client. A closed channel
-// means refreshing has stopped for good.
 type tokenErrMsg struct {
 	err     error
 	stopped bool
@@ -188,34 +177,25 @@ type tuiModel struct {
 	cacheAt    time.Time
 	cacheCount int
 
-	menuCursor   int
-	switchCursor int
-	setCursor    int
-	tokenDead    string
-	authMode     authMode
-	tenantIssues map[string]string
-	// The device login chosen per tenant, keyed by tenant ID, and which tenant
-	// the users panel is managing.
-	runAs    map[string]string
-	usersTSG string
-	// Derived when the element list changes, not per render.
-	scope       string
-	tenantCount int
-	// showSelected narrows the list to what has been picked.
-	showSelected bool
-	// The last selection alt+c threw away, so it can be put back.
+	menuCursor      int
+	switchCursor    int
+	setCursor       int
+	tokenDead       string
+	authMode        authMode
+	tenantIssues    map[string]string
+	runAs           map[string]string
+	usersTSG        string
+	scope           string
+	tenantCount     int
+	showSelected    bool
 	lastCleared     map[string]bool
 	lastClearedView bool
-	// Outstanding tenant connections, and the batch commands waiting on them.
-	connectWait int
-	resumeRun   []string
-	discovered  []saseauth.Tenant
-	picked      map[string]bool
-	pickCursor  int
+	connectWait     int
+	resumeRun       []string
+	discovered      []saseauth.Tenant
+	picked          map[string]bool
+	pickCursor      int
 
-	// What to replay once an unplanned sign-in finishes. At most one is set.
-	// A sign-in with something to replay skips the confirmation screen, since
-	// it is plumbing in the middle of an action the user already chose.
 	signInResume   bool
 	resumeSessions []sessionTarget
 	lastTargets    []sessionTarget
@@ -236,67 +216,51 @@ type tuiModel struct {
 	formOldTSG     string
 	formGeoRow     int
 
-	setSection int
-	setFocus   int
-	// The theme editor, which is the Theme section with a scheme open rather
-	// than a page of its own: the preview under it has to stay visible.
-	themeEdit  bool
-	themeRow   int
-	themeDraft ui.Theme
-	// Which role the colour form is typing into.
+	setSection    int
+	setFocus      int
+	themeEdit     bool
+	themeRow      int
+	themeDraft    ui.Theme
+	themeStart    ui.Theme
+	themeUndo     []ui.Theme
+	themeDel      string
+	macroDel      string
+	macroUndo     []config.Macro
+	switchDel     string
+	switchUndo    []config.Tenant
+	tabEdit       bool
+	tabRow        int
+	pick          colourPick
+	spinTick      int
 	formThemeRole string
-	// The last IANA zone typed in, so the times row can cycle back to it
-	// rather than only between UTC and local.
-	typedZone string
-	// The factory reset asks twice, and this is whether it has been asked once.
-	resetArmed bool
+	typedZone     string
+	resetArmed    bool
 
-	all   []elementRow
-	sites map[string]string
-	// HA state per element, keyed tsg/eid, filled in behind the list: it is a
-	// request per cluster and the list must not wait on it. haCluster is the
-	// per-cluster side, keyed tsg/cluster: "ok" for one that answered, the
-	// reason for one that refused, absent for one still in flight -- which is
-	// what tells a row that will never resolve from one that is loading.
-	ha        map[string]string
-	haCluster map[string]string
-	haFailed  int
-	haErr     string
-	// How far through the sweep we are, so the list can say. It is one
-	// request per cluster at the client's five a second, which on a fleet of
-	// HA pairs is long enough that "nothing yet" needs to be told apart from
-	// "stuck".
-	haTotal int
-	haDone  int
-	// The background fill's queue per tenant, and which tenants have a
-	// request out. The queue is paced so an interactive ask -- the rows
-	// someone just searched for -- is not stuck behind the fleet.
+	all        []elementRow
+	sites      map[string]string
+	ha         map[string]string
+	haCluster  map[string]string
+	haFailed   int
+	haErr      string
+	haTotal    int
+	haDone     int
+	haAt       time.Time
 	haQueue    map[string][]string
 	haInFlight map[string]bool
-	// The last sweep's states, read from the element cache at launch and
-	// shown with an asterisk until this run's sweep replaces them.
-	haCached map[string]string
-	// What the tenant-wide query did, for the Debug section: the aggregate is
-	// unverified against hardware, so which path filled the column is the
-	// first thing worth knowing about it.
-	haBulk string
+	haCached   map[string]string
+	haBulk     string
 
 	matches  []int
 	selected map[string]bool
 
-	// One client per tenant, built on demand. A browser account can reach many
-	// tenants, so there is no single "the" client any more.
 	pool           *clientPool
 	pendingTenants int
 	table          table.Model
 	filter         textinput.Model
 	filterOn       bool
-	// The element list as rebuildRows last worked it out: which columns are
-	// in it, their widths, and every row's plain values. Kept so a cursor
-	// move can repaint one row instead of rebuilding the fleet.
-	listKeep   []int
-	listWidths []int
-	listValues [][]string
+	listKeep       []int
+	listWidths     []int
+	listValues     [][]string
 
 	cmdInput textinput.Model
 
@@ -315,62 +279,40 @@ type tuiModel struct {
 	resTable    table.Model
 	resOpen     bool
 	resScroll   int
-	// The line an open result is scrolled to, highlighted the way the list
-	// above it highlights its row.
-	resLine int
-	elapsed []time.Duration
+	resLine     int
+	elapsed     []time.Duration
 
-	sessions *ionterm.Manager
-	// How far the session pane is held above its live bottom. Reset on a tab
-	// switch: an offset into one session's output means nothing in another's.
-	sesScroll  int
-	connecting string
-	// Per-element dial progress, and the channel the clients report it on.
+	sessions    *ionterm.Manager
+	sesScroll   int
+	connecting  string
 	dialing     map[string]dialState
 	dialReports chan dialProgressMsg
-	// The element a redial is in flight for. Its dead tab stays on screen,
-	// saying so, until the replacement is up.
-	redialing string
-	// The element a failed connection is asking about, empty when nothing is.
-	// askRetryNo is which answer is highlighted; the zero value picks yes,
-	// since that is what someone who hit enter almost certainly meant.
-	askRetry   sessionTarget
-	askRetryNo bool
+	redialing   string
+	askRetry    sessionTarget
+	askRetryNo  bool
 
-	// The stats overlay, and whether its repaint is already running.
 	stats        bool
 	statsTicking bool
 
-	// Command history, favourites and macros, loaded once and saved as they
-	// change. cmdsErr is a commands.json that would not parse, reported where
-	// the history is used rather than at startup.
 	cmds    *config.CommandStore
 	cmdsErr string
 
-	mode pickMode
-	// The rich-data views and the panes open on them. viewsErr is a broken
-	// views.yaml, reported where the mode is used rather than at startup.
-	views      *dataview.Set
-	viewsErr   string
-	data       []dataTab
-	dataActive int
-	// The data pane's own filter, which narrows the page to matching lines.
+	mode         pickMode
+	views        *dataview.Set
+	viewsErr     string
+	data         []dataTab
+	dataActive   int
 	dataFilter   textinput.Model
 	dataFilterOn bool
-	// What to reopen once a tenant connection or sign-in finishes, the way
-	// resumeSessions does for shells.
-	resumeData []sessionTarget
+	resumeData   []sessionTarget
 
 	userCursor  int
 	slash       slashMode
 	slashInput  textinput.Model
 	slashItems  []string
 	slashCursor int
-	// The history behind the rows /fc is showing, kept alongside them so a
-	// row can be acted on rather than re-parsed.
-	freq []config.CommandUse
+	freq        []config.CommandUse
 
-	// The favourite slot picker, drawn over the session pane.
 	favPick   bool
 	favCursor int
 
@@ -378,24 +320,16 @@ type tuiModel struct {
 	macroFilter   textinput.Model
 	macroFilterOn bool
 	formMacroName string
-	// The macro chosen for the element list, which is what macro mode runs.
-	armedMacro string
-	// The macro held on the cross-model warning, empty when nothing is, and
-	// the rows it would run on. It shares askRetryNo, since only one of the
-	// two questions can be open.
-	askMacro   string
-	askMacroOn []elementRow
+	armedMacro    string
+	askMacro      string
+	askMacroOn    []elementRow
 
 	width  int
 	height int
 }
 
-// Version is what the settings page reports. The command resolves it,
-// because the release build sets it through main.
 var Version = "dev"
 
-// Tenant is --tenant. The command checks the name before Run, so empty here
-// just means the user didn't ask for one.
 var Tenant string
 
 func Run(ctx context.Context) error {
@@ -411,8 +345,6 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Fail instead of opening with no tenant at all. A typo would otherwise
-	// look the same as a first run.
 	if Tenant != "" {
 		if _, ok := app.ResolveTenant(cfg, Tenant); !ok {
 			return fmt.Errorf("no saved tenant named %q; %s", Tenant, app.TenantChoices(cfg))
@@ -421,6 +353,8 @@ func Run(ctx context.Context) error {
 
 	model := newTUIModel(ctx, store, cfg)
 	defer model.sessions.CloseAll()
+	// bubbletea's own reset is OSC 111, which not every terminal implements
+	defer restoreTermColour(os.Stdout)
 
 	_, err = tea.NewProgram(model, tea.WithContext(ctx)).Run()
 	if err != nil && !errors.Is(err, tea.ErrProgramKilled) {
@@ -430,14 +364,8 @@ func Run(ctx context.Context) error {
 }
 
 func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) tuiModel {
-	// Appearance and the display zone are process-wide, and this is where the
-	// saved settings first exist. None of it can fail the launch: a zone that
-	// will not load reports itself on the settings page and the times stay
-	// UTC, a themes.yaml that will not parse leaves the built-ins, and an
-	// unknown theme name opens in the default.
 	app.ApplyDisplaySettings(store, cfg)
 
-	// The shape as well as the colour: the theme owns both.
 	s := ui.NewSpinner(ui.CurrentTheme().Spinner)
 
 	fi := textinput.New()
@@ -481,17 +409,12 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 		m.typedZone = z
 	}
 
-	// The views load here rather than when the mode is first used: a broken
-	// views.yaml should be reported once, at the start, and never leave the
-	// mode with nothing to show. Load returns the built-ins even when the
-	// user's file is the thing that failed.
 	views, err := dataview.Load(ViewsPath(store))
 	if err != nil {
 		m.viewsErr = err.Error()
 	}
 	m.views = views
 
-	// Nil in a test that only renders: ViewsPath guards the same way.
 	m.dataFilter = newDataFilter()
 	m.cmds = &config.CommandStore{}
 	if store != nil {
@@ -504,16 +427,11 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 	if am, ok := parseAuthMode(cfg.AuthMode); ok {
 		m.authMode = am
 	} else if t, ok := app.ResolveTenant(cfg, Tenant); ok && !t.UsesBrowser() {
-		// Nothing saved: follow whatever the tenant already uses, so an existing
-		// service account setup does not open on a browser prompt.
 		m.authMode = authTenant
 	}
 	m.tenant, m.hasTenant = app.ResolveTenant(cfg, Tenant)
 	if m.hasTenant {
 		m.ionUser = m.tenant.DefaultUser()
-		// Elements are refreshed on every launch so the list keeps up with the
-		// tenant; the cache only exists to reach the menu without waiting. A
-		// cache younger than cacheFresh is taken as current and left alone.
 		m.cacheState = cacheUpdating
 		if c, err := store.Cache(m.tenant.TSGID); err == nil && c != nil && len(c.Elements) > 0 {
 			m.cacheCount = len(c.Elements)
@@ -526,9 +444,6 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 	return m
 }
 
-// tableStyles is the widget's own, with the selected row replaced: its default
-// is a 256-colour pink that no theme of ours and no terminal's own palette has
-// anything to do with.
 func tableStyles() table.Styles {
 	s := table.DefaultStyles()
 	s.Selected = ui.StyleRow
@@ -538,12 +453,13 @@ func tableStyles() table.Styles {
 func newElementTable() table.Model {
 	t := table.New(
 		table.WithColumns([]table.Column{
+			{Title: "", Width: 2},
 			{Title: "", Width: 3},
 			{Title: "", Width: 3},
-			{Title: "element", Width: 26},
-			{Title: "site", Width: 22},
-			{Title: "model", Width: 11},
-			{Title: "state", Width: 9},
+			{Title: "Element", Width: 26},
+			{Title: "Site", Width: 22},
+			{Title: "Model", Width: 11},
+			{Title: "State", Width: 9},
 		}),
 		table.WithFocused(true),
 	)
@@ -551,14 +467,8 @@ func newElementTable() table.Model {
 	return t
 }
 
-// moveCursorTo puts the element list on a row.
-//
-// Moving down goes through the widget's MoveDown, which keeps its viewport
-// under the cursor. Moving up cannot: table.MoveUp raises the viewport offset
-// while the cursor falls, so the highlight walks off the top of the window
-// and a held k stops appearing to do anything. Rebuilding the scroll state
-// and walking down to the row is the way to an offset that is right by
-// construction.
+// table.MoveUp raises the viewport offset while the cursor falls, so the
+// highlight walks off the top and a held k stops appearing to do anything.
 func (m *tuiModel) moveCursorTo(n int) {
 	rows := m.table.Rows()
 	if len(rows) == 0 {
@@ -568,8 +478,6 @@ func (m *tuiModel) moveCursorTo(n int) {
 	prev := m.table.Cursor()
 	if n >= prev {
 		m.table.MoveDown(n - prev)
-		// The row the cursor left goes back to its own colour and the row it
-		// landed on gives it up. Two rows, not the list.
 		m.repaintCursorRows(prev)
 		return
 	}
@@ -588,9 +496,6 @@ func (m *tuiModel) moveCursor(delta int) {
 	m.moveCursorTo(m.table.Cursor() + delta)
 }
 
-// cacheFresh is how long cached elements are treated as current. The CLI's
-// --search reads the same window, so the two cannot disagree about what is
-// current enough to skip a round trip.
 const cacheFresh = config.CacheFresh
 
 func (m tuiModel) Init() tea.Cmd {
@@ -603,11 +508,10 @@ func (m tuiModel) Init() tea.Cmd {
 			cmds = cmds[:1]
 		}
 	}
+	cmds = append(cmds, probeTermColour())
 	return tea.Batch(cmds...)
 }
 
-// refreshNow re-fetches elements, authenticating first if that has not happened
-// yet. It is what the refresh keybind and the settings entry both call.
 func (m tuiModel) refreshNow() (tea.Model, tea.Cmd) {
 	if !m.hasTenant {
 		m.status = "no tenant selected"
@@ -621,9 +525,6 @@ func (m tuiModel) refreshNow() (tea.Model, tea.Cmd) {
 	}
 	m.flags = f
 	m.status = ""
-	// The failure tally belongs to one sweep. Left standing it would double
-	// on the next refresh and report a count nobody could account for; the
-	// per-cluster states stay, so the column does not blank while it refills.
 	m.haFailed, m.haErr = 0, ""
 	m.haTotal, m.haDone, m.haBulk = 0, 0, ""
 	return m.refreshActive()
@@ -642,14 +543,6 @@ func connect(ctx context.Context, st *config.Store, f app.Flags) tea.Cmd {
 	}
 }
 
-// signIn opens the browser and waits for the sign-in to finish. It is the only
-// path in iontk that ever shows a browser window.
-//
-// Finishing the exchange is not the same as working, so this goes on to build a
-// client the ordinary way and fetch a profile with it. That exercises the
-// stored refresh token, which is what decides whether the next run needs a
-// browser at all, and the profile call is the one that proves the SD-WAN API
-// accepts the token.
 func signIn(ctx context.Context, f app.Flags, st *config.Store) tea.Cmd {
 	return func() tea.Msg {
 		httpClient := &http.Client{Timeout: f.HTTPTimeout}
@@ -674,12 +567,7 @@ func signIn(ctx context.Context, f app.Flags, st *config.Store) tea.Cmd {
 	}
 }
 
-// watchToken surfaces refresh failures instead of letting them print into the
-// frame. The api package no longer writes to stderr, which the TUI never
-// redirected, so a failed refresh used to land in the middle of the display.
 func watchToken(ch <-chan error) tea.Cmd {
-	// A static token has no refresh loop, so there is no channel and nothing to
-	// watch. Receiving from a nil channel would block this goroutine forever.
 	if ch == nil {
 		return nil
 	}
@@ -694,16 +582,31 @@ func watchToken(ch <-chan error) tea.Cmd {
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
 	case tea.ColorProfileMsg:
-		// What the terminal can show, which the renderer downsamples to. Held
-		// so the theme picker can say a scheme is being approximated rather
-		// than leaving someone to wonder why nord looks like classic.
 		ui.SetProfile(msg.Profile)
 		if ui.ShouldQueryDepth() {
-			// Bubble Tea upgrades the profile and sends this message again if
-			// the terminal answers, so this asks once and does not loop.
 			return m, tea.Batch(tea.RequestCapability("RGB"), tea.RequestCapability("Tc"))
+		}
+		return m, nil
+
+	case tea.BackgroundColorMsg:
+		rememberTermColour(msg.Color, nil)
+		return m, nil
+
+	case tea.ForegroundColorMsg:
+		rememberTermColour(nil, msg.Color)
+		return m, nil
+
+	case colourProbeDoneMsg:
+		termColour.probed = true
+		return m, nil
+
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			return m.onWheel(true)
+		case tea.MouseWheelDown:
+			return m.onWheel(false)
 		}
 		return m, nil
 
@@ -727,8 +630,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tokenErrMsg:
 		if msg.stopped {
-			// Refreshing gave up. Whatever is on screen will start failing, so
-			// say so rather than letting it look like the device is at fault.
 			if m.tokenDead == "" {
 				m.tokenDead = "token expired — sign in again"
 			}
@@ -786,8 +687,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tokenRefreshedMsg:
 		if msg.err != nil {
 			if errors.Is(msg.err, saseauth.ErrInteractiveRequired) {
-				// The stored credential is spent, so the quiet path cannot
-				// finish; fall through to the browser.
 				m.tokenDead = "sign-in expired"
 				m.signInResume = false
 				return m.startSignIn()
@@ -799,8 +698,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tokenTTL = msg.ttl
 		m.tokenDead = ""
 		m.status = "token refreshed"
-		// The old client holds the previous token, so let the next action build
-		// one with the new.
 		m.pool.drop(m.tenant.TSGID)
 		m.client = nil
 		return m, nil
@@ -819,8 +716,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tokenDead = ""
 		watch := watchToken(msg.client.TokenErrors())
 
-		// Something was interrupted to get here, so go straight back to it
-		// rather than making the user acknowledge a screen first.
 		if targets := m.resumeSessions; len(targets) > 0 {
 			m.resumeSessions = nil
 			next, cmd := m.openSessions(targets)
@@ -841,8 +736,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.profile = msg.profile
 		m.tokenTTL = msg.ttl
 		m.phase = phaseSignedIn
-		// Elements are fetched behind the confirmation, so dismissing it lands on
-		// a list that is already current.
 		next, cmd := m.refreshActive()
 		return next, tea.Batch(m.spinner.Tick, watch, cmd)
 
@@ -881,8 +774,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tenantErr(msg.tsg, m.tenantName(msg.tsg), msg.err)
 		} else {
 			m.pool.set(msg.tsg, msg.client)
-			// Only the browsed tenant was watched, so a background tenant's
-			// token died unnoticed until a dial came back 401.
 			if msg.fresh {
 				watch = watchToken(msg.client.TokenErrors())
 			}
@@ -890,7 +781,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.connectWait > 0 {
 			return m, watch
 		}
-		// Everything that was waiting on a connection can go ahead now.
 		if cmds := m.resumeRun; len(cmds) > 0 {
 			m.resumeRun = nil
 			next, cmd := m.startRun(cmds)
@@ -927,14 +817,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sites[k] = v
 			}
 			m.mergeTenantElements(msg.tsg, msg.tenant, msg.elements)
-			// Behind the list, not in front of it: HA is a request per
-			// cluster, and the rows are what someone is looking for.
-			// Started on the clustered elements, not on the (site, cluster)
-			// pairs: the aggregate asks by element and needs no site, so
-			// gating the whole sweep on a site id -- which the fallback alone
-			// needs -- could leave a fleet on "loading" for ever.
 			if w := haClusters(msg.elements); len(w.elements) > 0 {
 				m.haTotal += w.clusters()
+				m.markHAOut(msg.tsg)
 				ha = loadHABulk(m.ctx, m.pool.get(msg.tsg), msg.tsg, w)
 			}
 		}
@@ -957,6 +842,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.wantsSpinner() {
 			return m, nil
 		}
+		m.spinTick++
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
@@ -985,8 +871,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dialFailed(msg.target.eid, msg.err)
 		m.status = msg.err
 		m.rebuildRows()
-		// Every dial has already been retried, so the only thing left to offer
-		// is trying the whole thing again.
 		if msg.target.eid != "" {
 			m.askRetry = msg.target
 			return m, nil
@@ -997,8 +881,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case sessionDirtyMsg:
-		// A shell the user left with "exit" closes its own tab rather than
-		// sitting there showing an error for something they asked for.
 		if n := m.sessions.Reap(); n > 0 && m.phase == phaseSession && m.sessions.Count() == 0 {
 			m.status = ""
 			m.phase = phasePicking
@@ -1055,10 +937,6 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.form) == 0 || m.formCursor >= len(m.form) {
 			return m, nil
 		}
-		// A block of commands pasted into the macro form is one per line,
-		// which is the shape the form already has. The field the cursor is in
-		// takes the first, so pasting into the empty line at the bottom
-		// appends rather than overwriting what is above it.
 		if p, ok := msg.(tea.PasteMsg); ok && m.formKind == formMacro && m.formCursor >= 1 {
 			if cmds := pasteCommands(p.Content); len(cmds) > 1 {
 				return m.pasteMacroCommands(cmds)
@@ -1080,9 +958,6 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case phaseCommand:
-		// The box is comma separated, so a multi-line paste is a list of
-		// commands. Rewritten before the input sees it: textinput replaces a
-		// newline with a space, which would make one long command of the lot.
 		if p, ok := msg.(tea.PasteMsg); ok {
 			if cmds := pasteCommands(p.Content); len(cmds) > 1 {
 				msg = tea.PasteMsg{Content: strings.Join(cmds, ", ")}
@@ -1125,18 +1000,10 @@ func (m tuiModel) wantsSpinner() bool {
 	case phaseLoading, phaseRunning, phaseSettings, phaseSignIn, phaseDiscover:
 		return true
 	case phasePicking:
-		// Only while a refresh is actually in flight, so the list is not
-		// repainted several times a second for nothing.
 		return m.cacheState == cacheUpdating
 	case phaseSession:
-		// A session whose socket is up but whose device has not spoken is
-		// still moving: the bar spins on "waiting for the ion" until the
-		// first byte or the handshake deadline.
 		return m.connectingAny() || m.awaitingDevice()
 	case phaseData:
-		// Only while a pane is actually reading, or it repaints for nothing.
-		// A comparison counts: it is a dial and a login, and the slowest
-		// thing the mode does.
 		for _, t := range m.data {
 			if t.loading() || t.cmp.loading {
 				return true
@@ -1166,25 +1033,16 @@ func (m *tuiModel) setElements(els []elementRow) {
 	m.applyFilter()
 }
 
-// siteName looks up a site within its own tenant, since two tenants can use the
-// same site identifier for different places.
 func (m *tuiModel) siteName(el elementRow) string {
 	return m.record(el).SiteLabel()
 }
 
-// record flattens a row into the values --search matches against, so the
-// filter here and the one on the command line cannot disagree.
 func (m *tuiModel) record(el elementRow) search.Record {
 	return search.Of(el.Element, el.TSG, el.Tenant, search.SiteMap(m.sites))
 }
 
-// showTenantColumn is true once more than one tenant is loaded; with a single
-// tenant the column is just noise.
 func (m tuiModel) showTenantColumn() bool { return m.tenantCount > 1 }
 
-// showHAColumn keeps the column off a list with no clusters in it, the way
-// the tenant column stays off a single-tenant list: most fleets are all HA or
-// none, and an empty column is paid for in width on every row.
 func (m tuiModel) showHAColumn() bool {
 	for _, r := range m.all {
 		if r.ClusterID() != "" {
@@ -1203,38 +1061,27 @@ func (m tuiModel) showSerialColumn() bool {
 	return false
 }
 
-// elementColumn is one column of the element list: how wide it would like to
-// be, and how narrow it will go. Sizing to content is why site stopped being
-// 22 columns wide for names like "Store 0003" while a serial was cut off at
-// 16 -- and why adding sn no longer pushes state off an 80-column terminal.
 type elementColumn struct {
 	title string
 	min   int
 	max   int
-	// flex is false for a column whose content is a known width: the marks,
-	// the state words, the HA words. Those are never shaved.
-	flex bool
+	flex  bool
 }
 
-// The order asked for: element · site · model · sn · state · ha. The serial
-// sits with the model as part of what the box is; state and HA are the pair
-// that change.
 var elementColumns = []elementColumn{
+	{title: "", min: 2, max: 2},
 	{title: "", min: 3, max: 3},
-	{title: "", min: 3, max: 3},
-	{title: "element", min: 12, max: 28, flex: true},
-	{title: "site", min: 8, max: 22, flex: true},
-	{title: "model", min: 8, max: 11, flex: true},
-	{title: "sn", min: 10, max: 24, flex: true},
-	{title: "state", min: 9, max: 9},
-	{title: "ha", min: 8, max: 8},
-	{title: "tenant", min: 8, max: 20, flex: true},
+	{title: "Element", min: 14, max: 30, flex: true},
+	{title: "Site", min: 8, max: 22, flex: true},
+	{title: "Model", min: 8, max: 11, flex: true},
+	{title: "SN", min: 10, max: 24, flex: true},
+	{title: "State", min: 9, max: 9},
+	{title: "HA", min: 8, max: 8},
+	{title: "Tenant", min: 8, max: 20, flex: true},
 }
 
-// Which of the optional columns are in this list, by index into
-// elementColumns.
 const (
-	colMark = iota
+	colCaret = iota
 	colStatus
 	colName
 	colSite
@@ -1245,14 +1092,8 @@ const (
 	colTenant
 )
 
-// colGap is what the table puts either side of a cell, which has to be
-// counted or the last column is the one that falls off the terminal.
 const colGap = 2
 
-// fitColumns sizes each column to its widest value, capped at its max, then
-// shaves the flexible ones -- widest first, never below their min -- until the
-// set fits the terminal. Widest first because the cost of a column losing two
-// of its twenty columns is nothing next to one losing two of its ten.
 func fitColumns(cols []elementColumn, values [][]string, avail int) []int {
 	w := make([]int, len(cols))
 	for i, c := range cols {
@@ -1267,7 +1108,6 @@ func fitColumns(cols []elementColumn, values [][]string, avail int) []int {
 	return shaveColumns(cols, w, avail)
 }
 
-// shaveColumns is the second half, for a caller that measured as it built.
 func shaveColumns(cols []elementColumn, w []int, avail int) []int {
 	total := func() int {
 		n := 0
@@ -1284,7 +1124,7 @@ func shaveColumns(cols []elementColumn, w []int, avail int) []int {
 			}
 		}
 		if at < 0 {
-			break // nothing left to give: the frame clips the rest
+			break
 		}
 		w[at]--
 	}
@@ -1296,7 +1136,7 @@ func (m *tuiModel) rebuildRows() {
 	ha := m.showHAColumn()
 	serials := m.showSerialColumn()
 
-	keep := []int{colMark, colStatus, colName, colSite, colModel}
+	keep := []int{colCaret, colStatus, colName, colSite, colModel}
 	if serials {
 		keep = append(keep, colSerial)
 	}
@@ -1315,11 +1155,6 @@ func (m *tuiModel) rebuildRows() {
 		widths[j] = max(elementColumns[c].min, ui.Width(elementColumns[c].title))
 	}
 
-	// Values and widths in one pass, plain, so the columns can be sized to
-	// what is in them before anything is truncated or coloured -- and so a
-	// cursor move can repaint one row without working the whole list out
-	// again. This used to build a map per row, which on a fleet is an
-	// allocation per element per keystroke of a search.
 	values := make([][]string, 0, len(m.matches))
 	for _, i := range m.matches {
 		el := m.all[i]
@@ -1340,9 +1175,6 @@ func (m *tuiModel) rebuildRows() {
 	m.listValues = values
 	m.listWidths = shaveColumns(cols, widths, max(20, m.width))
 
-	// Painted only where the table will render: it draws a window around the
-	// cursor and nothing else, so styling the other five thousand rows is work
-	// nobody sees -- and it was happening on every keystroke of a search.
 	rows := make([]table.Row, len(values))
 	lo, hi := m.paintWindow(len(values))
 	for n := range values {
@@ -1360,16 +1192,12 @@ func (m *tuiModel) rebuildRows() {
 		total += m.listWidths[i] + colGap
 	}
 
-	// Columns and rows have to agree at every moment: the table re-renders
-	// inside each setter, so changing the column count while the old rows are
-	// still in place indexes past the end of them. Clearing the rows first is
-	// safe but resets the cursor, so only do it when the shape really changed.
 	if len(m.table.Columns()) != len(tcols) {
 		at := m.table.Cursor()
 		m.table.SetRows(nil)
 		m.table.SetColumns(tcols)
 		m.table.SetRows(rows)
-		if at > 0 && at < len(rows) {
+		if at >= 0 && at < len(rows) {
 			m.table.SetCursor(at)
 		}
 	} else {
@@ -1380,21 +1208,26 @@ func (m *tuiModel) rebuildRows() {
 	m.table.SetHeight(m.listHeight())
 }
 
-// cellValue is one cell, plain. A switch rather than a map: this runs for
-// every column of every matched row on every keystroke of a search, and a map
-// literal per row is an allocation per element.
+const selectedMark = "▌ "
+
+func splitMark(cell string) (mark, name string) {
+	r := []rune(cell)
+	if len(r) < 2 {
+		return "", cell
+	}
+	return string(r[:2]), string(r[2:])
+}
+
 func (m *tuiModel) cellValue(el elementRow, col int) string {
 	switch col {
-	case colMark:
-		if m.selected[el.key()] {
-			return "x"
-		}
-		return " "
 	case colStatus:
 		glyph, _ := m.rowStatusOf(el)
 		return glyph
 	case colName:
-		return el.label()
+		if m.selected[el.key()] {
+			return selectedMark + el.label()
+		}
+		return "  " + el.label()
 	case colSite:
 		return m.siteName(el)
 	case colModel:
@@ -1409,7 +1242,6 @@ func (m *tuiModel) cellValue(el elementRow, col int) string {
 	case colHA:
 		word, cached := m.haState(el)
 		if cached {
-			// The asterisk is part of the text, so it is measured with it.
 			return word + "*"
 		}
 		return word
@@ -1419,37 +1251,38 @@ func (m *tuiModel) cellValue(el elementRow, col int) string {
 	return ""
 }
 
-// listRow paints one row from the values rebuildRows worked out. The row under
-// the cursor is painted plain: the table paints its highlight around the whole
-// row, and a highlight wrapped around coloured cells ends at the first reset
-// inside them -- so on a green line the cursor would all but disappear. One
-// rule: the cursor row is the highlight, every other row carries its own
-// colour.
 func (m *tuiModel) listRow(n int) table.Row {
 	vals := m.listValues[n]
 	el := m.all[m.matches[n]]
 	here := n == m.table.Cursor()
 
-	// A connected element reads green across the whole line, so a fleet's
-	// state is scannable without reading one column; offline keeps red on the
-	// state alone, since red across a row reads as an error rather than a
-	// fact about the appliance.
 	paint := func(s string) string { return s }
 	if el.Connected && !here {
 		paint = func(s string) string { return ui.StyleOK.Render(s) }
 	}
+	ticked := m.selected[el.key()]
 
 	row := make(table.Row, 0, len(vals))
 	for i, c := range m.listKeep {
 		v := ui.Truncate(vals[i], m.listWidths[i])
 		switch c {
+		case colCaret:
+			if here {
+				v = ">"
+			}
+		case colName:
+			if ticked && !here {
+				mark, name := splitMark(v)
+				v = ui.StyleRow.Render(mark) + ui.StyleBold.Render(paint(name))
+				row = append(row, v)
+				continue
+			}
+			v = paint(v)
 		case colStatus, colHA:
-			// Already styled, and styled per state rather than per row.
 			v = plainIf(here, v)
 		case colState:
 			switch {
 			case here:
-				// The highlight is this row's colour.
 			case el.Connected:
 				v = paint(v)
 			default:
@@ -1463,8 +1296,6 @@ func (m *tuiModel) listRow(n int) table.Row {
 	return row
 }
 
-// listRowPlain is the same row with no styling, for the rows outside the
-// window: they are never rendered, so painting them is wasted work.
 func (m *tuiModel) listRowPlain(n int) table.Row {
 	vals := m.listValues[n]
 	row := make(table.Row, len(vals))
@@ -1474,9 +1305,6 @@ func (m *tuiModel) listRowPlain(n int) table.Row {
 	return row
 }
 
-// paintWindow is the rows the table can render: it draws from cursor-height to
-// cursor+height, so a margin either side of that is everything that can be
-// seen.
 func (m *tuiModel) paintWindow(n int) (int, int) {
 	return m.windowAround(m.table.Cursor(), n)
 }
@@ -1486,20 +1314,11 @@ func (m *tuiModel) windowAround(at, n int) (int, int) {
 	return max(0, at-h), min(n, at+h)
 }
 
-// repaintCursorRows paints the two rows a move touched, instead of the whole
-// list. Rebuilding every row to move a highlight one line is what made a held
-// key and a wheel notch feel stuck on a fleet: the work was proportional to
-// the list, not to what changed.
 func (m *tuiModel) repaintCursorRows(prev int) {
 	rows := m.table.Rows()
 	if len(rows) != len(m.listValues) {
-		// The list changed under us; the next rebuild will paint it.
 		return
 	}
-	// The window the cursor left goes back to plain and the one it moved into
-	// is painted -- and only those two ranges are touched. Walking the whole
-	// slice to find them was O(fleet) on a keypress, which is the mistake
-	// this file has now made twice.
 	lo, hi := m.paintWindow(len(rows))
 	plo, phi := m.windowAround(prev, len(rows))
 	for i := min(lo, plo); i < max(hi, phi); i++ {
@@ -1559,14 +1378,10 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	// The overlay belongs to the frame rather than to any one page, and the
-	// session pane would otherwise type this at the device.
 	if key == "alt+i" {
 		return m.toggleStats()
 	}
 
-	// Both overlays own the keyboard while they are up, the macro warning
-	// first: only one can be open, and it is the one that was just asked.
 	if m.askMacro != "" {
 		return m.onMacroWarnKey(key)
 	}
@@ -1607,7 +1422,6 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case phaseSignIn:
-		// The browser owns the keyboard until it is done; esc only stops waiting.
 		if key == "esc" || key == "q" {
 			m.signInResume = false
 			m.status = "sign-in cancelled"
@@ -1634,8 +1448,6 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case phaseCommand:
 		return m.onCommandKey(msg, key)
 	case phaseRunning:
-		// q used to quit here, which made the key that leaves every other page
-		// the one that abandons a run mid-flight. ctrl+c does that now.
 		switch key {
 		case "esc", "q", "tab", "/":
 			if m.completedCount() > 0 {
@@ -1655,7 +1467,7 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 	switch key {
 	case "esc", "q":
 		if key == "q" && m.filterOn {
-			break // a letter while the filter is being typed
+			break
 		}
 		if m.filterOn || m.filter.Value() != "" {
 			m.filterOn = false
@@ -1682,11 +1494,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		m.moveCursor(step)
 		return m, nil
 
-	// A jump through a long list, between one row and a whole page. The step
-	// is a setting because the right size depends on the list: ten is a lot
-	// in a lab and nothing in a fleet of thousands.
-	// alt+k and alt+j are the same jump: hjkl is how the rest of the list
-	// moves, so the chorded version of it should be too.
 	case "alt+up", "alt+k":
 		m.moveCursor(-m.pageStep())
 		return m, nil
@@ -1695,10 +1502,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		return m, nil
 
 	case "k", "j", "home", "end":
-		// These move the cursor only when the query is not being typed. A
-		// search for a "j" in a hostname has to reach the input, and home/end
-		// belong to the text while it has focus; the arrows above stay with
-		// the table either way, so a narrowed list is still navigable mid-query.
 		if !m.filterOn {
 			switch key {
 			case "k":
@@ -1719,9 +1522,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 			return m, nil
 		}
 		n := len(m.selected)
-		// Kept so alt+z can put it back. The map is copied rather than
-		// aliased: the model is passed by value and the live selection is
-		// about to be replaced.
 		m.lastCleared = make(map[string]bool, n)
 		for k := range m.selected {
 			m.lastCleared[k] = true
@@ -1729,8 +1529,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		m.lastClearedView = m.showSelected
 
 		m.selected = map[string]bool{}
-		// Showing only the selection with nothing selected would be an empty
-		// list and no way back, so that view is dropped too.
 		m.showSelected = false
 		m.applyFilter()
 		m.status = fmt.Sprintf("cleared %d selected — alt+z to undo", n)
@@ -1741,8 +1539,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 			m.status = "nothing to undo"
 			return m, nil
 		}
-		// Anything selected since the clear is kept: undo restores, it does
-		// not replace.
 		for k := range m.lastCleared {
 			m.selected[k] = true
 		}
@@ -1765,9 +1561,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		return m, nil
 
 	case "space":
-		// Filtering and selecting are separate modes: while the query is being
-		// typed every space belongs to it, and selection resumes once the
-		// filter is applied with enter.
 		if !m.filterOn {
 			return m.toggleCurrent(), nil
 		}
@@ -1775,14 +1568,9 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 	case "alt+r":
 		return m.refreshNow()
 
-	case "alt+y":
-		return m.copyElements()
-
 	case "alt+u":
 		m.userCursor = 0
 		m.status = ""
-		// Open on the tenant of whatever is highlighted, which is the one the
-		// user is looking at; the browsed tenant is the fallback.
 		m.usersTSG = m.tenant.TSGID
 		if el, ok := m.current(); ok {
 			m.usersTSG = el.TSG
@@ -1790,10 +1578,8 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		m.phase = phaseUsers
 		return m, nil
 
-	case "alt+m":
+	case "alt+m", "alt+a":
 		m.mode = m.mode.next()
-		// Cycling out of macro mode puts the macro down: the list would
-		// otherwise still be holding one with nothing saying so.
 		m.armedMacro = ""
 		m.status = ""
 		return m, nil
@@ -1821,10 +1607,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 			m.filterOn = false
 			m.filter.Blur()
 
-			// A query that has narrowed to a single ION is unambiguous, so
-			// enter acts on it instead of only applying the filter. In shell
-			// mode that means going straight in; in batch mode it means
-			// selecting it and staying, since a command still has to be chosen.
 			if len(m.matches) == 1 {
 				el := m.all[m.matches[0]]
 				if m.mode == modeBatch || m.mode == modeMacro {
@@ -1838,17 +1620,12 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 				})
 			}
 
-			// Otherwise the query is applied and the narrowed list selected from.
 			return m, nil
 		}
 		return m.onPickEnter()
 	}
 
 	if m.filterOn {
-		// Backspace on an **already** empty query is what leaves: the last
-		// press deletes the "/" itself. Checked before the input sees the key,
-		// because doing it after meant the press that emptied the query was
-		// also the one that left -- one too early to carry on typing.
 		if key == "backspace" && m.filter.Value() == "" {
 			m.filterOn = false
 			m.filter.Blur()
@@ -1858,9 +1635,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		var cmd tea.Cmd
 		m.filter, cmd = m.filter.Update(msg)
 		m.applyFilter()
-		// The rows a search just brought on screen are asked about now rather
-		// than when the background fill reaches them. That is what the pacing
-		// leaves room for.
 		return m, tea.Batch(cmd, m.askVisibleHA())
 	}
 
@@ -1868,10 +1642,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		return m.reopenLastTab()
 	}
 	if key == "alt+w" {
-		// alt+w closes what you are in. On the element list that is the list
-		// itself, so it goes back where the list was opened from; only the
-		// menu's alt+w quits. Any sessions keep running and are still
-		// reachable with alt+t.
 		m.status = ""
 		m.phase = m.listReturn()
 		return m, nil
@@ -1882,6 +1652,10 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 
 	switch key {
 	case "/":
+		if m.filter.Value() != "" {
+			m.filter.SetValue("")
+			m.applyFilter()
+		}
 		m.filterOn = true
 		return m, m.filter.Focus()
 	case "ctrl+]":
@@ -1896,8 +1670,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 	return m, cmd
 }
 
-// pickTargets is what enter acts on: everything selected, or the highlighted
-// row when nothing is.
 func (m tuiModel) pickTargets() []sessionTarget {
 	var out []sessionTarget
 	for _, el := range m.all {
@@ -1919,30 +1691,19 @@ func (m tuiModel) onPickEnter() (tea.Model, tea.Cmd) {
 	return m.onPickTargets(m.pickTargets())
 }
 
-// onPickTargets acts on an explicit set of elements, running the per-tenant
-// credential and connection checks first. Separate from onPickEnter so a search
-// that narrows to a single ION can act on that one rather than on whatever
-// happens to be selected.
 func (m tuiModel) onPickTargets(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	if len(targets) == 0 {
 		return m, nil
 	}
 
-	// An explicit action is a fresh attempt, so an earlier connection failure
-	// stops blocking the tenants it affected.
 	for _, want := range targets {
 		delete(m.tenantIssues, want.tsg)
 	}
 
-	// Rich-data mode reads the portal and never opens a session, so it comes
-	// before the device-login gate: asking for an ION password to look at
-	// portal data would be asking for a credential the answer does not need.
 	if m.mode == modeData {
 		return m.openDataTabs(targets)
 	}
 
-	// A selection can span tenants, and each keeps its own device login, so
-	// every tenant involved has to be asked about rather than only the first.
 	for _, want := range targets {
 		t, ok := m.tenantOf(want.tsg)
 		if !ok {
@@ -1962,8 +1723,6 @@ func (m tuiModel) onPickTargets(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	if m.mode == modeShell {
 		return m.openSessions(targets)
 	}
-	// Macro mode is batch mode with the commands already chosen, so it skips
-	// the command box and runs.
 	if m.mode == modeMacro {
 		return m.runArmedMacro(m.rowsFor(targets))
 	}
@@ -2003,9 +1762,6 @@ func (m tuiModel) onCommandKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 	return m, cmd
 }
 
-// rowsFor maps what enter acted on back to element rows, which is what a run
-// needs. The highlighted row when nothing is ticked is a target like any
-// other, so a macro can be run on one element without selecting it first.
 func (m tuiModel) rowsFor(targets []sessionTarget) []elementRow {
 	out := make([]elementRow, 0, len(targets))
 	for _, t := range targets {
@@ -2016,8 +1772,6 @@ func (m tuiModel) rowsFor(targets []sessionTarget) []elementRow {
 	return out
 }
 
-// selectedRows is what a run acts on: the elements ticked in the list, with
-// their IDs in the same order.
 func (m tuiModel) selectedRows() ([]elementRow, []string) {
 	var picked []elementRow
 	var ids []string
@@ -2035,11 +1789,7 @@ func (m tuiModel) startRun(cmds []string) (tea.Model, tea.Cmd) {
 	return m.startRunOn(cmds, picked, ids)
 }
 
-// startRunOn is the run itself, against rows the caller chose. Macro mode
-// passes what enter acted on, which may be the highlighted row rather than
-// the ticked selection.
 func (m tuiModel) startRunOn(cmds []string, picked []elementRow, ids []string) (tea.Model, tea.Cmd) {
-
 	if !app.Defaults.AllowWrites && !m.cfg.AllowWrites {
 		if err := ioncli.CheckReadOnly(cmds); err != nil {
 			m.status = err.Error()
@@ -2047,9 +1797,6 @@ func (m tuiModel) startRunOn(cmds []string, picked []elementRow, ids []string) (
 		}
 	}
 
-	// Credentials are resolved per element, since a run can span tenants. The
-	// flags still carry one pair so the shared validation has something to
-	// check, but it is only a fallback for targets that supply none.
 	targets := m.targetsFor(picked)
 	for i, t := range targets {
 		if t.User == "" || t.Pass == "" {
@@ -2129,7 +1876,7 @@ func (m tuiModel) current() (elementRow, bool) {
 func (m tuiModel) total() int { return len(m.ran) }
 
 func (m tuiModel) listHeight() int {
-	h := m.height - 11 - m.statsRows()
+	h := m.height - 13 - m.statsRows()
 	if m.sessions.Count() > 0 {
 		h--
 	}
@@ -2187,6 +1934,7 @@ func (m tuiModel) View() tea.View {
 	v.Content = ui.ClipFrame(v.Content, m.height)
 	v.AltScreen = true
 	v.MouseMode = m.mouseMode()
+	v.BackgroundColor, v.ForegroundColor = frameColours()
 	return v
 }
 
@@ -2198,7 +1946,8 @@ func (m tuiModel) viewPicking() string {
 	}
 	b.WriteString(ui.StyleCmd.Render("iontk") + "  " + m.modeLabel() +
 		ui.StyleDim.Render("   "+m.scopeLabel()+" · "+m.countLabel()) +
-		m.selectedNote() + m.refreshNote() + "\n")
+		m.selectedNote() + "\n")
+	b.WriteString(m.refreshNote() + "\n")
 
 	if m.filterOn || m.filter.Value() != "" {
 		line := m.filter.View()
@@ -2234,8 +1983,6 @@ func (m tuiModel) viewPicking() string {
 		case modeMacro:
 			act = fmt.Sprintf("enter run %s on %d", m.armedMacro, n)
 		}
-		// While typing a query the only keys that matter are the ones that end
-		// it, so the hint says just those.
 		clear := "alt+c clear"
 		if len(m.lastCleared) > 0 {
 			clear = "alt+z undo clear"
@@ -2244,13 +1991,11 @@ func (m tuiModel) viewPicking() string {
 		if m.listReturn() == phaseMacros {
 			back = "macros"
 		}
-		hint := fmt.Sprintf("↑↓/jk move · / filter · space select · alt+s selected · %s · alt+r refresh · alt+m mode · %s id · %s · esc/q/alt+w %s", clear, copyKeyHint, act, back)
+		hint := fmt.Sprintf("↑↓/jk move · / filter · space select · alt+s selected · %s · alt+r refresh · alt+m/alt+a mode · %s · esc/q/alt+w %s", clear, act, back)
 		if m.showSelected {
 			hint = fmt.Sprintf("↑↓/jk move · alt+s all · alt+c clear · space unselect · %s · esc/q/alt+w %s", act, back)
 		}
 		if m.filterOn {
-			// With one match left, enter does the thing rather than just
-			// applying the query, so the hint says which.
 			enter := "enter apply"
 			if len(m.matches) == 1 {
 				enter = "enter open"
@@ -2334,8 +2079,6 @@ func (m tuiModel) viewRunning() string {
 	return b.String()
 }
 
-// plainIf strips a cell's own styling on the row the cursor is on, so the
-// table's highlight is the only thing colouring it.
 func plainIf(here bool, cell string) string {
 	if here {
 		return ui.Plain(cell)

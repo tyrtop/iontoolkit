@@ -14,8 +14,6 @@ import (
 	"github.com/coder/websocket"
 )
 
-// wsServer counts handshake attempts and answers with status until accept is
-// reached, standing in for a toolkit socket that does not come up at first.
 func wsServer(t *testing.T, status int, acceptOn int32) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
 	var tries atomic.Int32
@@ -60,7 +58,6 @@ func TestDialStopsOnceItSucceeds(t *testing.T) {
 	srv, tries := wsServer(t, http.StatusBadGateway, 2)
 	c := testClient(t, DialPolicy{Attempts: 5, Timeout: time.Second, Backoff: time.Millisecond})
 
-	// The second handshake is accepted, so the remaining attempts are not spent.
 	_, _ = c.dialURL(context.Background(), strings.Replace(srv.URL, "http://", "ws://", 1), "e1")
 	if got := tries.Load(); got != 2 {
 		t.Errorf("%d handshake attempts, want it to stop at 2", got)
@@ -74,7 +71,6 @@ func TestDialDoesNotRetryARejectedCredential(t *testing.T) {
 	}{
 		{"unauthorized", http.StatusUnauthorized},
 		{"forbidden", http.StatusForbidden},
-		// A missing element will not appear by trying again either.
 		{"no such element", http.StatusNotFound},
 	}
 	for _, tt := range tests {
@@ -110,7 +106,6 @@ func TestDialGivesUpWithTheContext(t *testing.T) {
 }
 
 func TestDialPolicyDefaults(t *testing.T) {
-	// Zero fields must not produce a zero timeout or a single silent attempt.
 	got := DialPolicy{}.withDefaults()
 	if got != DefaultDialPolicy {
 		t.Errorf("withDefaults() = %+v, want %+v", got, DefaultDialPolicy)
@@ -165,8 +160,6 @@ func TestDialReporterSeesEachAttemptAsItStarts(t *testing.T) {
 	if len(seen) != 3 {
 		t.Fatalf("%d attempts reported, want 3", len(seen))
 	}
-	// Reported as each begins, so a UI can show the retry while it runs rather
-	// than only once dialling has given up.
 	for i, a := range seen {
 		if a.Attempt != i+1 || a.Of != 3 {
 			t.Errorf("attempt %d reported as %d/%d, want %d/3", i, a.Attempt, a.Of, i+1)
@@ -178,7 +171,6 @@ func TestDialReporterSeesEachAttemptAsItStarts(t *testing.T) {
 	if seen[0].Err != nil {
 		t.Errorf("first attempt carried err %v, want nil", seen[0].Err)
 	}
-	// Each later attempt carries why the one before it did not take.
 	for i, a := range seen[1:] {
 		if a.Err == nil {
 			t.Errorf("attempt %d carried no previous error", i+2)

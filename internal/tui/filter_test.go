@@ -47,7 +47,6 @@ func TestFilterCombinesTermsAcrossFields(t *testing.T) {
 		want  []string
 	}{
 		{
-			// The case that prompted this: a term each for site, model and tenant.
 			name:  "site, model and tenant together",
 			query: "100 1200 tract",
 			want:  []string{"s0100-rtr-01"},
@@ -134,8 +133,6 @@ func TestFilterKeepsTheCursorInRange(t *testing.T) {
 }
 
 func TestFilterWithNoTenantColumnStillSearchesTenant(t *testing.T) {
-	// A single tenant hides the column, but its name should still be a usable
-	// search term.
 	m := multiModel(t)
 	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "e1", Name: "s0100-rtr-01"}})
 	if m.showTenantColumn() {
@@ -171,8 +168,6 @@ func TestRenderFilteredCrossTenantList(t *testing.T) {
 
 var _ = config.AuthBrowser
 
-// rankModel holds the store numbers that exposed the ranking problem: s5024 is
-// what is wanted, and s0500 is the name that an in-order match drags in.
 func rankModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := multiModel(t)
@@ -197,7 +192,7 @@ func TestGeneralSectionRowsAreAllReachable(t *testing.T) {
 		t.Fatalf("sectionRows() = %d, want %d", got, generalRows)
 	}
 	out := plain(m.viewSettings())
-	for _, want := range []string{"commands", "mode", "jump", "times", "elements", "views"} {
+	for _, want := range []string{"Commands", "Mode", "Jump", "Times", "Elements", "views"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the General section is missing %q:\n%s", want, out)
 		}
@@ -219,8 +214,6 @@ func TestResultsStayInNameOrder(t *testing.T) {
 	}
 }
 
-// searchEnterModel is a connected, credentialled single tenant so that acting
-// on a search result reaches the dial rather than a credential prompt.
 func searchEnterModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := multiModel(t)
@@ -326,8 +319,6 @@ func TestSeveralMatchesJustApplyTheFilter(t *testing.T) {
 }
 
 func TestASingleMatchBeatsAnEarlierSelection(t *testing.T) {
-	// Selections survive filtering, so a search that lands on one ION has to
-	// act on that one rather than on what was ticked before.
 	m := searchEnterModel(t)
 	m.mode = modeShell
 	m.selected["111/e3"] = true
@@ -399,7 +390,6 @@ func TestClearingTheSelection(t *testing.T) {
 	if !strings.Contains(got.status, "cleared 3") {
 		t.Errorf("status = %q, want the count reported", got.status)
 	}
-	// Every element is listed again.
 	if len(got.matches) != 3 {
 		t.Errorf("matched %d, want the full list back", len(got.matches))
 	}
@@ -429,7 +419,6 @@ func TestShowingOnlyTheSelection(t *testing.T) {
 		t.Errorf("the list does not say it is narrowed:\n%s", out)
 	}
 
-	// And back again.
 	mm, _ = got.onPickKey(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModAlt}), "alt+s")
 	back := mm.(tuiModel)
 	if back.showSelected {
@@ -453,8 +442,6 @@ func TestShowingTheSelectionNeedsASelection(t *testing.T) {
 }
 
 func TestClearingWhileShowingTheSelectionRestoresTheList(t *testing.T) {
-	// Clearing the selection while only it is shown would otherwise leave an
-	// empty list with no obvious way back.
 	m := searchEnterModel(t)
 	m.selected["111/e2"] = true
 	m.showSelected = true
@@ -478,8 +465,6 @@ func TestSelectedOnlyStillHonoursTheQuery(t *testing.T) {
 	m.filter.SetValue("s5024")
 	m.applyFilter()
 
-	// e1 is s5024-rtr-01 and is selected; e3 is s0100 and is selected but does
-	// not match the query.
 	if len(m.matches) != 1 {
 		t.Fatalf("matched %d, want the intersection of query and selection", len(m.matches))
 	}
@@ -508,8 +493,6 @@ func TestJAndKMoveTheList(t *testing.T) {
 }
 
 func TestScopeIsComputedOnceNotPerRender(t *testing.T) {
-	// Walking every element on each render is what made holding a movement key
-	// lag, so the label and the tenant count come from the list changing.
 	m := multiModel(t)
 	if got := m.scopeLabel(); got != "Tractor Supply" {
 		t.Errorf("scopeLabel() = %q with nothing loaded, want the current tenant", got)
@@ -537,7 +520,6 @@ func TestScopeIsComputedOnceNotPerRender(t *testing.T) {
 		t.Error("the tenant column did not show for two tenants")
 	}
 
-	// Emptying one tenant brings it back down.
 	m.mergeTenantElements("222", "Niagara Bottling", nil)
 	if m.tenantCount != 1 {
 		t.Errorf("tenantCount = %d, want 1 after the second tenant emptied", m.tenantCount)
@@ -584,7 +566,6 @@ func TestUndoIsOnlyOfferedWhenThereIsSomethingToUndo(t *testing.T) {
 		t.Errorf("status = %q, want it to say so", got.status)
 	}
 
-	// And it is spent after one use.
 	m.selected["111/e1"] = true
 	mm, _ = m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
 	mm, _ = mm.(tuiModel).onPickKey(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModAlt}), "alt+z")
@@ -596,7 +577,6 @@ func TestUndoIsOnlyOfferedWhenThereIsSomethingToUndo(t *testing.T) {
 }
 
 func TestUndoRestoresRatherThanReplaces(t *testing.T) {
-	// Anything picked after the clear has to survive the undo.
 	m := searchEnterModel(t)
 	m.selected["111/e1"] = true
 
@@ -634,8 +614,6 @@ func TestUndoBringsBackTheSelectionOnlyView(t *testing.T) {
 }
 
 func TestUndoDoesNotAliasTheClearedSelection(t *testing.T) {
-	// The model is copied by value, so keeping a reference to the live map
-	// would make the undo see later edits instead of what was cleared.
 	m := searchEnterModel(t)
 	m.selected["111/e1"] = true
 
@@ -745,7 +723,6 @@ func TestArrowsStillMoveTheListWhileSearching(t *testing.T) {
 	m := filterModel(t)
 	m = typeIntoFilter(t, m, "1200")
 
-	// Arrows are not text, so a narrowed list stays navigable mid-query.
 	m.table.SetCursor(0)
 	start := m.table.Cursor()
 	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}), "down")
@@ -758,10 +735,6 @@ func TestArrowsStillMoveTheListWhileSearching(t *testing.T) {
 	}
 }
 
-// Backspacing a query down to nothing leaves the filter **open**, so typing
-// can carry straight on; it is the next backspace -- the one that deletes the
-// "/" itself -- that goes back to the list. Leaving on the press that emptied
-// the query was one too early.
 func TestBackspacingTheQueryEmptiesItThenLeaves(t *testing.T) {
 	m := pickModel(t)
 	m.phase = phasePicking
@@ -781,7 +754,6 @@ func TestBackspacingTheQueryEmptiesItThenLeaves(t *testing.T) {
 	for range "s0" {
 		m = backspace(m)
 	}
-	// Empty, still in the filter, whole list back.
 	if !m.filterOn {
 		t.Error("the filter closed on the press that emptied the query")
 	}
@@ -792,7 +764,6 @@ func TestBackspacingTheQueryEmptiesItThenLeaves(t *testing.T) {
 		t.Errorf("%d matches, want the whole list of %d", len(m.matches), len(m.all))
 	}
 
-	// Typing carries on from there rather than needing / again.
 	m = typeString(t, m, "s9")
 	if m.filter.Value() != "s9" {
 		t.Errorf("query = %q, want typing to continue in the filter", m.filter.Value())
@@ -801,7 +772,6 @@ func TestBackspacingTheQueryEmptiesItThenLeaves(t *testing.T) {
 		m = backspace(m)
 	}
 
-	// One more deletes the "/" and hands the keys back to the list.
 	m = backspace(m)
 	if m.filterOn {
 		t.Error("the filter is still open after backspacing the empty query")
@@ -812,7 +782,6 @@ func TestBackspacingTheQueryEmptiesItThenLeaves(t *testing.T) {
 	}
 }
 
-// The same rule on the macro page, which has a filter of its own.
 func TestBackspacingTheMacroQueryEmptiesItThenLeaves(t *testing.T) {
 	m := macroModel(t)
 
@@ -833,22 +802,16 @@ func TestBackspacingTheMacroQueryEmptiesItThenLeaves(t *testing.T) {
 		t.Errorf("%d rows, want every macro back", len(m.macroRows()))
 	}
 
-	// The press that deletes the "/" is the one that leaves.
 	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
 	if next.(tuiModel).macroFilterOn {
 		t.Error("the macro filter is still open after backspacing the empty query")
 	}
 }
 
-// The widget's own MoveUp scrolls its viewport away from the cursor, so a held
-// k used to walk the highlight off the top of the window and the list stopped
-// appearing to move. Both directions go through moveCursorTo now.
 func TestHoldingKWalksBackUpTheList(t *testing.T) {
 	m := pickModel(t)
 	m.phase = phasePicking
 	m.height = 12
-	// More rows than the window, which is when the viewport arithmetic
-	// mattered.
 	els := make([]api.Element, 40)
 	for i := range els {
 		els[i] = api.Element{ID: fmt.Sprint(i), Name: fmt.Sprintf("S%04d-RTR-01", i), Connected: true}
@@ -866,8 +829,6 @@ func TestHoldingKWalksBackUpTheList(t *testing.T) {
 		t.Errorf("the row the cursor is on is not in the window:\n%s", plain(m.table.View()))
 	}
 
-	// Back up one at a time: the cursor and the window move together the
-	// whole way.
 	for i := 29; i >= 0; i-- {
 		next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
 		m = next.(tuiModel)
@@ -880,7 +841,6 @@ func TestHoldingKWalksBackUpTheList(t *testing.T) {
 	}
 }
 
-// alt+j and alt+k jump by the page step, like alt+↓ and alt+↑.
 func TestAltJAndAltKJumpTheList(t *testing.T) {
 	m := pickModel(t)
 	m.cfg.PageStep = 2
@@ -897,7 +857,6 @@ func TestAltJAndAltKJumpTheList(t *testing.T) {
 	}
 }
 
-// alt+h and alt+l walk the tab ring, like alt+← and alt+→.
 func TestAltHAndAltLSwitchTabs(t *testing.T) {
 	m := pickModel(t)
 	m.data = []dataTab{{eid: "1", name: "S0100-RTR-01", tsg: "1"}}
@@ -915,8 +874,6 @@ func TestAltHAndAltLSwitchTabs(t *testing.T) {
 	}
 }
 
-// The serial is on the row and matched by the filter: a column you can read is
-// one people will type into, and a serial is quoted off a label or a case.
 func TestTheSerialIsOnTheRowAndSearchable(t *testing.T) {
 	m := multiModel(t)
 	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
@@ -931,7 +888,7 @@ func TestTheSerialIsOnTheRowAndSearchable(t *testing.T) {
 		t.Fatal("the sn column is hidden on a list whose records carry serials")
 	}
 	out := plain(m.viewPicking())
-	for _, want := range []string{"sn", "ION1200ABC123", "ION1200XYZ789"} {
+	for _, want := range []string{"SN", "ION1200ABC123", "ION1200XYZ789"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the list is missing %q:\n%s", want, out)
 		}
@@ -947,15 +904,9 @@ func TestTheSerialIsOnTheRowAndSearchable(t *testing.T) {
 	}
 }
 
-// A connected element reads green across the line, an offline one keeps red on
-// the state alone, and the row under the cursor gives both up: the table paints
-// its highlight around the whole row, and a highlight wrapped around coloured
-// cells ends at the first reset inside them.
 func TestConnectedRowsAreGreenAndOfflineKeepsRed(t *testing.T) {
 	m := multiModel(t)
 	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
-		// Sorted by name, so the offline one is row 0 and starts under the
-		// cursor.
 		{ID: "e2", Name: "s0500-rtr-01", Model: "ion1200"},
 		{ID: "e1", Name: "s5024-rtr-01", Model: "ion1200", Connected: true},
 	})
@@ -963,9 +914,8 @@ func TestConnectedRowsAreGreenAndOfflineKeepsRed(t *testing.T) {
 	m.width, m.height = 140, 30
 	m.rebuildRows()
 
-	// Cursor on the offline row: the connected one is green, name and all.
 	out := m.viewPicking()
-	if !strings.Contains(out, ui.StyleOK.Render("s5024-rtr-01")) {
+	if !strings.Contains(out, ui.StyleOK.Render("  s5024-rtr-01")) {
 		t.Errorf("a connected element is not green across the line:\n%q", out)
 	}
 	if !strings.Contains(out, ui.StyleOK.Render("connected")) {
@@ -975,7 +925,6 @@ func TestConnectedRowsAreGreenAndOfflineKeepsRed(t *testing.T) {
 		t.Error("the row under the cursor kept its own colour, which breaks the highlight")
 	}
 
-	// Move off it: now offline is red and the connected row is the plain one.
 	m.moveCursorTo(1)
 	out = m.viewPicking()
 	if !strings.Contains(out, ui.StyleErr.Render("offline")) {
@@ -984,19 +933,16 @@ func TestConnectedRowsAreGreenAndOfflineKeepsRed(t *testing.T) {
 	if strings.Contains(out, ui.StyleOK.Render("s5024-rtr-01")) {
 		t.Error("the row under the cursor is still green, which breaks the highlight")
 	}
-	// Connected is never red, wherever the cursor is.
 	if strings.Contains(out, ui.StyleErr.Render("connected")) {
 		t.Error("connected is rendered in the error colour")
 	}
 }
 
-// Columns are sized to what is in them, which is why site stopped being wider
-// than its names while a serial was cut off.
 func TestColumnsAreSizedToTheirContent(t *testing.T) {
 	cols := []elementColumn{
 		{title: "element", min: 12, max: 28, flex: true},
 		{title: "site", min: 8, max: 22, flex: true},
-		{title: "sn", min: 10, max: 24, flex: true},
+		{title: "SN", min: 10, max: 24, flex: true},
 		{title: "state", min: 9, max: 9},
 	}
 	values := [][]string{
@@ -1011,8 +957,6 @@ func TestColumnsAreSizedToTheirContent(t *testing.T) {
 		t.Errorf("sn = %d, want the whole serial (%d)", wide[2], len("ION1200ABCDEF123456"))
 	}
 
-	// On a narrow terminal the flexible columns give way, widest first, and
-	// the fixed ones never do.
 	narrow := fitColumns(cols, values, 60)
 	total := 0
 	for _, w := range narrow {
@@ -1047,4 +991,129 @@ func TestRenderTheElementListWithSerials(t *testing.T) {
 	m.haTotal, m.haDone = 2, 1
 	m.rebuildRows()
 	t.Log("\n" + m.viewPicking())
+}
+
+func TestATickedRowCarriesABarAgainstItsName(t *testing.T) {
+	m := searchEnterModel(t)
+	m.applyFilter()
+	if len(m.matches) < 2 {
+		t.Fatalf("need two rows to compare, got %d", len(m.matches))
+	}
+
+	nameCell := func(row int) string {
+		for i, c := range m.listKeep {
+			if c == colName {
+				return m.table.Rows()[row][i]
+			}
+		}
+		t.Fatal("no name column")
+		return ""
+	}
+
+	el := m.all[m.matches[1]]
+	m.selected = map[string]bool{el.key(): true}
+	m.rebuildRows()
+
+	ticked := nameCell(1)
+	if !strings.HasPrefix(plain(ticked), "▌ ") {
+		t.Errorf("the name cell is %q, want the bar against the name", plain(ticked))
+	}
+	if !strings.Contains(ticked, "\x1b[1m") {
+		t.Errorf("the name is %q, want it bold", ticked)
+	}
+
+	plainCell := plain(nameCell(0))
+	if strings.Contains(plainCell, "▌") {
+		t.Errorf("an unticked row carries the bar: %q", plainCell)
+	}
+	if !strings.HasPrefix(plainCell, "  ") {
+		t.Errorf("an unticked name is %q, want it padded into line", plainCell)
+	}
+	if a, b := strings.TrimLeft(plainCell, " "), strings.TrimLeft(plain(ticked), "▌ "); a == "" || b == "" {
+		t.Error("a name cell came out empty")
+	}
+
+	m.selected = map[string]bool{}
+	m.rebuildRows()
+	if got := plain(nameCell(1)); strings.Contains(got, "▌") {
+		t.Errorf("the bar survived unticking: %q", got)
+	}
+}
+
+func TestTheListAndItsChromeFitTheFrame(t *testing.T) {
+	m := searchEnterModel(t)
+	for _, h := range []int{24, 30, 44, 60} {
+		m.height, m.width = h, 120
+		m.applyFilter()
+		frame := plain(m.viewPicking())
+		lines := strings.Split(strings.TrimRight(frame, "\n"), "\n")
+		if len(lines) > h-1 {
+			t.Errorf("at height %d the list draws %d lines, which the frame clips:\n%s",
+				h, len(lines), frame)
+		}
+	}
+}
+
+func TestOpeningTheFilterAgainStartsFresh(t *testing.T) {
+	m := searchEnterModel(t)
+
+	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}), "/")
+	m = next.(tuiModel)
+	for _, r := range "e1" {
+		next, _ = m.onPickKey(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}), string(r))
+		m = next.(tuiModel)
+	}
+	next, _ = m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), "enter")
+	m = next.(tuiModel)
+
+	if m.filterOn {
+		t.Error("enter did not leave the filter")
+	}
+	applied := m.filter.Value()
+	if applied == "" {
+		t.Fatal("enter dropped the query, which is what it is meant to keep")
+	}
+	narrowed := len(m.matches)
+	if narrowed >= len(m.all) {
+		t.Fatalf("the query matched everything (%d of %d), so there is nothing to clear",
+			narrowed, len(m.all))
+	}
+
+	next, _ = m.onPickKey(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}), "/")
+	m = next.(tuiModel)
+	if got := m.filter.Value(); got != "" {
+		t.Errorf("the filter reopened on %q, want an empty query", got)
+	}
+	if len(m.matches) != len(m.all) {
+		t.Errorf("%d of %d rows after reopening, want the whole list back",
+			len(m.matches), len(m.all))
+	}
+	if !m.filterOn {
+		t.Error("the filter did not open")
+	}
+}
+
+func TestAltAAlsoCyclesTheMode(t *testing.T) {
+	m := searchEnterModel(t)
+	m.phase = phasePicking
+
+	for _, key := range []string{"alt+m", "alt+a"} {
+		before := m.mode
+		next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModAlt}), key)
+		m = next.(tuiModel)
+		if m.mode == before {
+			t.Errorf("%s left the mode on %v", key, before)
+		}
+	}
+
+	m.mode, m.armedMacro = modeMacro, "ha check"
+	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'a', Mod: tea.ModAlt}), "alt+a")
+	m = next.(tuiModel)
+	if m.armedMacro != "" {
+		t.Errorf("armedMacro = %q after cycling out of macro mode", m.armedMacro)
+	}
+
+	if out := plain(m.viewPicking()); !strings.Contains(out, "alt+m/alt+a mode") {
+		t.Errorf("the hint does not offer both:\n%s", out)
+	}
 }

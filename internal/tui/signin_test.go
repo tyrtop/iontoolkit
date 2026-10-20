@@ -42,8 +42,6 @@ func menuLabels(m tuiModel) []string {
 }
 
 func TestSignInEntryIsAlwaysOffered(t *testing.T) {
-	// It is the way in to the tenant list, not a per-tenant re-auth, so it does
-	// not depend on which tenant happens to be active.
 	for _, tenant := range []config.Tenant{
 		{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser},
 		{Name: "Acme Co", TSGID: "1", Auth: config.AuthServiceAccount},
@@ -131,7 +129,6 @@ func TestSignedInLandsOnAConfirmation(t *testing.T) {
 	m.phase = phaseSignIn
 	m.spinner = ui.NewSpinner("")
 
-	// An explicit sign-in has nothing to replay, so the result is shown.
 	mm, cmd := m.Update(signedInMsg{
 		client: liveClient(),
 		ident:  saseauth.Identity{Name: "Ben Hall", Email: "ben@example.test", TSG: "1"},
@@ -206,8 +203,6 @@ func TestDismissingTheConfirmation(t *testing.T) {
 		wantPhase tuiPhase
 	}{
 		{"an explicit sign-in returns to the menu", false, phaseMenu},
-		// A browser tenant needs no stored secret to validate, so resuming goes
-		// on to load elements rather than bouncing back to the menu.
 		{"an interrupted action resumes", true, phaseLoading},
 	}
 	for _, tt := range tests {
@@ -358,8 +353,6 @@ func TestForgettingATenantDropsItsRefreshToken(t *testing.T) {
 }
 
 func TestLabelKeysFitTheGutter(t *testing.T) {
-	// Every key rendered through ui.Label() has to fit ui.LabelWidth, or it collides
-	// with its value instead of being padded away from it.
 	keys := []string{
 		"account", "tenant", "region", "roles", "api token", "sign-in",
 		"spinner", "commands", "elements", "secrets",
@@ -432,8 +425,6 @@ func TestMenuKeybinds(t *testing.T) {
 
 		mm, _ := m.onMenuKey("alt+t")
 		got := mm.(tuiModel)
-		// Nothing was open to reattach to, but the elements that own tab 1 must
-		// still have been restored, or a reattach would land on an empty list.
 		if len(got.all) != len(els) {
 			t.Errorf("loaded %d elements, want %d restored from cache", len(got.all), len(els))
 		}

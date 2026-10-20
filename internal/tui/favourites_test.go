@@ -9,8 +9,6 @@ import (
 	"tyrtop.com/iontk/internal/ionterm"
 )
 
-// favModel is a shell open on an ion 1200, which is what a favourite's model
-// is compared against.
 func favModel(t *testing.T) (tuiModel, *recConn) {
 	t.Helper()
 	m := historyModel(t)
@@ -30,12 +28,8 @@ func pressSessionKey(t *testing.T, m tuiModel, key tea.Key) (tuiModel, tea.Cmd) 
 	return next.(tuiModel), cmd
 }
 
-// No Text: with it set, KeyPressMsg.String() reports the character and drops
-// the modifier, so an alt chord built that way arrives as a plain keypress.
 func altKey(r rune) tea.Key { return tea.Key{Code: r, Mod: tea.ModAlt} }
 
-// alt+N puts the command on the line without sending it, the same discipline
-// the palette has: a stored command is read before it runs.
 func TestAltDigitInsertsAFavourite(t *testing.T) {
 	m, conn := favModel(t)
 	if err := m.cmds.SetFavourite(1, "dump device status", "ion 1200"); err != nil {
@@ -47,7 +41,6 @@ func TestAltDigitInsertsAFavourite(t *testing.T) {
 		t.Errorf("status = %q, want nothing to say for a favourite from this model", m.status)
 	}
 	waitForTUI(t, func() bool { return strings.Contains(conn.sent(), "dump device status") })
-	// Inserted, not sent.
 	if strings.Contains(conn.sent(), "\r") {
 		t.Errorf("the favourite was sent, not inserted: %q", conn.sent())
 	}
@@ -64,8 +57,6 @@ func TestAnEmptySlotSaysHowToFillIt(t *testing.T) {
 	}
 }
 
-// The model a favourite was captured on is why it is stored: a 1200 command
-// is flagged on a 3200 rather than silently failing there.
 func TestAFavouriteFromAnotherModelIsFlagged(t *testing.T) {
 	m, conn := favModel(t)
 	if err := m.cmds.SetFavourite(2, "dump interface status 8", "ion 3200"); err != nil {
@@ -78,12 +69,9 @@ func TestAFavouriteFromAnotherModelIsFlagged(t *testing.T) {
 			t.Errorf("status = %q, want it to name %q", m.status, want)
 		}
 	}
-	// Flagged, not blocked: it is on the line for the user to read.
 	waitForTUI(t, func() bool { return strings.Contains(conn.sent(), "dump interface status 8") })
 }
 
-// alt+f captures what is being typed, which is the moment someone decides a
-// command is worth keeping.
 func TestAltFSavesThePromptLine(t *testing.T) {
 	m, _ := favModel(t)
 	m = typeString(t, m, "dump vpn count")
@@ -96,7 +84,6 @@ func TestAltFSavesThePromptLine(t *testing.T) {
 		t.Errorf("the picker is not on screen:\n%s", got)
 	}
 
-	// A digit picks the slot and saves in one keypress.
 	m, cmd := pressSessionKey(t, m, tea.Key{Code: '4', Text: "4"})
 	if m.favPick {
 		t.Error("the picker stayed open after saving")
@@ -138,7 +125,6 @@ func TestThePickerListsAndClearsSlots(t *testing.T) {
 		}
 	}
 
-	// The cursor starts on slot 1, which is the one ctrl+d clears.
 	cleared, cmd := m.onFavouriteKey("ctrl+d")
 	after := cleared.(tuiModel)
 	if _, ok := after.cmds.Favourite(1); ok {
@@ -148,7 +134,6 @@ func TestThePickerListsAndClearsSlots(t *testing.T) {
 		t.Error("clearing queued no write")
 	}
 
-	// Nothing on the line, so a digit has nothing to save and says so.
 	next, _ := after.onFavouriteKey("2")
 	empty := next.(tuiModel)
 	if !strings.Contains(empty.status, "nothing on the line") {
@@ -164,7 +149,6 @@ func TestThePickerListsAndClearsSlots(t *testing.T) {
 	}
 }
 
-// The by-hand route: a command for hardware that is not in front of you.
 func TestTheFavouriteFormSaves(t *testing.T) {
 	m, _ := favModel(t)
 	m, _ = pressSessionKey(t, m, altKey('f'))
@@ -192,7 +176,6 @@ func TestTheFavouriteFormSaves(t *testing.T) {
 	}
 	runSave(t, cmd)
 
-	// A slot outside the range is refused rather than written somewhere else.
 	m.form = []formField{newField("command", "", false), newField("slot", "", false)}
 	m.formKind = formFavourite
 	m.form[0].input.SetValue("uptime")
@@ -203,8 +186,6 @@ func TestTheFavouriteFormSaves(t *testing.T) {
 	}
 }
 
-// alt+N was tab selection. It is a favourite now, and the tab bar no longer
-// advertises numbers that do nothing.
 func TestNumericTabSelectionIsRetired(t *testing.T) {
 	m, _ := favModel(t)
 	conn2 := newRecConn()
@@ -218,7 +199,6 @@ func TestNumericTabSelectionIsRetired(t *testing.T) {
 	if m.currentTab() != before {
 		t.Errorf("alt+1 moved the tab from %d to %d, want it to reach a favourite instead", before, m.currentTab())
 	}
-	// alt+←/→ is what moves tabs now.
 	m, _ = pressSessionKey(t, m, tea.Key{Code: tea.KeyLeft, Mod: tea.ModAlt})
 	if m.currentTab() == before {
 		t.Error("alt+left did not move the tab")
@@ -234,7 +214,6 @@ func TestFavouriteSlotsSurviveARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// What a fresh process does: read the store back.
 	cfg, err := m.store.Config()
 	if err != nil {
 		t.Fatal(err)

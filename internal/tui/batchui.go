@@ -17,8 +17,6 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// DrainLive draws batch progress on stderr. stdinTaken says the element list
-// was read from stdin, which the progress UI must then leave alone.
 func DrainLive(ctx context.Context, events <-chan sase.Event, commands []string, total int, sink output.Sink, stdinTaken bool) (int, int, error) {
 	opts := []tea.ProgramOption{
 		tea.WithContext(ctx),
@@ -106,7 +104,6 @@ func waitForEvent(ch <-chan sase.Event) tea.Cmd {
 
 func (m batchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil

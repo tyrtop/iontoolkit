@@ -11,8 +11,6 @@ import (
 )
 
 func TestEveryFlagIsGrouped(t *testing.T) {
-	// The guard that makes the generated doc worth having: a new flag cannot
-	// quietly land in a catch-all section nobody reads.
 	if _, err := groupFlags(rootCmd); err != nil {
 		t.Errorf("groupFlags() error = %v", err)
 	}
@@ -26,7 +24,6 @@ func TestAnUngroupedFlagFailsGeneration(t *testing.T) {
 	if err == nil {
 		t.Fatal("groupFlags() error = nil, want an ungrouped flag to fail")
 	}
-	// The message has to name the flag and where to put it, or it is a riddle.
 	for _, want := range []string{"brand-new", "flagdoc.go"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to mention %q", err, want)
@@ -40,7 +37,6 @@ func TestGroupedFlagsKeepTheirListedOrder(t *testing.T) {
 		t.Fatalf("groupFlags() error = %v", err)
 	}
 
-	// Related timeouts read better together than alphabetically.
 	var want []string
 	for _, g := range flagGroups {
 		if g.name == "Connection" {
@@ -72,8 +68,6 @@ func TestDeprecatedFlagsAreSeparated(t *testing.T) {
 			t.Errorf("--%s is in Deprecated with no deprecation message", f.Name)
 		}
 	}
-	// A deprecated flag must not also appear in a live group, or it reads as
-	// current.
 	for _, g := range flagGroups {
 		for _, f := range grouped[g.name] {
 			if f.Deprecated != "" {
@@ -95,7 +89,6 @@ func TestTheDocMentionsEveryFlagAndEnvVar(t *testing.T) {
 			t.Errorf("--%s is missing from the generated doc", f.Name)
 		}
 	})
-	// These are read in BaseFlags() and documented nowhere else.
 	for _, env := range []string{
 		"SCM_CLIENT_ID", "SCM_CLIENT_SECRET", "SCM_TSG_ID", "SCM_TOKEN",
 		"ION_USER", "ION_PASS",
@@ -107,7 +100,6 @@ func TestTheDocMentionsEveryFlagAndEnvVar(t *testing.T) {
 }
 
 func TestGeneratingIntoAMissingDirectory(t *testing.T) {
-	// docs/ is gitignored, so CI generates into a directory that is not there.
 	out := filepath.Join(t.TempDir(), "docs", "flags.md")
 
 	if err := genFlagDocsCmd.RunE(genFlagDocsCmd, []string{out}); err != nil {
@@ -124,7 +116,6 @@ func TestGeneratingIntoAMissingDirectory(t *testing.T) {
 }
 
 func TestTheGeneratorIsHidden(t *testing.T) {
-	// It would otherwise show up in --help beside run and shell.
 	if !genFlagDocsCmd.Hidden {
 		t.Error("gen-flag-docs is not hidden")
 	}

@@ -10,8 +10,6 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-// CacheFresh is how long cached elements are treated as current, by the TUI
-// on launch and by a --search that would rather answer from disk.
 const CacheFresh = 15 * time.Minute
 
 type ElementCache struct {
@@ -19,19 +17,15 @@ type ElementCache struct {
 	FetchedAt time.Time         `json:"fetched_at"`
 	Elements  []api.Element     `json:"elements"`
 	Sites     map[string]string `json:"sites,omitempty"`
-	// last sweep's states, shown with an asterisk: as old as this file
-	HA map[string]string `json:"ha,omitempty"`
+	HA        map[string]string `json:"ha,omitempty"`
 }
 
-// a sweep finishes long after the elements were written
 func (s *Store) SaveHA(tsg string, states map[string]string) error {
 	c, err := s.Cache(tsg)
 	if err != nil {
 		return err
 	}
 	if c == nil {
-		// Nothing to attach it to: the elements are what the file is for, and
-		// HA state without them has nothing to key against.
 		return nil
 	}
 	if c.HA == nil {
@@ -91,6 +85,4 @@ func (c *ElementCache) Stale(ttl time.Duration) bool {
 	return c == nil || c.FetchedAt.IsZero() || c.Age() > ttl
 }
 
-// Usable is a cache worth reading: one that was written and has something in
-// it. An empty one is indistinguishable from a tenant that answered nothing.
 func (c *ElementCache) Usable() bool { return c != nil && len(c.Elements) > 0 }

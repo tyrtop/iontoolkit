@@ -2,15 +2,16 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// prints the clock too: a zone set months ago is only checkable against it
 func (m tuiModel) zoneLine() string {
 	if p := clock.Problem(); p != "" {
 		return ui.StyleWarn.Render(ui.Truncate(p, 44)) + ui.StyleDim.Render("  times are UTC")
@@ -19,7 +20,6 @@ func (m tuiModel) zoneLine() string {
 		ui.StyleDim.Render("  now "+clock.Stamp(time.Now()))
 }
 
-// 600 IANA names have no order to walk, so only the typed one is kept
 func (m tuiModel) cycleZone() (tea.Model, tea.Cmd) {
 	order := []string{clock.UTC, clock.Local}
 	if m.typedZone != "" {
@@ -37,7 +37,6 @@ func (m tuiModel) cycleZone() (tea.Model, tea.Cmd) {
 	return nm, nil
 }
 
-// a zone that will not resolve is a typo, so the saved value stays
 func (m tuiModel) applyZone(spec string) (tuiModel, bool) {
 	if err := clock.Valid(spec); err != nil {
 		m.status = err.Error()
@@ -65,12 +64,19 @@ func (m tuiModel) openZoneForm() (tea.Model, tea.Cmd) {
 func (m tuiModel) submitZone() (tea.Model, tea.Cmd) {
 	nm, ok := m.applyZone(m.formValue(0))
 	if !ok {
-		// the form stays up with the reason on it
 		return nm, nil
 	}
 	nm.form, nm.formKind = nil, formNone
 	nm.phase = nm.formReturn
 	return nm, nil
+}
+
+func (m tuiModel) themeAt(cursor int) (ui.Theme, bool) {
+	themes := ui.Themes()
+	if cursor < 1 || cursor > len(themes) {
+		return ui.Theme{}, false
+	}
+	return themes[cursor-1], true
 }
 
 func (m tuiModel) themeContent() []string {
@@ -82,14 +88,16 @@ func (m tuiModel) themeContent() []string {
 	cur := ui.CurrentTheme()
 
 	out := make([]string, 0, len(themes)+10)
+	const newRow = "+ New Theme"
+	out = append(out, ui.StyleGhost.Render(newRow))
+
 	for _, t := range themes {
-		// padded plain, or the swatches drift row by row
-		name := ui.StyleElement.Render(fmt.Sprintf("%-12s", ui.Truncate(t.Name, 12)))
+		plain := fmt.Sprintf("%-12s", ui.Truncate(t.Name, 12))
+		name := ui.StyleElement.Render(plain)
 		tag := ""
 		if strings.EqualFold(t.Name, cur.Name) {
-			tag = ui.StyleOK.Render("  (in use)")
+			name = ui.StyleRow.Render(plain)
 		}
-		// nothing to say about a scheme this terminal can show
 		if ui.ThemeNote(t) != "" {
 			tag += ui.StyleWarn.Render("  approximated here")
 		}
@@ -100,12 +108,15 @@ func (m tuiModel) themeContent() []string {
 		out = append(out, "", ui.StyleErr.Render(ui.Truncate(err, 60)))
 	}
 
-	// under the cursor, not in use: a preview is for before choosing
-	at := min(max(m.setCursor, 0), len(themes)-1)
-	if m.setFocus != focusContent {
-		at = max(0, indexOfTheme(themes, cur.Name))
+	out = append(out, "", ui.StyleDim.Render(m.themeControls()))
+
+	at := max(0, indexOfTheme(themes, cur.Name))
+	if m.setFocus == focusContent {
+		if _, ok := m.themeAt(m.setCursor); ok {
+			at = m.setCursor - 1
+		}
 	}
-	return append(out, m.themePreview(themes[at])...)
+	return append(out, m.themePreview(themes[min(at, len(themes)-1)])...)
 }
 
 func indexOfTheme(themes []ui.Theme, name string) int {
@@ -117,8 +128,6 @@ func indexOfTheme(themes []ui.Theme, name string) int {
 	return -1
 }
 
-// fixture-shaped rows: a swatch says what the colours are, a pane says
-// what they look like.
 var previewRows = []struct {
 	name, site, model, state string
 	ok, selected             bool
@@ -128,15 +137,13 @@ var previewRows = []struct {
 	{"store-0100-rtr-01", "Store 0100", "ion 3200", "offline", false, false},
 }
 
-// a page of iontk drawn in one scheme
 func (m tuiModel) themePreview(t ui.Theme) []string {
 	s := t.Styles()
 	width := max(40, min(m.width-20, 64))
 
 	out := []string{
 		"",
-		ui.StyleDim.Render("preview · ") + ui.StyleElement.Render(t.Name),
-		// tab colours are identity, not status
+		ui.StyleDim.Render("Preview · ") + ui.StyleElement.Render(t.Name),
 		previewTabs(t),
 	}
 
@@ -151,7 +158,6 @@ func (m tuiModel) themePreview(t ui.Theme) []string {
 		if r.selected {
 			box = s.OK.Render("[x]")
 		}
-		// styled on its own: a highlight around the mark ends at its reset
 		block := fmt.Sprintf("%-20s%-12s%-11s", r.name, r.site, r.model)
 		style := s.Element
 		if i == 0 {
@@ -165,8 +171,9 @@ func (m tuiModel) themePreview(t ui.Theme) []string {
 			s.Dim.Render("   3 elements · 1 selected"),
 		" "+s.Warn.Render("ion offline")+
 			s.Dim.Render(" · alt+y copy · ")+s.Hot.Render("session closing"),
-		" "+s.Spinner.Render(spinnerFrame(t))+s.Dim.Render(" reading interfaces")+
-			s.Dim.Render("   spinner: ")+s.Element.Render(spinnerLabel(t)),
+		" "+s.Spinner.Render(m.previewFrame(t))+s.Dim.Render(" reading interfaces")+
+			s.Dim.Render("   spinner: ")+s.Element.Render(spinnerLabel(t))+
+			" "+s.Spinner.Render(m.previewFrame(t)),
 	)
 	if note := ui.ThemeNote(t); note != "" {
 		out = append(out, " "+ui.StyleWarn.Render(ui.Truncate(note, width)))
@@ -176,19 +183,30 @@ func (m tuiModel) themePreview(t ui.Theme) []string {
 	if depth == "" {
 		depth = "not reported yet"
 	}
-	return append(out, "", ui.Label("terminal")+ui.StyleDim.Render(depth))
+	return append(out, "", ui.Label("Terminal")+ui.StyleDim.Render(depth))
 }
 
 func previewTabs(t ui.Theme) string {
-	s := t.Styles()
-	labels := []string{" elements (shell) ", " store-0003-rtr-01 ", " store-0100-rtr-01 · data "}
-	parts := make([]string, 0, len(labels))
-	for i, label := range labels {
-		st := s.Tabs[i%len(s.Tabs)]
-		if i == 0 {
-			st = st.Reverse(true).Bold(true)
-		}
-		parts = append(parts, st.Render(label))
+	was := ui.CurrentTheme()
+	ui.Apply(t)
+	defer ui.Apply(was)
+
+	type tab struct {
+		kind      ui.TabKind
+		ring, nth int
+		label     string
+	}
+	bar := []tab{
+		{ui.TabList, 0, 0, " elements "},
+		{ui.TabShell, 1, 0, " rtr-01 "},
+		{ui.TabShell, 2, 1, " rtr-02 "},
+		{ui.TabData, 3, 0, " rtr-01 · data "},
+		{ui.TabData, 4, 1, " rtr-02 · data "},
+	}
+
+	parts := make([]string, 0, len(bar))
+	for _, b := range bar {
+		parts = append(parts, ui.StyleTab(b.kind, b.ring, b.nth, b.ring == 0).Render(b.label))
 	}
 	return " " + strings.Join(parts, " ")
 }
@@ -203,17 +221,35 @@ func (m tuiModel) onThemeKey(key string) (tea.Model, tea.Cmd) {
 	if m.themeEdit {
 		return m.onThemeEditKey(key)
 	}
+	armed := m.themeDel
+	m.themeDel = ""
+
+	t, onScheme := m.themeAt(m.setCursor)
+
+	if key == "x" || key == "ctrl+d" {
+		if !onScheme {
+			return m, nil
+		}
+		if strings.EqualFold(armed, t.Name) {
+			return m.deleteTheme(t)
+		}
+		m.themeDel = t.Name
+		m.status = "x again to " + m.deleteWord(t) + " " + t.Name
+		return m, nil
+	}
+
 	if key == "e" {
+		if !onScheme {
+			return m.openNewThemeForm()
+		}
 		return m.openThemeEdit()
 	}
 	if key != "enter" && key != " " && key != "space" {
 		return m, nil
 	}
-	themes := ui.Themes()
-	if m.setCursor < 0 || m.setCursor >= len(themes) {
-		return m, nil
+	if !onScheme {
+		return m.openNewThemeForm()
 	}
-	t := themes[m.setCursor]
 
 	m.cfg.Theme = t.Name
 	if err := m.store.SaveConfig(m.cfg); err != nil {
@@ -229,12 +265,19 @@ func (m tuiModel) onThemeKey(key string) (tea.Model, tea.Cmd) {
 	return nm, cmd
 }
 
-// the tables and the spinner copied a style when built, so rebuild them
 func (m tuiModel) applyTheme(t ui.Theme) (tea.Model, tea.Cmd) {
+	cur := ui.CurrentTheme()
+	repaint := t.Bg != cur.Bg || t.Fg != cur.Fg
+
 	ui.Apply(t)
 	m.table.SetStyles(tableStyles())
 	m.resTable.SetStyles(tableStyles())
-	return m.withSpinner()
+
+	next, cmd := m.withSpinner()
+	if repaint {
+		return next, tea.Batch(cmd, tea.ClearScreen)
+	}
+	return next, cmd
 }
 
 func profileLabel() string {
@@ -242,4 +285,139 @@ func profileLabel() string {
 		return n
 	}
 	return "depth not reported"
+}
+
+func (m tuiModel) openNewThemeForm() (tea.Model, tea.Cmd) {
+	f := newField("name", "my scheme", false)
+	return m.openForm(formNewTheme, "New scheme, copied from "+ui.CurrentTheme().Name,
+		phaseAddUser, []formField{f})
+}
+
+func (m tuiModel) submitNewTheme() (tea.Model, tea.Cmd) {
+	name := strings.TrimSpace(m.formValue(0))
+	switch {
+	case name == "":
+		m.status = "a scheme needs a name"
+		return m, nil
+	case len(name) > 40:
+		m.status = "that name is too long for the picker"
+		return m, nil
+	}
+	if _, taken := ui.ThemeByName(name); taken {
+		m.status = name + " already exists — edit it with e"
+		return m, nil
+	}
+
+	t := ui.CurrentTheme()
+	t.Name, t.Blurb = name, "copied from "+ui.CurrentTheme().Name
+	t.Tabs = slices.Clone(t.Tabs)
+	if err := ui.SaveUserTheme(app.ThemesPath(m.store), t); err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+
+	nm := m
+	nm.form, nm.formKind = nil, formNone
+	nm.phase = phaseSettings
+	nm.setFocus = focusContent
+	for i, th := range ui.Themes() {
+		if strings.EqualFold(th.Name, name) {
+			nm.setCursor = i + 1
+		}
+	}
+	next, _ := nm.openThemeEdit()
+	out, cmd := next.(tuiModel).saveDraft()
+	o := out.(tuiModel)
+	if o.status == "" || !strings.Contains(o.status, "fail") {
+		o.status = name
+	}
+	return o, cmd
+}
+
+func (m tuiModel) themeControls() string {
+	if m.themeEdit {
+		return ""
+	}
+	if _, onScheme := m.themeAt(m.setCursor); !onScheme {
+		return "enter new scheme · ↑↓ move · esc back"
+	}
+	return "↑↓ move · enter select · e edit · x delete · esc back"
+}
+
+func (m tuiModel) previewFrame(t ui.Theme) string {
+	return ui.SpinnerFrameAt(t.Spinner, m.spinTick)
+}
+
+func (m tuiModel) deleteWord(t ui.Theme) string {
+	_, shipped := ui.BuiltinTheme(t.Name)
+	switch {
+	case ui.IsUserTheme(app.ThemesPath(m.store), t.Name) && shipped:
+		return "drop your changes to"
+	case ui.IsUserTheme(app.ThemesPath(m.store), t.Name):
+		return "delete"
+	}
+	return "hide"
+}
+
+func (m tuiModel) deleteTheme(t ui.Theme) (tea.Model, tea.Cmd) {
+	path := app.ThemesPath(m.store)
+	report := ""
+
+	if ui.IsUserTheme(path, t.Name) {
+		if err := ui.DeleteUserTheme(path, t.Name); err != nil {
+			m.status = err.Error()
+			return m, nil
+		}
+		if _, still := ui.ThemeByName(t.Name); still {
+			report = t.Name + " is back to the one iontk ships"
+		} else {
+			report = t.Name + " is gone"
+		}
+	} else {
+		m.cfg.HiddenThemes = append(slices.Clone(m.cfg.HiddenThemes), t.Name)
+		ui.HideThemes(m.cfg.HiddenThemes)
+		report = t.Name + " is hidden · settings → Reset brings it back"
+	}
+
+	if _, still := ui.ThemeByName(m.cfg.Theme); !still || ui.IsHidden(m.cfg.Theme) {
+		m.cfg.Theme = ui.Default().Name
+		report += ", so " + m.cfg.Theme + " is in use"
+	}
+	if err := m.store.SaveConfig(m.cfg); err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+
+	m.setCursor = min(m.setCursor, max(0, m.sectionRows()-1))
+	now, _ := ui.ThemeByName(m.cfg.Theme)
+	next, cmd := m.applyTheme(now)
+	nm := next.(tuiModel)
+	nm.status = report
+	return nm, cmd
+}
+
+func (m tuiModel) restoreShippedThemes() (tea.Model, tea.Cmd) {
+	n, err := ui.RemoveOverrides(app.ThemesPath(m.store))
+	if err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+	hidden := len(m.cfg.HiddenThemes)
+	m.cfg.HiddenThemes = nil
+	ui.HideThemes(nil)
+	if err := m.store.SaveConfig(m.cfg); err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+
+	now, ok := ui.ThemeByName(m.cfg.Theme)
+	if !ok {
+		m.cfg.Theme = now.Name
+		_ = m.store.SaveConfig(m.cfg)
+	}
+	next, cmd := m.applyTheme(now)
+	nm := next.(tuiModel)
+	nm.status = fmt.Sprintf("the shipped schemes are back · %d override(s) removed, %d unhidden",
+		n, hidden)
+	return nm, cmd
 }

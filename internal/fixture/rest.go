@@ -10,9 +10,6 @@ import (
 	"strings"
 )
 
-// Transport answers the SASE REST calls for one tenant. Handing this to the
-// real client means the request building, status handling and decoding under
-// test are the production ones; only the server is fake.
 func (s *Set) Transport(tsg string) http.RoundTripper {
 	return &transport{set: s, tsg: tsg}
 }
@@ -34,16 +31,12 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	case strings.HasSuffix(p, "/api/elements"):
 		return t.json(req, http.StatusOK, items(t.set.apiElements(t.tsg)))
 
-	// Circuits. These come before the element routes because a circuit's
-	// element-side state lives under /elements/{id}/waninterfaces/...
 	case strings.HasSuffix(p, "/api/waninterfacelabels"):
 		return t.json(req, http.StatusOK, items(fixtureLabels()))
 
 	case strings.HasSuffix(p, "/api/wannetworks"):
 		return t.json(req, http.StatusOK, items(fixtureNetworks()))
 
-	// Security zones in two parts, as the real API has them: the tenant's
-	// zone names, and one element's bindings of interfaces to zones.
 	case strings.HasSuffix(p, "/api/securityzones"):
 		return t.json(req, http.StatusOK, items(fixtureZones()))
 
@@ -58,8 +51,6 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	case strings.Contains(p, "/waninterfaces"):
 		return t.circuits(req, p)
 
-	// The aggregate, which is tenant-wide: one POST for every cluster. Before
-	// the per-cluster route below, which its path would also match.
 	case strings.HasSuffix(p, "/spokeclusters/status/query"):
 		return t.json(req, http.StatusOK, items(t.set.apiClusterStatuses(t.tsg)))
 
@@ -72,8 +63,6 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		return t.json(req, http.StatusOK, st)
 
-	// Interfaces and their status hang off the site in the path, so these are
-	// matched on the element segment rather than on what the path ends with.
 	case strings.Contains(p, "/elements/") && strings.Contains(p, "/interfaces"):
 		return t.interfaces(req, p)
 
@@ -98,9 +87,6 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		map[string]string{"error": fmt.Sprintf("fixture mode serves no %s", p)})
 }
 
-// interfaces answers both interface endpoints, whose paths are
-// /sites/{site}/elements/{element}/interfaces and that path plus
-// /{interface}/status.
 func (t *transport) interfaces(req *http.Request, p string) (*http.Response, error) {
 	seg := strings.Split(strings.Trim(p, "/"), "/")
 	var eid, iid string
@@ -132,8 +118,6 @@ func (t *transport) interfaces(req *http.Request, p string) (*http.Response, err
 	return t.json(req, http.StatusOK, st)
 }
 
-// circuits answers the three circuit endpoints: the site's list, one
-// circuit's status, and one circuit's state as seen by an element.
 func (t *transport) circuits(req *http.Request, p string) (*http.Response, error) {
 	seg := strings.Split(strings.Trim(p, "/"), "/")
 	var eid, cid string
@@ -150,8 +134,6 @@ func (t *transport) circuits(req *http.Request, p string) (*http.Response, error
 		}
 	}
 
-	// The list and the status are the site's, so any element on the site can
-	// answer them; the fixture picks the first one it has there.
 	el := t.element(eid)
 	if el == nil {
 		el = t.siteElementFor(p)
@@ -177,8 +159,6 @@ func (t *transport) circuits(req *http.Request, p string) (*http.Response, error
 		map[string]string{"error": "no circuit " + cid + " on that site"})
 }
 
-// siteElementFor finds any of the tenant's elements on the site in the path,
-// for the endpoints that are the site's rather than an element's.
 func (t *transport) siteElementFor(p string) *Element {
 	seg := strings.Split(strings.Trim(p, "/"), "/")
 	site := ""
@@ -202,10 +182,6 @@ func (t *transport) siteElementFor(p string) *Element {
 	return nil
 }
 
-// element is the tenant's own element, or nil. Outside the tenant is a 404
-// too: a tenant's token cannot see another tenant's elements, and a fixture
-// that pretended otherwise would hide exactly the bug that looks like a site
-// ID mistaken for an element.
 func (t *transport) element(eid string) *Element {
 	el := t.set.element(eid)
 	if el == nil || el.tsg != t.tsg {
@@ -219,8 +195,6 @@ func (t *transport) noElement(req *http.Request, eid string) (*http.Response, er
 		map[string]string{"error": "element " + eid + " not found in this tenant"})
 }
 
-// The profile is what proves a token is accepted, so fixture mode has to answer
-// it or every tenant looks unreachable.
 func (t *transport) profile() map[string]any {
 	name := t.tsg
 	if ten := t.set.tenant(t.tsg); ten != nil {

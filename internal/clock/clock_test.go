@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// pin puts the zone back afterwards. The zone is process state, so a test
-// that left it set would decide what every later test printed.
 func pin(t *testing.T, spec string) error {
 	t.Helper()
 	t.Cleanup(func() { _ = Use(UTC) })
@@ -25,7 +23,6 @@ func TestUseResolvesTheZonesTheSettingOffers(t *testing.T) {
 		{"nothing saved is UTC", "", "2026-10-18 13:25 UTC"},
 		{"UTC by name", "UTC", "2026-10-18 13:25 UTC"},
 		{"a named zone shifts the reading", "America/Chicago", "2026-10-18 08:25 CDT"},
-		// Not an IANA name, so it cannot go through LoadLocation.
 		{"local is whatever this machine is", Local, ""},
 	}
 
@@ -48,8 +45,6 @@ func TestUseResolvesTheZonesTheSettingOffers(t *testing.T) {
 	}
 }
 
-// A zone that will not load must not take the program with it: the reading is
-// labelled UTC, which is honest, and the settings page can say what happened.
 func TestAZoneThatWillNotLoadFallsBackToUTCAndSaysSo(t *testing.T) {
 	err := pin(t, "Mars/Olympus_Mons")
 	if err == nil {
@@ -69,8 +64,6 @@ func TestAZoneThatWillNotLoadFallsBackToUTCAndSaysSo(t *testing.T) {
 	}
 }
 
-// Every reading says which zone it is in. A time with no zone on it is a
-// number you have to remember a setting to read.
 func TestStampNamesItsZone(t *testing.T) {
 	if err := pin(t, "Europe/London"); err != nil {
 		t.Fatal(err)
@@ -81,8 +74,6 @@ func TestStampNamesItsZone(t *testing.T) {
 	}
 }
 
-// A field the appliance never set arrives as zero, and a date in 1970 would
-// read like one it did set.
 func TestAZeroTimeIsBlank(t *testing.T) {
 	if got := Stamp(time.Time{}); got != "" {
 		t.Errorf("Stamp(zero) = %q, want empty", got)
@@ -92,8 +83,6 @@ func TestAZeroTimeIsBlank(t *testing.T) {
 	}
 }
 
-// RFC3339 carries its offset, so machine-readable output stays unambiguous
-// whatever the display zone is.
 func TestRFC3339CarriesTheOffset(t *testing.T) {
 	if err := pin(t, "America/Chicago"); err != nil {
 		t.Fatal(err)

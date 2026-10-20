@@ -14,26 +14,20 @@ type IONUser struct {
 	Default bool   `json:"default,omitempty"`
 }
 
-// How a tenant proves who it is. An empty Auth means a service account, so
-// tenants written before browser sign-in existed keep working.
 const (
 	AuthServiceAccount = "service_account"
 	AuthBrowser        = "browser"
 )
 
 type Tenant struct {
-	Name     string `json:"name"`
-	TSGID    string `json:"tsg_id"`
-	ClientID string `json:"client_id"`
-	Auth     string `json:"auth,omitempty"`
-	// Added means this tenant is part of the working set: its elements are in
-	// the list and searchable across tenants. The set is chosen from the
-	// discovered tenants when signing in, and changed in settings.
-	Added bool      `json:"added,omitempty"`
-	Users []IONUser `json:"users,omitempty"`
+	Name     string    `json:"name"`
+	TSGID    string    `json:"tsg_id"`
+	ClientID string    `json:"client_id"`
+	Auth     string    `json:"auth,omitempty"`
+	Added    bool      `json:"added,omitempty"`
+	Users    []IONUser `json:"users,omitempty"`
 }
 
-// AddedTenants are the tenants in the working set.
 func (c *Config) AddedTenants() []Tenant {
 	if c == nil {
 		return nil
@@ -47,7 +41,6 @@ func (c *Config) AddedTenants() []Tenant {
 	return out
 }
 
-// IsAdded reports whether a tenant ID is in the working set.
 func (c *Config) IsAdded(tsg string) bool {
 	if c == nil {
 		return false
@@ -62,7 +55,6 @@ func (c *Config) IsAdded(tsg string) bool {
 
 func (t Tenant) UsesBrowser() bool { return t.Auth == AuthBrowser }
 
-// AuthLabel names the tenant's sign-in method for display.
 func (t Tenant) AuthLabel() string {
 	if t.UsesBrowser() {
 		return "browser"
@@ -71,29 +63,24 @@ func (t Tenant) AuthLabel() string {
 }
 
 type Config struct {
-	LastTenant  string `json:"last_tenant,omitempty"`
-	Spinner     string `json:"spinner,omitempty"`
-	DefaultMode string `json:"default_mode,omitempty"`
-	AuthMode    string `json:"auth_mode,omitempty"`
-	AllowWrites bool   `json:"allow_writes,omitempty"`
-	SessionCols int    `json:"session_cols,omitempty"`
-	SessionRows int    `json:"session_rows,omitempty"`
-	// PageStep is how far alt+up and alt+down move through the element list.
-	PageStep int `json:"page_step,omitempty"`
-	// Theme names the colour scheme; Zone is the IANA zone every printed time
-	// is read in, or "local", or empty for UTC.
-	Theme       string   `json:"theme,omitempty"`
-	Zone        string   `json:"zone,omitempty"`
-	BatchFormat string   `json:"batch_format,omitempty"`
-	BatchOrient string   `json:"batch_orient,omitempty"`
-	BatchToFile bool     `json:"batch_to_file,omitempty"`
-	BatchDir    string   `json:"batch_dir,omitempty"`
-	Tenants     []Tenant `json:"tenants,omitempty"`
+	LastTenant   string   `json:"last_tenant,omitempty"`
+	Spinner      string   `json:"spinner,omitempty"`
+	DefaultMode  string   `json:"default_mode,omitempty"`
+	AuthMode     string   `json:"auth_mode,omitempty"`
+	AllowWrites  bool     `json:"allow_writes,omitempty"`
+	SessionCols  int      `json:"session_cols,omitempty"`
+	SessionRows  int      `json:"session_rows,omitempty"`
+	PageStep     int      `json:"page_step,omitempty"`
+	Theme        string   `json:"theme,omitempty"`
+	HiddenThemes []string `json:"hidden_themes,omitempty"`
+	Zone         string   `json:"zone,omitempty"`
+	BatchFormat  string   `json:"batch_format,omitempty"`
+	BatchOrient  string   `json:"batch_orient,omitempty"`
+	BatchToFile  bool     `json:"batch_to_file,omitempty"`
+	BatchDir     string   `json:"batch_dir,omitempty"`
+	Tenants      []Tenant `json:"tenants,omitempty"`
 }
 
-// BatchOutDir is the folder batch results are written to, or empty for stdout.
-// A folder is only used when output to a file is turned on, so turning it off
-// does not lose the path.
 func (c *Config) BatchOutDir() string {
 	if c == nil || !c.BatchToFile {
 		return ""
@@ -122,27 +109,14 @@ func OpenAt(root string, s Secrets) *Store {
 	return &Store{Root: root, Secrets: s}
 }
 
-// DebugRoot is where --debug keeps its throwaway config. Fixed rather than
-// random so a debug run can be looked at afterwards.
 func DebugRoot() string { return filepath.Join(os.TempDir(), "iontk-debug") }
 
-// Set up once per process, not per open: the memory store stands in for the OS
-// keyring, which every store in a run shares, and the root has to be cleared
-// before the first open rather than at every one.
 var (
 	debugOnce    sync.Once
 	debugSecrets Secrets
 	debugErr     error
 )
 
-// OpenDebug is the store --debug and --fixtures run against: a root outside the
-// real config directory and secrets that never leave memory, so nothing such a
-// run does can reach a saved tenant or the keyring.
-//
-// The root is fixed so it can be looked at afterwards, which means an earlier
-// run's tenants would still be in it. Clearing it here is what makes "no saved
-// state" true; doing that at startup rather than at exit is what leaves the run
-// inspectable.
 func OpenDebug() (*Store, error) {
 	root := DebugRoot()
 	debugOnce.Do(func() {
@@ -163,8 +137,6 @@ func OpenDebug() (*Store, error) {
 
 func (s *Store) configPath() string { return filepath.Join(s.Root, "config.json") }
 
-// BrowserDir is the browser profile kept for sign-in. Holding the identity
-// provider's session cookie here is what lets a later sign-in skip the window.
 func (s *Store) BrowserDir() string { return filepath.Join(s.Root, "browser") }
 
 func (s *Store) Config() (*Config, error) {
@@ -315,6 +287,4 @@ func IONPassKey(tsg, user string) string { return "tsg/" + tsg + "/ion_user/" + 
 
 func RefreshTokenKey(tsg string) string { return "tsg/" + tsg + "/refresh_token" }
 
-// AccountRefreshTokenKey holds the tenant-less credential a browser sign-in
-// produces. It seeds every tenant that has no credential of its own.
 func AccountRefreshTokenKey() string { return "account/refresh_token" }

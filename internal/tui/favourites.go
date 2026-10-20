@@ -10,9 +10,6 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// altDigit is alt+1 to alt+9, which used to select a tab and now reaches a
-// favourite. Tabs kept alt+←/alt+→: alt+shift+N is layout-dependent and
-// ctrl+N mostly untransmittable, so there was no third chord to move them to.
 func altDigit(key string) (int, bool) {
 	if len(key) != 5 || !strings.HasPrefix(key, "alt+") || key[4] < '1' || key[4] > '9' {
 		return 0, false
@@ -27,9 +24,6 @@ func plainDigit(key string) (int, bool) {
 	return int(key[0] - '0'), true
 }
 
-// useFavourite puts a slot's command on the device line. Inserted and not
-// sent, like the palette: a stored command is read before it runs, which is
-// also what makes a cross-model favourite safe to offer at all.
 func (m tuiModel) useFavourite(slot int) (tea.Model, tea.Cmd) {
 	f, ok := m.cmds.Favourite(slot)
 	if !ok {
@@ -44,7 +38,6 @@ func (m tuiModel) useFavourite(slot int) (tea.Model, tea.Cmd) {
 
 	next, cmd := m.insertCommand(f.Command)
 	nm := next.(tuiModel)
-	// A refusal says more than the model note does.
 	if nm.status == "" {
 		nm.status = note
 	}
@@ -86,8 +79,6 @@ func (m tuiModel) onFavouriteKey(key string) (tea.Model, tea.Cmd) {
 		}
 		return m.copyText(fmt.Sprintf("alt+%d", m.favCursor), f.Command)
 	}
-	// A digit picks the slot and saves in one keypress, which is the whole
-	// point of a slot picker.
 	if n, ok := plainDigit(key); ok {
 		m.favCursor = n
 		return m.saveFavourite(n)
@@ -99,9 +90,6 @@ func (m tuiModel) onFavouriteKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// saveFavourite captures the line the session is on. The prompt line rather
-// than the last command run: what is being typed is what someone has just
-// decided is worth keeping.
 func (m tuiModel) saveFavourite(slot int) (tea.Model, tea.Cmd) {
 	line := ""
 	if s := m.sessions.Active(); s != nil {
@@ -129,8 +117,6 @@ func (m tuiModel) clearFavourite(slot int) (tea.Model, tea.Cmd) {
 	return m, saveCommands(m.store, m.cmds)
 }
 
-// openFavouriteForm is the by-hand route: a command for a model that is not in
-// front of you, or one too long to want to type at a prompt first.
 func (m tuiModel) openFavouriteForm(slot int) (tea.Model, tea.Cmd) {
 	cmd := newField("command", "dump device status", false)
 	if f, ok := m.cmds.Favourite(slot); ok {
@@ -146,9 +132,6 @@ func (m tuiModel) openFavouriteForm(slot int) (tea.Model, tea.Cmd) {
 		[]formField{cmd, at})
 }
 
-// submitFavourite is the form's enter. The model is the one the session is on,
-// which is empty for a favourite typed in with nothing open -- better than
-// claiming it was captured on whatever happens to be in front of the user.
 func (m tuiModel) submitFavourite() (tea.Model, tea.Cmd) {
 	command := m.formValue(0)
 	slot, err := strconv.Atoi(m.formValue(1))
@@ -166,9 +149,6 @@ func (m tuiModel) submitFavourite() (tea.Model, tea.Cmd) {
 	return m, saveCommands(m.store, m.cmds)
 }
 
-// overlayFavourites draws the picker over the bottom of the session pane, the
-// same way the retry question does, so what is on screen behind it still says
-// which element this is.
 func (m tuiModel) overlayFavourites(content string) string {
 	lines := []string{
 		ui.StyleCmd.Render("favourites") + ui.StyleDim.Render("   alt+1-9 inserts one"),
@@ -185,7 +165,6 @@ func (m tuiModel) overlayFavourites(content string) string {
 			lines = append(lines, row+ui.StyleDim.Render("empty"))
 			continue
 		}
-		// Padded before styling, or the model tags drift row by row.
 		cmd := fmt.Sprintf("%-34s", ui.Truncate(f.Command, 34))
 		tag := ""
 		if f.Model != "" {

@@ -13,7 +13,6 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// refreshTokenExpiring builds a refresh token that says it expires at exp.
 func refreshTokenExpiring(t *testing.T, exp time.Time) string {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{"exp": float64(exp.Unix())})
@@ -58,8 +57,6 @@ func TestAuthLineNamesTheCredentialKind(t *testing.T) {
 }
 
 func TestAuthLineColourTracksTheSessionLeft(t *testing.T) {
-	// The colour is what makes this readable at a glance, so assert on the code
-	// rather than only the text.
 	const (
 		red    = "\x1b[31m"
 		green  = "\x1b[32m"
@@ -131,7 +128,6 @@ func TestSessionLeftPrefersWhatThisRunSaw(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// A token minted this run supersedes whatever is on disk.
 	m.ident = saseauth.Identity{TSG: "111", SessionExpires: time.Now().Add(8 * time.Hour)}
 	left, ok := m.sessionLeft()
 	if !ok {
@@ -141,7 +137,6 @@ func TestSessionLeftPrefersWhatThisRunSaw(t *testing.T) {
 		t.Errorf("sessionLeft() = %v, want the freshly minted figure", left)
 	}
 
-	// An identity for a different tenant must not be used for this one.
 	m.ident = saseauth.Identity{TSG: "999", SessionExpires: time.Now().Add(8 * time.Hour)}
 	left, ok = m.sessionLeft()
 	if !ok {
@@ -163,10 +158,10 @@ func TestMenuOffersSignInBeforeAndRefreshAfter(t *testing.T) {
 	t.Run("before any sign-in", func(t *testing.T) {
 		m := authModel(t, config.AuthBrowser)
 		joined := strings.Join(menuLabels(m), " | ")
-		if !strings.Contains(joined, "sign in with browser") {
+		if !strings.Contains(joined, "Sign In with Browser") {
 			t.Errorf("want the invitation to sign in: %s", joined)
 		}
-		if strings.Contains(joined, "refresh browser token") {
+		if strings.Contains(joined, "Refresh Browser Token") {
 			t.Errorf("want no refresh entry before signing in: %s", joined)
 		}
 	})
@@ -175,10 +170,10 @@ func TestMenuOffersSignInBeforeAndRefreshAfter(t *testing.T) {
 		m := authModel(t, config.AuthBrowser)
 		seedKnown(t, m, config.KnownTenant{TSGID: "111", Name: "Tractor Supply"})
 		joined := strings.Join(menuLabels(m), " | ")
-		if strings.Contains(joined, "sign in with browser") {
+		if strings.Contains(joined, "Sign In with Browser") {
 			t.Errorf("the sign-in invitation survived signing in: %s", joined)
 		}
-		if !strings.Contains(joined, "refresh browser token") {
+		if !strings.Contains(joined, "Refresh Browser Token") {
 			t.Errorf("want a refresh entry once signed in: %s", joined)
 		}
 	})
@@ -237,7 +232,7 @@ func TestRenderMenuWithCredentialLine(t *testing.T) {
 	m.cacheState, m.cacheCount, m.cacheAt = cacheUpdated, 5613, time.Now()
 
 	out := plain(m.viewMenu())
-	for _, want := range []string{"5613 elements cached", "Browser Sign-In", "41m left", "refresh browser token"} {
+	for _, want := range []string{"5613 elements cached", "Browser Sign-In", "41m left", "Refresh Browser Token"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the menu is missing %q:\n%s", want, out)
 		}
@@ -256,8 +251,6 @@ func TestServiceAccountLineNamesWhichAccountIsAttached(t *testing.T) {
 	})
 
 	got := plain(m.authLine())
-	// The tenant name does not say which credential answered, and a tenant can
-	// be reached by more than one service account.
 	for _, want := range []string{
 		"SASE Service Account", "Tractor Supply",
 		"iontk@1234567890.iam.panserviceaccount.com", "2 elements cached",
@@ -267,8 +260,6 @@ func TestServiceAccountLineNamesWhichAccountIsAttached(t *testing.T) {
 		}
 	}
 
-	// On a narrow terminal the client id gives way rather than wrapping: a
-	// wrapped line pushes the whole menu down a row.
 	m.width = 72
 	narrow := plain(m.authLine())
 	if ui.Width(narrow) > m.width {
@@ -286,8 +277,6 @@ func TestServiceAccountLineCountsOnlyItsOwnElements(t *testing.T) {
 	m := authModel(t, config.AuthServiceAccount)
 	m.tenant = m.cfg.Tenants[0]
 
-	// A second tenant's elements are in the same working set, so the cache line
-	// above is the total and this line has to say which part of it is ours.
 	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "a", Name: "one"}})
 	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{
 		{ID: "b", Name: "two"},
@@ -305,8 +294,6 @@ func TestServiceAccountLineCountsOnlyItsOwnElements(t *testing.T) {
 func TestServiceAccountLineBeforeAnythingHasLoaded(t *testing.T) {
 	m := authModel(t, config.AuthServiceAccount)
 	m.tenant = m.cfg.Tenants[0]
-	// What newTUIModel puts there from this tenant's own cache file, so the
-	// figure is right from launch rather than reading the file every frame.
 	m.cacheCount = 143
 
 	if got := plain(m.authLine()); !strings.Contains(got, "143 elements cached") {
@@ -318,8 +305,6 @@ func TestServiceAccountLineSaysWhenNoClientIDWasSaved(t *testing.T) {
 	m := authModel(t, config.AuthServiceAccount)
 	m.tenant = m.cfg.Tenants[0]
 
-	// Records written before the client ID was kept, and runs whose credentials
-	// came from the environment. Saying nothing would read as "no account".
 	if got := plain(m.authLine()); !strings.Contains(got, "client id not saved") {
 		t.Errorf("authLine() = %q, want it to say the client id is missing", got)
 	}

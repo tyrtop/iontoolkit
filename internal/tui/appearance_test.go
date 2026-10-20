@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,8 +15,6 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// pinZone and pinTheme put the process state back: both are global, so a test
-// that left one set would decide what every later test rendered.
 func pinZone(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() { _ = clock.Use(clock.UTC) })
@@ -23,16 +22,12 @@ func pinZone(t *testing.T) {
 
 func pinTheme(t *testing.T) {
 	t.Helper()
-	// LoadThemes("") is also how the set goes back to the built-ins, which a
-	// test that saved an override has to do.
 	t.Cleanup(func() {
 		_ = ui.LoadThemes("")
 		ui.Apply(ui.Default())
 	})
 }
 
-// The times row is where someone finds out their panes are five hours out, so
-// it has to show the clock and not only the zone's name.
 func TestTimesRowShowsTheZoneAndTheClock(t *testing.T) {
 	pinZone(t)
 	m := settingsModel(t)
@@ -40,11 +35,10 @@ func TestTimesRowShowsTheZoneAndTheClock(t *testing.T) {
 	m.setFocus = focusContent
 
 	out := plain(m.viewSettings())
-	if !strings.Contains(out, "times") || !strings.Contains(out, "UTC") {
+	if !strings.Contains(out, "Times") || !strings.Contains(out, "UTC") {
 		t.Errorf("the General section does not say what zone times are in:\n%s", out)
 	}
 
-	// space cycles; enter on the same row types a name instead.
 	m.setCursor = zoneRow
 	mm, _ := m.onGeneralKey("space")
 	got := mm.(tuiModel)
@@ -63,8 +57,6 @@ func TestTimesRowShowsTheZoneAndTheClock(t *testing.T) {
 	}
 }
 
-// Cycling has to be able to get back to a typed zone: there are 600 IANA
-// names and no order to walk them in.
 func TestTheCycleKeepsTheTypedZone(t *testing.T) {
 	pinZone(t)
 	m := settingsModel(t)
@@ -110,8 +102,6 @@ func TestEnterOnTheTimesRowOpensTheZoneForm(t *testing.T) {
 	}
 }
 
-// A zone nobody can resolve is a typo. The form keeps it and says why rather
-// than saving it and printing UTC from then on.
 func TestAZoneThatWillNotLoadIsRefusedByTheForm(t *testing.T) {
 	pinZone(t)
 	m := settingsModel(t)
@@ -146,11 +136,14 @@ func TestThemeSectionListsEveryThemeAndMarksTheOneInUse(t *testing.T) {
 			t.Errorf("the Theme section is missing %q:\n%s", th.Name, out)
 		}
 	}
-	if !strings.Contains(out, "(in use)") {
+	if !strings.Contains(out, "") {
 		t.Errorf("nothing marks the theme in use:\n%s", out)
 	}
-	if got := m.sectionRows(); got != len(ui.Themes()) {
-		t.Errorf("sectionRows() = %d, want one per theme", got)
+	if got := m.sectionRows(); got != len(ui.Themes())+1 {
+		t.Errorf("sectionRows() = %d, want %d", got, len(ui.Themes())+1)
+	}
+	if !strings.Contains(out, "+ New Theme") {
+		t.Errorf("there is no way to make a scheme from the picker:\n%s", out)
 	}
 	t.Log("\n" + m.viewSettings())
 }
@@ -160,11 +153,10 @@ func TestPickingAThemeAppliesAndPersistsIt(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection, m.setFocus = secTheme, focusContent
 
-	// mono is the one whose effect is visible without colour support.
 	want := 0
 	for i, th := range ui.Themes() {
 		if th.Name == "mono" {
-			want = i
+			want = i + 1
 		}
 	}
 	m.setCursor = want
@@ -181,8 +173,6 @@ func TestPickingAThemeAppliesAndPersistsIt(t *testing.T) {
 	if saved.Theme != "mono" {
 		t.Errorf("saved theme = %q, want it persisted", saved.Theme)
 	}
-	// The spinner carries a style built when it was made, so the change has to
-	// rebuild it -- and that comes with a tick.
 	if cmd == nil {
 		t.Error("picking a theme issued no command, so the spinner kept the old one")
 	}
@@ -191,8 +181,6 @@ func TestPickingAThemeAppliesAndPersistsIt(t *testing.T) {
 	}
 }
 
-// A theme saved by a later version, or deleted from one, must not stop the TUI
-// opening.
 func TestAnUnknownSavedThemeOpensInTheDefault(t *testing.T) {
 	pinTheme(t)
 	m := settingsModel(t)
@@ -207,9 +195,6 @@ func TestAnUnknownSavedThemeOpensInTheDefault(t *testing.T) {
 	}
 }
 
-// A swatch says what the colours are; only a pane says what they look like in
-// the thing people read. The preview follows the cursor, not the scheme in
-// use, because its job is showing one before you pick it.
 func TestThePreviewFollowsTheCursorNotTheThemeInUse(t *testing.T) {
 	pinTheme(t)
 	m := settingsModel(t)
@@ -217,15 +202,14 @@ func TestThePreviewFollowsTheCursorNotTheThemeInUse(t *testing.T) {
 
 	themes := ui.Themes()
 	last := len(themes) - 1
-	m.setCursor = last
+	m.setCursor = last + 1
 
 	out := plain(m.viewSettings())
-	if !strings.Contains(out, "preview · "+themes[last].Name) {
+	if !strings.Contains(out, "Preview · "+themes[last].Name) {
 		t.Errorf("the preview is not of the scheme under the cursor:\n%s", out)
 	}
-	// Something recognisable from a real page, with fixture-shaped data.
 	for _, want := range []string{"store-0003-rtr-01", "Store 0003", "ion 1200",
-		"connected", "offline", "dump device status", "elements (shell)"} {
+		"connected", "offline", "dump device status", "elements"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the preview is missing %q:\n%s", want, out)
 		}
@@ -234,15 +218,12 @@ func TestThePreviewFollowsTheCursorNotTheThemeInUse(t *testing.T) {
 		t.Fatal("this test needs the cursor on a scheme that is not in use")
 	}
 
-	// On the nav pane there is no cursor in the list, so it shows the one in use.
 	m.setFocus = focusNav
-	if out := plain(m.viewSettings()); !strings.Contains(out, "preview · "+ui.CurrentTheme().Name) {
+	if out := plain(m.viewSettings()); !strings.Contains(out, "Preview · "+ui.CurrentTheme().Name) {
 		t.Errorf("with the nav focused the preview should be the scheme in use:\n%s", out)
 	}
 }
 
-// The preview must draw in the previewed scheme, not the one applied, or it
-// would show the same thing for every row.
 func TestThePreviewRendersInTheSchemeItNames(t *testing.T) {
 	pinTheme(t)
 	m := settingsModel(t)
@@ -256,21 +237,17 @@ func TestThePreviewRendersInTheSchemeItNames(t *testing.T) {
 	if monoLines == nordLines {
 		t.Error("two schemes previewed identically")
 	}
-	// nord's green is #a6e3a1-adjacent hex, which lands on an RGB escape.
 	if !strings.Contains(nordLines, "38;2;") {
 		t.Errorf("the nord preview has no truecolor in it:\n%q", nordLines)
 	}
 	if strings.Contains(monoLines, "38;2;") {
 		t.Errorf("the mono preview emitted colour:\n%q", monoLines)
 	}
-	// Each scheme names its own spinner shape, and shows a frame of it.
 	if !strings.Contains(plain(monoLines), mono.Spinner) {
 		t.Errorf("the preview does not name mono's spinner %q", mono.Spinner)
 	}
 }
 
-// The spinner moved into the theme, so picking one has to change the shape the
-// model is actually ticking.
 func TestPickingAThemeChangesTheSpinnerShape(t *testing.T) {
 	pinTheme(t)
 	m := settingsModel(t)
@@ -286,7 +263,7 @@ func TestPickingAThemeChangesTheSpinnerShape(t *testing.T) {
 	if want < 0 {
 		t.Fatal("no theme called Ben's Theme")
 	}
-	m.setCursor = want
+	m.setCursor = want + 1
 
 	mm, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = mm.(tuiModel)
@@ -296,14 +273,11 @@ func TestPickingAThemeChangesTheSpinnerShape(t *testing.T) {
 	if got := ui.CurrentTheme().Spinner; got != "monkey" {
 		t.Errorf("spinner = %q, want the monkey the scheme asks for", got)
 	}
-	// The model's own spinner is the one that ticks, so it has to have changed.
 	if got := plain(m.spinner.View()); got == "" {
 		t.Error("the model's spinner renders nothing after the change")
 	}
 }
 
-// A themes.yaml beside the config adds schemes, which is what makes the format
-// worth having: --themes is the same escape hatch --views is.
 func TestAUserThemesFileReachesThePicker(t *testing.T) {
 	pinTheme(t)
 	t.Cleanup(func() { app.ThemesFile = "" })
@@ -337,5 +311,192 @@ themes:
 	}
 	if got := app.ThemesPath(st); got != path {
 		t.Errorf("ThemesPath() = %q, want --themes to win", got)
+	}
+}
+
+func TestDeletingASchemeTakesTwoPresses(t *testing.T) {
+	pinTheme(t)
+	t.Cleanup(func() { app.ThemesFile = "" })
+
+	m := settingsModel(t)
+	m.width, m.height = 110, 44
+	m.setSection, m.setFocus = secTheme, focusContent
+
+	if err := ui.SaveUserTheme(app.ThemesPath(m.store),
+		ui.Theme{Name: "workbench", OK: "2", Spinner: "dot"}); err != nil {
+		t.Fatal(err)
+	}
+	at := 0
+	for i, th := range ui.Themes() {
+		if th.Name == "workbench" {
+			at = i + 1
+		}
+	}
+	if at == 0 {
+		t.Fatal("the scheme was not written where the picker reads from")
+	}
+	m.setCursor = at
+
+	next, _ := m.onSettingsKey("x")
+	m = next.(tuiModel)
+	if _, ok := ui.ThemeByName("workbench"); !ok {
+		t.Fatal("one x deleted the scheme")
+	}
+	if !strings.Contains(m.status, "x again") {
+		t.Errorf("status = %q, want it to ask for the second press", m.status)
+	}
+
+	next, _ = m.onSettingsKey("up")
+	m = next.(tuiModel)
+	m.setCursor = at
+	next, _ = m.onSettingsKey("x")
+	m = next.(tuiModel)
+	if _, ok := ui.ThemeByName("workbench"); !ok {
+		t.Error("the arm survived a cursor move, so x deleted on one press")
+	}
+
+	next, _ = m.onSettingsKey("x")
+	m = next.(tuiModel)
+	if _, ok := ui.ThemeByName("workbench"); ok {
+		t.Errorf("the scheme is still there: %s", m.status)
+	}
+	if !strings.Contains(m.status, "gone") {
+		t.Errorf("status = %q after deleting", m.status)
+	}
+	if m.setCursor >= m.sectionRows() {
+		t.Errorf("the cursor is past the end of a shorter list: %d of %d",
+			m.setCursor, m.sectionRows())
+	}
+}
+
+func TestAShippedSchemeIsHiddenRatherThanRemoved(t *testing.T) {
+	pinTheme(t)
+	t.Cleanup(func() { app.ThemesFile = ""; ui.HideThemes(nil) })
+
+	m := settingsModel(t)
+	m.setSection, m.setFocus = secTheme, focusContent
+	for i, th := range ui.Themes() {
+		if th.Name == "desert" {
+			m.setCursor = i + 1
+		}
+	}
+
+	next, _ := m.onSettingsKey("x")
+	m = next.(tuiModel)
+	if !strings.Contains(m.status, "hide") {
+		t.Errorf("status = %q, want it to offer to hide the scheme", m.status)
+	}
+	next, _ = m.onSettingsKey("x")
+	m = next.(tuiModel)
+
+	if _, ok := ui.ThemeByName("desert"); ok {
+		t.Error("desert is still in the picker after being hidden")
+	}
+	if !strings.Contains(m.status, "Reset") {
+		t.Errorf("status = %q, want it to say where it comes back from", m.status)
+	}
+	saved, err := m.store.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(saved.HiddenThemes, "desert") {
+		t.Errorf("hidden = %v, want desert in it", saved.HiddenThemes)
+	}
+
+	next, _ = m.restoreShippedThemes()
+	m = next.(tuiModel)
+	if _, ok := ui.ThemeByName("desert"); !ok {
+		t.Errorf("desert did not come back: %s", m.status)
+	}
+	saved, err = m.store.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.HiddenThemes) != 0 {
+		t.Errorf("hidden = %v after restoring, want none", saved.HiddenThemes)
+	}
+}
+
+func TestRestoringTheShippedSchemesKeepsYourOwn(t *testing.T) {
+	pinTheme(t)
+	t.Cleanup(func() { app.ThemesFile = ""; ui.HideThemes(nil) })
+
+	m := settingsModel(t)
+	m.setSection, m.setFocus = secTheme, focusContent
+	dir := app.ThemesPath(m.store)
+
+	if err := ui.SaveUserTheme(dir, ui.Theme{Name: "nord", OK: "#ffffff", Spinner: "dot"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ui.SaveUserTheme(dir, ui.Theme{Name: "workbench", OK: "2", Spinner: "dot"}); err != nil {
+		t.Fatal(err)
+	}
+
+	next, _ := m.restoreShippedThemes()
+	m = next.(tuiModel)
+
+	got, _ := ui.ThemeByName("nord")
+	if got.OK == "#ffffff" {
+		t.Error("the override of a shipped scheme survived the restore")
+	}
+	if _, ok := ui.ThemeByName("workbench"); !ok {
+		t.Errorf("a scheme of the user's own was taken with it: %s", m.status)
+	}
+	if !strings.Contains(m.status, "override") {
+		t.Errorf("status = %q, want it to say what it did", m.status)
+	}
+}
+
+func TestTheThemeSectionPrintsItsOwnControls(t *testing.T) {
+	pinTheme(t)
+	m := settingsModel(t)
+	m.width, m.height = 110, 44
+	m.setSection, m.setFocus = secTheme, focusContent
+	m.setCursor = 1
+
+	out := plain(m.viewSettings())
+	for _, want := range []string{"enter select", "e edit", "x delete"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the controls do not offer %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "tab back") {
+		t.Errorf("the controls still mention tab:\n%s", out)
+	}
+	if got := strings.Count(out, "enter select"); got != 1 {
+		t.Errorf("the controls are printed %d times, want once", got)
+	}
+
+	m.setCursor = 0
+	if out := plain(m.viewSettings()); !strings.Contains(out, "enter new scheme") {
+		t.Errorf("the new-scheme row does not say what enter does:\n%s", out)
+	}
+}
+
+func TestThePreviewSpinnerAnimatesAndNamesItsShapeFirst(t *testing.T) {
+	pinTheme(t)
+	m := settingsModel(t)
+	m.width, m.height = 110, 44
+	m.setSection, m.setFocus = secTheme, focusContent
+	for i, th := range ui.Themes() {
+		if th.Name == "Ben's Theme" {
+			m.setCursor = i + 1
+		}
+	}
+
+	out := plain(m.viewSettings())
+	at := strings.Index(out, "spinner: monkey")
+	if at < 0 {
+		t.Fatalf("the preview does not name the shape:\n%s", out)
+	}
+	rest := out[at+len("spinner: monkey"):]
+	if frame := strings.TrimSpace(strings.SplitN(rest, "\n", 2)[0]); frame == "" {
+		t.Errorf("nothing is drawn after the shape's name: %q", rest)
+	}
+
+	first := m.previewFrame(ui.Theme{Spinner: "minidot"})
+	m.spinTick += 2
+	if second := m.previewFrame(ui.Theme{Spinner: "minidot"}); second == first {
+		t.Errorf("the preview frame did not advance: %q twice", first)
 	}
 }

@@ -1,11 +1,3 @@
-// Package dataview is rich-data mode's YAML: which portal endpoints to read
-// for an element and how to lay the answers out.
-//
-// It is data, not code. A view names GET paths and Go templates over what they
-// returned, so a new pane of element data is a file edit rather than a build.
-// The paths are checked at load: GET only, on the SASE host, under /sdwan.
-// iontk holds credentials that can write to production appliances, and a view
-// is the one part of it a person is expected to edit.
 package dataview
 
 import (
@@ -22,67 +14,40 @@ import (
 //go:embed builtin.yaml
 var builtinFS embed.FS
 
-// Set is the views available, in the order they are offered.
 type Set struct {
 	Views []View `yaml:"views"`
 }
 
 type View struct {
-	Name string `yaml:"name"`
-	// Fetch is the endpoints read once per element, keyed by the name the
-	// templates refer to them by.
+	Name     string            `yaml:"name"`
 	Fetch    map[string]string `yaml:"fetch"`
 	Sections []Section         `yaml:"sections"`
-	// Compare is the GUI-vs-CLI half, and the only part of a view that costs a
-	// device login. It runs on a keypress, never with the page.
-	Compare *Compare `yaml:"compare"`
+	Compare  *Compare          `yaml:"compare"`
 }
 
-// Compare puts what the portal says beside what the appliance's own CLI says.
-// It reads the portal again rather than reusing the page: a comparison is only
-// worth something if both answers were taken at the same moment.
 type Compare struct {
-	// When gates the whole comparison, same template rules as a section's: an
-	// element that is not clustered is not worth dialling to ask about HA.
-	When string `yaml:"when"`
-	// Fetch is the portal side, read when the comparison runs.
-	Fetch map[string]string `yaml:"fetch"`
-	// Commands is name -> CLI command, which .cli.<name> holds the output of.
-	// Not templated, unlike a path: a command built out of fetched data could
-	// expand into one that writes, and the read-only check here happens at
-	// load.
+	When     string            `yaml:"when"`
+	Fetch    map[string]string `yaml:"fetch"`
 	Commands map[string]string `yaml:"commands"`
 	Rows     []CompareRow      `yaml:"rows"`
 }
 
-// CompareRow is one question asked of both sources. Each side is a template,
-// which is where a difference in spelling between the two gets reconciled;
-// the engine only decides whether the answers match.
 type CompareRow struct {
 	Label  string `yaml:"label"`
 	Portal string `yaml:"portal"`
 	Device string `yaml:"device"`
 }
 
-// Section is either a list of label/value rows or, with for_each, a table over
-// something one of the fetches returned.
 type Section struct {
 	Title string `yaml:"title"`
-	// When is a template; the section is dropped when it renders empty,
-	// "false" or "<no value>". It is how a section for a thing an element may
-	// not have -- an HA cluster, a cellular module -- stays out of the way.
-	When string `yaml:"when"`
-	Rows []Row  `yaml:"rows"`
+	When  string `yaml:"when"`
+	Rows  []Row  `yaml:"rows"`
 
-	// ForEach is a dotted path into the fetched data, "interfaces.items".
-	ForEach string `yaml:"for_each"`
-	// Fetch runs once per item, with .item in scope. One request per row, so
-	// MaxItems bounds it.
+	ForEach  string            `yaml:"for_each"`
 	Fetch    map[string]string `yaml:"fetch"`
 	MaxItems int               `yaml:"max_items"`
 	Columns  []Column          `yaml:"columns"`
-	// Empty is what to say when ForEach yields nothing.
-	Empty string `yaml:"empty"`
+	Empty    string            `yaml:"empty"`
 }
 
 type Row struct {
@@ -93,18 +58,11 @@ type Row struct {
 type Column struct {
 	Header string `yaml:"header"`
 	Value  string `yaml:"value"`
-	// Width caps the column. Columns are sized to their contents; this stops
-	// one long cell -- a 40-character tunnel name among the port numbers --
-	// pushing the rest off the pane. Zero is no cap.
-	Width int `yaml:"width"`
+	Width  int    `yaml:"width"`
 }
 
-// defaultMaxItems bounds a table's per-item fetches. A view is one GET per row
-// beyond the first, and an element with 24 interfaces is already 25 requests.
 const defaultMaxItems = 60
 
-// Builtin is the views iontk ships, which are also the worked example of the
-// format.
 func Builtin() (*Set, error) {
 	b, err := builtinFS.ReadFile("builtin.yaml")
 	if err != nil {
@@ -117,15 +75,8 @@ func Builtin() (*Set, error) {
 	return s, nil
 }
 
-// FileName is the file a config root is searched for.
 const FileName = "views.yaml"
 
-// Load returns the built-in views with the file's own appended, or replacing a
-// built-in of the same name. A missing file is not an error: most runs have
-// none.
-//
-// The error it can return is a broken file, and the caller gets the built-ins
-// anyway: a typo in one view should not leave the mode with nothing.
 func Load(path string) (*Set, error) {
 	set, err := Builtin()
 	if err != nil {
@@ -166,8 +117,6 @@ func (s *Set) index(name string) int {
 	return -1
 }
 
-// View returns one by name, for a saved preference that may since have been
-// renamed away.
 func (s *Set) View(name string) (View, bool) {
 	if i := s.index(name); i >= 0 {
 		return s.Views[i], true
@@ -186,8 +135,6 @@ func (s *Set) Names() []string {
 func Parse(b []byte) (*Set, error) {
 	var set Set
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
-	// A misspelled key is the whole failure mode of a hand-written view, and
-	// ignoring it silently looks like the view not working.
 	dec.KnownFields(true)
 	if err := dec.Decode(&set); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
@@ -259,9 +206,6 @@ func (sec *Section) normalize(view string) error {
 	return nil
 }
 
-// normalize checks the comparison. The commands are the part that matters:
-// they run on an appliance, and a view is the one piece of iontk a person is
-// expected to edit, so only the read-only verbs are allowed.
 func (c *Compare) normalize(view string) error {
 	if c == nil {
 		return nil
@@ -295,10 +239,8 @@ func (c *Compare) normalize(view string) error {
 	return nil
 }
 
-// checkPath is the gate on what a view may call. A view is user-editable data
-// and iontk's token can write to production, so the path has to be a read of
-// the SASE SD-WAN API and nothing else: no host of its own, no method, no
-// escaping /sdwan with "..".
+// a read of the SASE SD-WAN API and nothing else: no host of its own, no
+// method, no escaping /sdwan with ".."
 func checkPath(p string) error {
 	if p == "" {
 		return fmt.Errorf("is empty")

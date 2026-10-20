@@ -11,9 +11,6 @@ import (
 	"tyrtop.com/iontk/internal/config"
 )
 
-// clipboardOf reads the OSC 52 payload back out of the command a copy
-// returned. Bubble Tea's clipboard message is its own unexported type, so the
-// text comes back through fmt rather than a type assertion.
 func clipboardOf(t *testing.T, cmd tea.Cmd) string {
 	t.Helper()
 	if cmd == nil {
@@ -22,41 +19,19 @@ func clipboardOf(t *testing.T, cmd tea.Cmd) string {
 	return fmt.Sprint(cmd())
 }
 
-// The id is the thing people paste into --element, so that is what the list
-// copies.
-func TestCopyingFromTheElementListTakesTheId(t *testing.T) {
+func TestTheElementListNoLongerCopiesIds(t *testing.T) {
 	m := pickModel(t)
 
 	mm, cmd := m.Update(tea.KeyPressMsg(altKey('y')))
 	m = mm.(tuiModel)
-	if got := clipboardOf(t, cmd); got != "1" {
-		t.Errorf("clipboard = %q, want the highlighted element's id", got)
+	if cmd != nil {
+		t.Errorf("alt+y on the element list still copied %q", fmt.Sprint(cmd()))
 	}
-	if !strings.Contains(m.status, "copied") {
-		t.Errorf("status = %q, want it to say what was copied", m.status)
+	if strings.Contains(m.status, "copied") {
+		t.Errorf("status = %q, want nothing copied", m.status)
 	}
-	// OSC 52 is never acknowledged, so the report has to admit that silence
-	// means the terminal refused it.
-	if !strings.Contains(m.status, "OSC 52") {
-		t.Errorf("status = %q, want it to say a copy can be refused", m.status)
-	}
-}
-
-// A ticked selection is a list someone built on purpose, and one id per line
-// is the shape --elements-path reads.
-func TestCopyingAselectionTakesEveryIdOnePerLine(t *testing.T) {
-	m := pickModel(t)
-	m.selected = map[string]bool{"1/1": true, "1/3": true}
-	m.rebuildRows()
-
-	mm, cmd := m.Update(tea.KeyPressMsg(altKey('y')))
-	m = mm.(tuiModel)
-	got := clipboardOf(t, cmd)
-	if got != "1\n3" {
-		t.Errorf("clipboard = %q, want both ids one per line", got)
-	}
-	if !strings.Contains(m.status, "2 element ids") {
-		t.Errorf("status = %q, want it to count what was copied", m.status)
+	if out := plain(m.viewPicking()); strings.Contains(out, "copy id") {
+		t.Errorf("the element list still advertises copy id:\n%s", out)
 	}
 }
 
@@ -75,8 +50,6 @@ func TestCopyingAnOpenResultTakesItsOutput(t *testing.T) {
 	}
 }
 
-// With nothing open the page is showing the run, so that is what it copies --
-// in the format a saved file would have had.
 func TestCopyingTheResultsPageTakesTheRunAsJSON(t *testing.T) {
 	m := resultsModel(t)
 	m.resOpen = false
@@ -97,33 +70,23 @@ func TestCopyingTheResultsPageTakesTheRunAsJSON(t *testing.T) {
 	}
 }
 
-func TestCopyingAMacroTakesItsCommands(t *testing.T) {
+func TestTheMacroPageNoLongerCopies(t *testing.T) {
 	m := macroModel(t)
 	m.macroCursor = 1
 
 	mm, cmd := m.Update(tea.KeyPressMsg(altKey('y')))
 	m = mm.(tuiModel)
-	if got := clipboardOf(t, cmd); got != "dump interface status all\ndump vpn count" {
-		t.Errorf("clipboard = %q, want one command per line", got)
-	}
-}
-
-func TestCopyingWithNothingToCopySaysSo(t *testing.T) {
-	m := macroModel(t)
-	m.macroCursor = 0 // the "+ new macro" row, which is an action not a macro
-
-	mm, cmd := m.Update(tea.KeyPressMsg(altKey('y')))
-	m = mm.(tuiModel)
 	if cmd != nil {
-		t.Error("something was sent to the clipboard from the new-macro row")
+		t.Errorf("alt+y on the macro page still copied %q", fmt.Sprint(cmd()))
 	}
-	if m.status == "" {
-		t.Error("nothing said why the copy did nothing")
+	if strings.Contains(m.status, "copied") {
+		t.Errorf("status = %q, want nothing copied", m.status)
+	}
+	if out := plain(m.viewMacros()); strings.Contains(out, "alt+y") {
+		t.Errorf("the macro page still offers alt+y:\n%s", out)
 	}
 }
 
-// A payload past the cap is cut at a line boundary, keeps the end, and says
-// so: terminals and tmux cap OSC 52 and the far end truncates silently.
 func TestAnOversizeCopyKeepsTheTailAndSaysItWasCut(t *testing.T) {
 	m := pickModel(t)
 	var b strings.Builder
@@ -148,8 +111,6 @@ func TestAnOversizeCopyKeepsTheTailAndSaysItWasCut(t *testing.T) {
 	}
 }
 
-// A run too big to paste is pointed at the thing that can hold it: half a JSON
-// document parses as nothing.
 func TestARunTooBigForTheClipboardOffersTheFileInstead(t *testing.T) {
 	m := resultsModel(t)
 	big := strings.Repeat("x", clipLimit)
@@ -164,8 +125,6 @@ func TestARunTooBigForTheClipboardOffersTheFileInstead(t *testing.T) {
 	}
 }
 
-// A shell copies what it has said rather than the window: the output that
-// scrolled away is most of the reason to copy one at all.
 func TestCopyingAShellTakesItsScrollback(t *testing.T) {
 	m, conn := favModel(t)
 	conn.feed("S0100-RTR-01# dump device status\r\nSerial: 1234\r\n")
@@ -184,20 +143,14 @@ func TestCopyingAShellTakesItsScrollback(t *testing.T) {
 	if !strings.Contains(m.status, "scrollback") {
 		t.Errorf("status = %q, want it to name what was copied", m.status)
 	}
-	// Nothing was typed at the device: the key is iontk's, not the shell's.
 	if strings.Contains(conn.sent(), "y") {
 		t.Errorf("alt+y reached the device: %q", conn.sent())
 	}
 }
 
-// The batch box is comma separated, so a pasted block of commands is a list.
-// textinput would otherwise flatten the newlines into spaces and make one
-// long command of the lot.
 func TestPastingCommandsIntoTheBatchBoxSplitsThem(t *testing.T) {
 	m := pickModel(t)
 	m.phase = phaseCommand
-	// textinput ignores input unless something focused it, which entering the
-	// command page does.
 	m.cmdInput.Focus()
 
 	mm, _ := m.Update(tea.PasteMsg{Content: "dump device status\ndump interface status all\n\n uptime \n"})
@@ -215,8 +168,6 @@ func TestPastingCommandsIntoTheBatchBoxSplitsThem(t *testing.T) {
 	}
 }
 
-// The macro form is already one field per command, so a pasted block fills a
-// line each and leaves the empty line the ghost row points at.
 func TestPastingCommandsIntoTheMacroFormFillsALinePerCommand(t *testing.T) {
 	m := macroModel(t)
 	next, _ := m.openMacroForm(config.Macro{})
@@ -235,7 +186,6 @@ func TestPastingCommandsIntoTheMacroFormFillsALinePerCommand(t *testing.T) {
 	if m.formCursor != len(m.form)-1 {
 		t.Errorf("formCursor = %d, want the empty line at the bottom", m.formCursor)
 	}
-	// The labels are the run order, and a paste must not leave them wrong.
 	for i := 1; i < len(m.form); i++ {
 		if want := macroCommandLabel(i - 1); m.form[i].label != want {
 			t.Errorf("field %d is labelled %q, want %q", i, m.form[i].label, want)
@@ -243,8 +193,6 @@ func TestPastingCommandsIntoTheMacroFormFillsALinePerCommand(t *testing.T) {
 	}
 }
 
-// A data pane copies the whole page, not the window: the page is what the
-// refetch built and what someone wants in a ticket.
 func TestCopyingADataPaneTakesTheWholePagePlain(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -267,7 +215,6 @@ func TestCopyingADataPaneTakesTheWholePagePlain(t *testing.T) {
 	if strings.Contains(got, "\x1b[") {
 		t.Error("the copied page carries escape codes")
 	}
-	// The window is 24 rows; the page is longer than that.
 	if n := strings.Count(got, "\n"); n < 24 {
 		t.Errorf("the copy has %d lines, want the whole page rather than the window", n)
 	}

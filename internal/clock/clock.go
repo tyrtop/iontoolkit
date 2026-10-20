@@ -1,5 +1,3 @@
-// Package clock is the zone printed times are read in. Conversion stays in
-// api.UTCTime; durations are relative, so they do not belong here.
 package clock
 
 import (
@@ -13,18 +11,15 @@ const Local = "local"
 
 const UTC = "UTC"
 
-// zone named, or the reading needs a setting to interpret
 const layout = "2006-01-02 15:04 MST"
 
 var (
-	mu   sync.RWMutex
-	loc  = time.UTC
-	name = UTC
-	// read on the settings page, long after the config was
+	mu      sync.RWMutex
+	loc     = time.UTC
+	name    = UTC
 	problem string
 )
 
-// a typo in config must not stop iontk starting
 func Use(spec string) error {
 	l, resolved, err := load(spec)
 
@@ -64,7 +59,6 @@ func Zone() *time.Location {
 	return loc
 }
 
-// as spelled, not as resolved: callers compare against Local
 func Name() string {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -77,7 +71,6 @@ func Problem() string {
 	return problem
 }
 
-// zero is blank: a field never set is not a date in 1970
 func Stamp(t time.Time) string {
 	if t.IsZero() {
 		return ""

@@ -6,9 +6,6 @@ import (
 	"tyrtop.com/iontk/internal/output"
 )
 
-// saveBatchResults writes a finished run to the configured folder. Writing to
-// stdout is not offered here: the TUI owns the terminal, so only a folder
-// produces a file, and the accordion stays the way results are read in-app.
 func (m tuiModel) saveBatchResults() string {
 	dir := m.cfg.BatchOutDir()
 	if dir == "" {
@@ -22,8 +19,6 @@ func (m tuiModel) saveBatchResults() string {
 	}
 	defer out.Close()
 
-	// No width: this is a file, and a cell trimmed to a terminal that is not
-	// reading it would lose the only copy.
 	sink := output.NewSink(out, format, output.WithOrientation(m.batchOrient()))
 	for i, r := range m.results {
 		if r.ElementID == "" {

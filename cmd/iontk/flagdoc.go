@@ -12,9 +12,6 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// Flags are documented in docs/flags.md, which this generates. A hand-written
-// reference went stale within a release; three flags were added and one
-// deprecated in a single sitting.
 var genFlagDocsCmd = &cobra.Command{
 	Use:    "gen-flag-docs [file]",
 	Short:  "Write the flag reference to a file, or to stdout",
@@ -25,11 +22,7 @@ var genFlagDocsCmd = &cobra.Command{
 		if err := writeFlagDocs(&b, rootCmd); err != nil {
 			return err
 		}
-		// Writing the file here rather than redirecting stdout keeps the
-		// go:generate line free of a shell, so it runs on Windows too.
 		if len(args) == 1 {
-			// docs/ is gitignored, so a fresh checkout has no directory to
-			// write into.
 			if dir := filepath.Dir(args[0]); dir != "." {
 				if err := os.MkdirAll(dir, 0o755); err != nil {
 					return fmt.Errorf("create %s: %w", dir, err)
@@ -45,9 +38,6 @@ var genFlagDocsCmd = &cobra.Command{
 	},
 }
 
-// flagGroups is the running order. A flag missing from here fails generation
-// rather than landing in a catch-all: being forced to classify a new flag is
-// the only thing that keeps the grouping meaningful.
 var flagGroups = []struct {
 	name  string
 	intro string
@@ -157,8 +147,6 @@ func writeFlagTable(b *strings.Builder, flags []*pflag.Flag) {
 	}
 }
 
-// groupFlags sorts every registered flag into its group, and reports any that
-// no group claims.
 func groupFlags(root *cobra.Command) (map[string][]*pflag.Flag, error) {
 	want := map[string]string{}
 	for _, g := range flagGroups {
@@ -187,8 +175,6 @@ func groupFlags(root *cobra.Command) (map[string][]*pflag.Flag, error) {
 			strings.Join(ungrouped, ", "))
 	}
 
-	// Within a group, the order flagGroups lists them in, not alphabetical:
-	// related timeouts read better together than apart.
 	for _, g := range flagGroups {
 		rank := map[string]int{}
 		for i, name := range g.flags {

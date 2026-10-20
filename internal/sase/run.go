@@ -15,19 +15,13 @@ type Event struct {
 	Elapsed time.Duration
 }
 
-// Target is one element with everything needed to reach it. The client and the
-// device login both travel per element, which is what lets a single run span
-// tenants: each tenant has its own token and its own ION credentials.
 type Target struct {
 	ElementID string
 	Client    Client
-	// User and Pass override the Options credentials for this element. Empty
-	// means fall back to the Options, which is the single-tenant case.
-	User string
-	Pass string
+	User      string
+	Pass      string
 }
 
-// creds returns the login to use for a target, preferring its own.
 func (t Target) creds(o Options) (string, string) {
 	user, pass := t.User, t.Pass
 	if user == "" {
@@ -41,14 +35,11 @@ func (t Target) creds(o Options) (string, string) {
 
 type credential interface{ RefreshStopped() bool }
 
-// A spent token fails every remaining element identically, each for a full
-// element timeout, burying the one cause in a report full of 401s.
 func credentialDead(c Client) bool {
 	cd, ok := c.(credential)
 	return ok && cd.RefreshStopped()
 }
 
-// Targets pairs every element with the same client, for a run inside one tenant.
 func Targets(client Client, elements []string) []Target {
 	out := make([]Target, 0, len(elements))
 	for _, eid := range elements {

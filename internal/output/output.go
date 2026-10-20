@@ -77,21 +77,13 @@ func NextFormat(f string) string {
 	return FormatJSON
 }
 
-// Tabular is asked before offering an orientation control: on the other
-// formats it would change nothing.
 func Tabular(f string) bool { return f == FormatTable || f == FormatCSV }
 
-// Sink receives each element's result as it finishes and writes it out.
-// The streaming formats write immediately; json and the tabular formats
-// buffer, because an array has to keep the order the elements were given in
-// and a row sort cannot start until every row exists.
 type Sink interface {
 	Add(index int, r sase.Result) error
 	Close() error
 }
 
-// Only the tabular formats read these, so a caller can pass them without
-// knowing which format it ended up with.
 type Option func(*sinkOpts)
 
 type sinkOpts struct {
@@ -101,8 +93,6 @@ type sinkOpts struct {
 
 func WithOrientation(o string) Option { return func(s *sinkOpts) { s.orient = o } }
 
-// WithWidth fits table rows into n columns. Zero leaves every cell whole,
-// which is what a file wants -- truncating one would lose the only copy.
 func WithWidth(n int) Option { return func(s *sinkOpts) { s.width = n } }
 
 func NewSink(w io.Writer, format string, opts ...Option) Sink {
@@ -138,8 +128,6 @@ func (s *jsonSink) Add(index int, r sase.Result) error {
 	return nil
 }
 
-// addAt exists because results arrive in completion order and have to be
-// written in the order the elements were given.
 func addAt(results []sase.Result, index int, r sase.Result) []sase.Result {
 	for len(results) <= index {
 		results = append(results, sase.Result{})
@@ -153,15 +141,12 @@ func (s *jsonSink) Close() error {
 		s.results = []sase.Result{}
 	}
 	enc := json.NewEncoder(s.w)
-	// Command output stays \n-escaped inside the JSON strings whatever the
-	// indentation, which is why text and table exist.
 	enc.SetIndent("", "  ")
 	return enc.Encode(s.results)
 }
 
 type jsonlSink struct{ enc *json.Encoder }
 
-// Encode already ends each value with a newline, which is the whole format.
 func (s *jsonlSink) Add(_ int, r sase.Result) error { return s.enc.Encode(r) }
 func (s *jsonlSink) Close() error                   { return nil }
 
@@ -222,14 +207,10 @@ type nopCloser struct{ io.Writer }
 
 func (nopCloser) Close() error { return nil }
 
-// outputName is the file a run writes to when output goes to a folder. The
-// timestamp keeps repeated runs from overwriting each other.
 func outputName(format string, now time.Time) string {
 	return "iontk-" + now.Format("20060102-150405") + "." + formatExt(format)
 }
 
-// Open decides where results go. An explicit path wins; "-" and an empty
-// folder both mean stdout. It returns the destination and a label to report.
 func Open(explicit, dir, format string, now time.Time) (io.WriteCloser, string, error) {
 	path := strings.TrimSpace(explicit)
 	switch {
@@ -253,7 +234,6 @@ func Open(explicit, dir, format string, now time.Time) (io.WriteCloser, string, 
 	return f, path, nil
 }
 
-// ExpandHome resolves a leading ~ so a typed-in folder behaves the way it looks.
 func ExpandHome(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path != "~" && !strings.HasPrefix(path, "~/") {

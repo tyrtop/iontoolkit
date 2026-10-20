@@ -12,8 +12,6 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-// A model whose elements carry hardware models, since that is what history is
-// keyed on.
 func historyModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := pickModel(t)
@@ -24,8 +22,6 @@ func historyModel(t *testing.T) tuiModel {
 	return m
 }
 
-// What a shell sends is counted as it is sent, which is what fills /fc
-// without anyone having to save anything.
 func TestEnterInAShellCountsWhatWasTyped(t *testing.T) {
 	m := historyModel(t)
 	m.phase = phaseSession
@@ -47,13 +43,10 @@ func TestEnterInAShellCountsWhatWasTyped(t *testing.T) {
 	if got[0].Command != "dump device status" {
 		t.Errorf("command = %q, want what was typed", got[0].Command)
 	}
-	// The model it ran on, not just the command: the same text means
-	// different things on different hardware.
 	if got[0].Model != "ion 1200" {
 		t.Errorf("model = %q, want the element's", got[0].Model)
 	}
 
-	// And the keypress hands back the save, so the next run has it.
 	if cmd == nil {
 		t.Fatal("enter queued no save")
 	}
@@ -67,8 +60,6 @@ func TestEnterInAShellCountsWhatWasTyped(t *testing.T) {
 	}
 }
 
-// Enter on an empty line is the device's own prompt being nudged, not a
-// command.
 func TestEnterOnAnEmptyLineCountsNothing(t *testing.T) {
 	m := historyModel(t)
 	m.phase = phaseSession
@@ -88,8 +79,6 @@ func TestEnterOnAnEmptyLineCountsNothing(t *testing.T) {
 	}
 }
 
-// A run of ten 1200s doing the same thing is one fact about the 1200, not
-// ten, so a batch counts per model rather than per element.
 func TestABatchRunCountsOncePerModel(t *testing.T) {
 	m := historyModel(t)
 	rows := []elementRow{
@@ -123,8 +112,6 @@ func TestABatchRunCountsOncePerModel(t *testing.T) {
 	}
 }
 
-// /fc is the history: this model's commands first, most-used first inside
-// that, and a command from another model named as such rather than hidden.
 func TestFrequentCommandsAreRankedForThisModel(t *testing.T) {
 	m := historyModel(t)
 	m.phase = phaseSession
@@ -161,25 +148,20 @@ func TestFrequentCommandsAreRankedForThisModel(t *testing.T) {
 	if !strings.Contains(m.slashItems[0], "×2") {
 		t.Errorf("first row = %q, want the count on it", m.slashItems[0])
 	}
-	// No tag on a command captured on the model in front of the user: it
-	// would be on every row and say nothing.
 	if strings.Contains(m.slashItems[0], "ion 1200") {
 		t.Errorf("first row = %q, want no model tag for this model", m.slashItems[0])
 	}
-	// Run five times, but on other hardware, so it comes last and says so.
 	last := m.slashItems[2]
 	if !strings.HasPrefix(last, "dump interface status 8") || !strings.Contains(last, "ion 3200") {
 		t.Errorf("last row = %q, want the other model's command, named", last)
 	}
 
-	// The query decides which rows show; the ranking still decides the order.
 	m.slashInput.SetValue("dump")
 	m = m.refilterSlash()
 	if len(m.slashItems) != 2 || !strings.HasPrefix(m.slashItems[0], "dump device status") {
 		t.Errorf("filtered items = %v, want the two dumps, this model's first", m.slashItems)
 	}
 
-	// Enter inserts without sending, like the reference palette.
 	next, _ = m.activateSlash()
 	m = next.(tuiModel)
 	if m.slash != slashOff {
@@ -195,7 +177,6 @@ func TestFrequentCommandsAreRankedForThisModel(t *testing.T) {
 	t.Fatalf("the command never reached the session; sent=%q", conn.sent())
 }
 
-// A history nobody can prune fills with typos and stops being a shortlist.
 func TestCtrlDForgetsAHistoryEntry(t *testing.T) {
 	m := historyModel(t)
 	m.phase = phaseSession
@@ -226,8 +207,6 @@ func TestCtrlDForgetsAHistoryEntry(t *testing.T) {
 	if !strings.Contains(m.status, "forgot") {
 		t.Errorf("status = %q, want it to say what went", m.status)
 	}
-	// The list it is showing goes with it, or the next enter inserts a
-	// command that no longer exists.
 	if len(m.slashItems) != 0 {
 		t.Errorf("items = %v, want the row gone too", m.slashItems)
 	}
@@ -245,8 +224,6 @@ func TestCtrlDForgetsAHistoryEntry(t *testing.T) {
 	}
 }
 
-// The verbs are resolved by prefix before anything fuzzy, so one letter still
-// picks one: "c" is a subsequence of both "commands" and "fc".
 func TestOneLetterStillPicksAVerb(t *testing.T) {
 	tests := map[string]string{
 		"c": "commands",

@@ -9,8 +9,6 @@ import (
 	"tyrtop.com/iontk/internal/fixture"
 )
 
-// An element whose answer to one command is longer than any pane, which is the
-// only state where scrolling back shows anything.
 func longResponseFixture(lines int) string {
 	var b strings.Builder
 	b.WriteString(`
@@ -33,9 +31,6 @@ tenants:
 	return b.String()
 }
 
-// scrolledPane is a real session against the playback device, with the pane
-// shorter than the emulator so there is output both above the window and in
-// the scrollback.
 func scrolledPane(t *testing.T) (tuiModel, *fixture.Set) {
 	t.Helper()
 	m, set := fixtureTUIWith(t, longResponseFixture(60))
@@ -90,8 +85,6 @@ func TestSessionPaneScrollsBackThroughWhatTheDeviceSaid(t *testing.T) {
 		t.Errorf("a page back and the last line is still showing:\n%s", back)
 	}
 
-	// Far enough to reach the first line the device sent, which only the
-	// scrollback holds.
 	for range 10 {
 		m = press(m, keyPgUp)
 	}
@@ -100,7 +93,6 @@ func TestSessionPaneScrollsBackThroughWhatTheDeviceSaid(t *testing.T) {
 		t.Errorf("scrolling back never reached the first line:\n%s", top)
 	}
 
-	// And the offset stops where the output does, so coming back is one page.
 	held := m.sesScroll
 	m = press(m, keyPgUp)
 	if m.sesScroll != held {
@@ -121,7 +113,6 @@ func TestScrolledPaneSaysItIsNotLive(t *testing.T) {
 
 	m = press(m, keyPgUp)
 	got := plain(m.viewSession())
-	// Without this a pane that stopped moving reads as a session that hung.
 	if !strings.Contains(got, "scrolled back") || !strings.Contains(got, "alt+end") {
 		t.Errorf("a scrolled pane does not say so, or does not say how to get back:\n%s", got)
 	}
@@ -154,23 +145,24 @@ func TestTypingReturnsThePaneToLive(t *testing.T) {
 		t.Fatal("shift+pgup did not move the pane")
 	}
 
-	// A key goes to the device, which is about to answer it at the bottom.
 	m = press(m, tea.Key{Code: 'd', Text: "d"})
 	if m.sesScroll != 0 {
 		t.Errorf("sesScroll = %d after typing, want the pane back at the live bottom", m.sesScroll)
 	}
 }
 
-// iontk never asks for the mouse, on any page: reporting would take the
-// terminal's own select-and-copy away, and the keys scroll every pane. The
-// wheel keeps working because terminals send arrow keys for a notch in the
-// alt screen.
-func TestNoPageAsksForTheMouse(t *testing.T) {
+func TestOnlyTheScrollingPanesAskForTheMouse(t *testing.T) {
 	m, _ := scrolledPane(t)
-	for _, phase := range []tuiPhase{phaseSession, phasePicking, phaseResults, phaseData, phaseMenu} {
+	for _, phase := range []tuiPhase{phasePicking, phaseResults, phaseMenu, phaseSettings, phaseMacros} {
 		m.phase = phase
 		if got := m.mouseMode(); got != tea.MouseModeNone {
 			t.Errorf("phase %d mouseMode() = %v, want the terminal to keep the mouse", phase, got)
+		}
+	}
+	for _, phase := range []tuiPhase{phaseSession, phaseData} {
+		m.phase = phase
+		if got := m.mouseMode(); got == tea.MouseModeNone {
+			t.Errorf("phase %d asks for no mouse, so the wheel cannot reach it", phase)
 		}
 	}
 }

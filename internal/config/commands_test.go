@@ -12,15 +12,11 @@ var epoch = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 
 func at(min int) time.Time { return epoch.Add(time.Duration(min) * time.Minute) }
 
-// The same command on the same model is one entry with a count; on another
-// model it is a different command, since the ports and subsystems differ.
 func TestRecordCountsUsesPerModel(t *testing.T) {
 	var c CommandStore
 	c.Record("dump device status", "ion 1200", at(0))
 	c.Record("dump device status", "ion 1200", at(1))
 	c.Record("dump device status", "ion 3200", at(2))
-	// Typed with trailing space, which is what a device line looks like after
-	// the palette inserts a completion.
 	c.Record("  dump device status  ", "ion 1200", at(3))
 	c.Record("", "ion 1200", at(4))
 
@@ -41,7 +37,6 @@ func TestRecordCountsUsesPerModel(t *testing.T) {
 
 func TestRankedPutsThisModelsCommandsFirst(t *testing.T) {
 	var c CommandStore
-	// Run far more often, but on another model.
 	for i := 0; i < 5; i++ {
 		c.Record("dump interface status 8", "ion 3200", at(i))
 	}
@@ -50,9 +45,9 @@ func TestRankedPutsThisModelsCommandsFirst(t *testing.T) {
 	c.Record("ping 10.0.0.1", "ion 1200", at(12))
 
 	want := []string{
-		"dump device status",      // this model, two uses
-		"ping 10.0.0.1",           // this model, one
-		"dump interface status 8", // another model, however often it was run
+		"dump device status",
+		"ping 10.0.0.1",
+		"dump interface status 8",
 	}
 	var got []string
 	for _, u := range c.Ranked("ion 1200") {
@@ -62,15 +57,11 @@ func TestRankedPutsThisModelsCommandsFirst(t *testing.T) {
 		t.Errorf("Ranked(ion 1200) = %v, want %v", got, want)
 	}
 
-	// Ranking does not reorder what is stored, so the file does not churn on
-	// a read.
 	if c.History[0].Command != "dump interface status 8" {
 		t.Errorf("Ranked rewrote the history order: %+v", c.History)
 	}
 }
 
-// A history that grows for the life of the install would be a file nobody can
-// read and a palette nobody can use.
 func TestHistoryIsBounded(t *testing.T) {
 	var c CommandStore
 	for i := 0; i < HistoryMax+10; i++ {
@@ -79,8 +70,6 @@ func TestHistoryIsBounded(t *testing.T) {
 	if len(c.History) > HistoryMax {
 		t.Fatalf("history = %d entries, want at most %d", len(c.History), HistoryMax)
 	}
-	// The oldest went, not the newest: an entry recorded a moment ago is the
-	// one most likely to be wanted again.
 	if _, ok := find(c.History, "ping 10.0.0.0", "ion 1200"); ok {
 		t.Error("the oldest entry survived the trim")
 	}
@@ -100,7 +89,6 @@ func TestForgetDropsOneEntry(t *testing.T) {
 	if _, ok := find(c.History, "dump device status", "ion 1200"); ok {
 		t.Error("the entry survived")
 	}
-	// The other model's entry is a different command and stays.
 	if _, ok := find(c.History, "dump device status", "ion 3200"); !ok {
 		t.Error("forgetting one model's entry took the other's")
 	}
@@ -114,7 +102,6 @@ func TestFavouriteSlots(t *testing.T) {
 	if err := c.SetFavourite(1, "dump device status", "ion 1200"); err != nil {
 		t.Fatalf("SetFavourite() error = %v", err)
 	}
-	// Setting an occupied slot replaces it rather than stacking.
 	if err := c.SetFavourite(1, "dump vpn count", "ion 3200"); err != nil {
 		t.Fatalf("SetFavourite() error = %v", err)
 	}
@@ -167,7 +154,6 @@ func TestMacrosAreKeptByName(t *testing.T) {
 	if err := c.SetMacro(m); err != nil {
 		t.Fatalf("SetMacro() error = %v", err)
 	}
-	// Same name, different case: one macro, replaced.
 	m.Name = "WAN Check"
 	m.Commands = append(m.Commands, "dump vpn count")
 	if err := c.SetMacro(m); err != nil {
@@ -204,8 +190,6 @@ func TestMacrosAreKeptByName(t *testing.T) {
 	}
 }
 
-// Keyed by ID rather than a field per warning, because the cross-model one is
-// the first of several.
 func TestAcknowledgedWarningsAreKeptByID(t *testing.T) {
 	var c CommandStore
 	if c.Acked("favourite/model") {
@@ -228,7 +212,6 @@ func TestCommandsRoundTripThroughTheStore(t *testing.T) {
 	root := t.TempDir()
 	st := OpenAt(root, NewMemorySecrets())
 
-	// A first run has no file, which is not an error.
 	c, err := st.Commands()
 	if err != nil {
 		t.Fatalf("Commands() on a fresh root error = %v", err)
@@ -266,7 +249,6 @@ func TestCommandsRoundTripThroughTheStore(t *testing.T) {
 		t.Error("the acknowledgement did not survive the round trip")
 	}
 
-	// A corrupt file costs the history, not the session someone is opening.
 	if err := os.WriteFile(st.commandsPath(), []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -10,24 +10,17 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-// The portal has no "standby": a cluster reads "active" on the member
-// carrying traffic and "unknown" on anything the controller cannot see. The
-// second node is therefore derived, and only where there is an active member
-// to derive it from.
 func TestHAStatesAreFilledIntoTheList(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
 	m.rebuildRows()
 
-	// Both fixture elements are in the site's cluster, so the column shows.
 	if !m.showHAColumn() {
 		t.Fatal("the HA column is hidden on a list with a cluster in it")
 	}
-	if got := plain(m.viewPicking()); !strings.Contains(got, "ha") {
+	if got := plain(m.viewPicking()); !strings.Contains(got, "HA") {
 		t.Errorf("the list has no ha column:\n%s", got)
 	}
-	// Before the status lands, a clustered element says the state is coming
-	// rather than naming one.
 	first := set.Tenants[0].Elements[0]
 	if got := plain(m.haCell(rowFor(t, m, first.ID))); got != "loading" {
 		t.Errorf("cell before the fetch = %q, want it to say it is loading", got)
@@ -49,9 +42,6 @@ func TestHAStatesAreFilledIntoTheList(t *testing.T) {
 	next, _ := m.Update(msg)
 	m = next.(tuiModel)
 
-	// The fixture's connected element is the active one; its peer is not
-	// connected, so the cluster reports it as unknown -- and with an active
-	// member in the cluster that is the standby.
 	active := plain(m.haCell(rowFor(t, m, first.ID)))
 	peer := plain(m.haCell(rowFor(t, m, set.Tenants[0].Elements[1].ID)))
 	if active != "active" {
@@ -65,7 +55,6 @@ func TestHAStatesAreFilledIntoTheList(t *testing.T) {
 	}
 }
 
-// A list with no clusters pays nothing for the column.
 func TestTheHAColumnStaysOffAListWithoutClusters(t *testing.T) {
 	m, _ := fixtureTUI(t)
 	m.phase = phasePicking
@@ -79,22 +68,18 @@ func TestTheHAColumnStaysOffAListWithoutClusters(t *testing.T) {
 	}
 }
 
-// One request per cluster, not per element: a pair shares a cluster.
 func TestHAClustersAreCountedOncePerCluster(t *testing.T) {
 	els := []api.Element{
 		{ID: "1", SiteID: "s1", SpokeHA: &api.SpokeHA{ClusterID: "c1"}},
 		{ID: "2", SiteID: "s1", SpokeHA: &api.SpokeHA{ClusterID: "c1"}},
 		{ID: "3", SiteID: "s2", SpokeHA: &api.SpokeHA{ClusterID: "c2"}},
 		{ID: "4", SiteID: "s3"},
-		// In a cluster but with no site, so there is no path to ask about.
 		{ID: "5", SpokeHA: &api.SpokeHA{ClusterID: "c3"}},
 	}
 	got := haClusters(els)
 	if len(got.pairs) != 2 {
 		t.Errorf("pairs = %v, want one per cluster that can be read one at a time", got.pairs)
 	}
-	// The one with no site can only ever be read by the aggregate, which asks
-	// by element, so it is kept apart rather than dropped.
 	if len(got.noSite) != 1 {
 		t.Errorf("noSite = %v, want the cluster with no site in it", got.noSite)
 	}
@@ -122,8 +107,6 @@ func elementsOf(m tuiModel) []api.Element {
 	return out
 }
 
-// manyClusterFixture is a fleet of HA pairs, one cluster per site, with more
-// clusters than a single pass reads.
 func manyClusterFixture(sites int) string {
 	var b strings.Builder
 	b.WriteString("tenants:\n  - name: Acme Co\n    tsg_id: \"000000000\"\n    users:\n      - name: admin\n        password: ion\n    elements:\n")
@@ -134,10 +117,6 @@ func manyClusterFixture(sites int) string {
 	return b.String()
 }
 
-// Every cluster resolves, however many there are. This is the bug that put
-// "ha" on most of a fleet: the sweep read the first 64 clusters and dropped
-// the rest, and the status line's "alt+r for another pass" rebuilt the same
-// list and read the same 64 again.
 func TestEveryClusterResolvesNotJustTheFirstBatch(t *testing.T) {
 	sites := haBatch + 2
 	m, _ := fixtureTUIWith(t, manyClusterFixture(sites))
@@ -149,8 +128,6 @@ func TestEveryClusterResolvesNotJustTheFirstBatch(t *testing.T) {
 		t.Fatalf("%d clusters, want one per site (%d)", len(pairs), sites)
 	}
 
-	// Follow the passes the way the program does: each message carries what
-	// it did not reach, and the next command takes it.
 	cmd := loadHA(t.Context(), m.pool.get(m.tenant.TSGID), m.tenant.TSGID, pairs)
 	passes := 0
 	for {
@@ -165,7 +142,6 @@ func TestEveryClusterResolvesNotJustTheFirstBatch(t *testing.T) {
 		next, c := m.Update(msg)
 		m = next.(tuiModel)
 		if len(msg.rest) == 0 {
-			// The last pass hands back the cache write, not another read.
 			break
 		}
 		if c == nil {
@@ -185,9 +161,6 @@ func TestEveryClusterResolvesNotJustTheFirstBatch(t *testing.T) {
 	}
 }
 
-// A cluster that refuses is why a row says nothing, so the row says that it
-// could not be told rather than that it is still loading, and the line says
-// how many and why.
 func TestARefusingClusterIsReportedNotSwallowed(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -208,8 +181,6 @@ func TestARefusingClusterIsReportedNotSwallowed(t *testing.T) {
 	}
 }
 
-// A cluster that answered without naming a member means the controller cannot
-// see it, which is the API's own word rather than something still in flight.
 func TestAnAnsweredClusterThatNamesNobodyReadsUnknown(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -230,8 +201,6 @@ func TestAnAnsweredClusterThatNamesNobodyReadsUnknown(t *testing.T) {
 	}
 }
 
-// An element whose record carries no site id can never be asked about: the
-// status path is per site. It used to show "ha" for good.
 func TestAnElementWithNoSiteSaysItCannotBeAsked(t *testing.T) {
 	m, _ := fixtureTUI(t)
 	r := elementRow{Element: api.Element{
@@ -245,10 +214,6 @@ func TestAnElementWithNoSiteSaysItCannotBeAsked(t *testing.T) {
 	}
 }
 
-// One POST for the whole tenant instead of one GET per cluster. This is what
-// the portal's own resource map calls query_status_spokeclusters, and on a
-// fleet of pairs it is the difference between a column that is there with the
-// list and one that fills at five requests a second.
 func TestTheAggregateQueryFillsTheWholeColumnAtOnce(t *testing.T) {
 	sites := haBatch + 2
 	m, _ := fixtureTUIWith(t, manyClusterFixture(sites))
@@ -284,8 +249,6 @@ func TestTheAggregateQueryFillsTheWholeColumnAtOnce(t *testing.T) {
 	}
 }
 
-// A tenant whose aggregate is refused has to fall back, not come up empty:
-// the per-cluster sweep is the only path proved against hardware.
 func TestARefusedAggregateFallsBackToThePerClusterSweep(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -304,7 +267,6 @@ func TestARefusedAggregateFallsBackToThePerClusterSweep(t *testing.T) {
 		t.Errorf("haPath() = %q, want it to say the query was refused and what took over", got)
 	}
 
-	// And the sweep it queued does fill the column.
 	msg, ok := cmd().(haStatesMsg)
 	if !ok {
 		t.Fatalf("message = %T, want the per-cluster states", msg)
@@ -316,8 +278,6 @@ func TestARefusedAggregateFallsBackToThePerClusterSweep(t *testing.T) {
 	}
 }
 
-// Without an aggregate the sweep is slow, so the last one is kept and shown
-// with an asterisk rather than leaving the column empty on every launch.
 func TestCachedHAIsShownWithAnAsteriskUntilItIsRefreshed(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -330,7 +290,6 @@ func TestCachedHAIsShownWithAnAsteriskUntilItIsRefreshed(t *testing.T) {
 		t.Errorf("cell = %q, want the cached state marked", got)
 	}
 
-	// This run's own answer replaces it, asterisk and all.
 	next, _ := m.Update(haStatesMsg{
 		tsg:      m.tenant.TSGID,
 		states:   map[string]string{first.key(): haStandby},
@@ -342,8 +301,6 @@ func TestCachedHAIsShownWithAnAsteriskUntilItIsRefreshed(t *testing.T) {
 	}
 }
 
-// The sweep is written to the element cache, which is what the next launch
-// reads: a value saved per element id, keyed off the tenant's file.
 func TestASweepIsSavedForTheNextLaunch(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	tsg := m.tenant.TSGID
@@ -365,16 +322,11 @@ func TestASweepIsSavedForTheNextLaunch(t *testing.T) {
 	if got := c.HA[eid]; got != haActive {
 		t.Errorf("cached HA for %s = %q, want %q", eid, got, haActive)
 	}
-	// The elements it was attached to are still there.
 	if len(c.Elements) == 0 {
 		t.Error("saving the sweep dropped the cached elements")
 	}
 }
 
-// The portal's trick, which is the whole reason its page is quick: ask about
-// the rows you are showing, not the fleet you have. The first request covers
-// what is on screen, and a search reprioritises what is asked next -- the
-// matched rows are the only ones ranked at all.
 func TestTheAggregateAsksAboutTheVisibleRowsFirst(t *testing.T) {
 	m, _ := fixtureTUIWith(t, manyClusterFixture(20))
 	m.phase = phasePicking
@@ -386,14 +338,12 @@ func TestTheAggregateAsksAboutTheVisibleRowsFirst(t *testing.T) {
 		t.Fatalf("%d clustered elements, want the fleet", len(w.elements))
 	}
 
-	// With the cursor at the top, the first ids asked about are the top rows.
 	ordered := m.visibleFirst(m.tenant.TSGID, w.elements)
 	top := m.all[m.matches[0]].ID
 	if ordered[0] != top {
 		t.Errorf("first id asked about = %s, want the row under the cursor (%s)", ordered[0], top)
 	}
 
-	// Move down the list and the order follows the cursor.
 	m.moveCursorTo(len(m.matches) - 1)
 	ordered = m.visibleFirst(m.tenant.TSGID, w.elements)
 	bottom := m.all[m.matches[len(m.matches)-1]].ID
@@ -401,8 +351,6 @@ func TestTheAggregateAsksAboutTheVisibleRowsFirst(t *testing.T) {
 		t.Errorf("first id asked about = %s, want the row the cursor moved to (%s)", ordered[0], bottom)
 	}
 
-	// A search narrows it: the matched rows are asked about first, and
-	// everything else goes behind them.
 	m.filter.SetValue("store-0007")
 	m.applyFilter()
 	if len(m.matches) == 0 || len(m.matches) == len(m.all) {
@@ -420,16 +368,12 @@ func TestTheAggregateAsksAboutTheVisibleRowsFirst(t *testing.T) {
 	}
 }
 
-// The background fill is paced on purpose, and a search does not wait for it:
-// the rows a query brings on screen are asked about immediately, which is only
-// possible because the fill leaves the rate budget alone between chunks.
 func TestASearchAsksForItsRowsWithoutWaitingForTheFill(t *testing.T) {
 	m, _ := fixtureTUIWith(t, manyClusterFixture(20))
 	m.phase = phasePicking
 	m.width, m.height = 120, 24
 	m.rebuildRows()
 
-	// A chunk lands with the fleet still queued, which is the paced state.
 	w := haClusters(elementsOf(m))
 	next, cmd := m.Update(haStatesMsg{
 		tsg:          m.tenant.TSGID,
@@ -445,7 +389,6 @@ func TestASearchAsksForItsRowsWithoutWaitingForTheFill(t *testing.T) {
 		t.Fatal("the rest of the fleet was not queued")
 	}
 
-	// Searching asks for what it put on screen, straight away.
 	m.filter.SetValue("store-0012")
 	m.applyFilter()
 	if len(m.matches) == 0 {
@@ -471,13 +414,10 @@ func TestASearchAsksForItsRowsWithoutWaitingForTheFill(t *testing.T) {
 	if ask == nil {
 		t.Fatal("the search did not ask for its rows")
 	}
-	// One request per tenant at a time: a second ask while that one is out
-	// must not duplicate it.
 	if again := m.askVisibleHA(); again != nil {
 		t.Error("a second ask went out while the first was still in flight")
 	}
 
-	// And the answer fills exactly those rows.
 	msg, ok := ask().(haStatesMsg)
 	if !ok {
 		t.Fatalf("message = %T, want the HA states", msg)
@@ -495,8 +435,6 @@ func TestASearchAsksForItsRowsWithoutWaitingForTheFill(t *testing.T) {
 	}
 }
 
-// Each chunk is written to the cache as it lands, not only at the end: a fill
-// that is paced across a fleet would otherwise save nothing until it finished.
 func TestEachChunkIsCachedAsItLands(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	tsg := m.tenant.TSGID
@@ -511,7 +449,6 @@ func TestEachChunkIsCachedAsItLands(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("nothing came back from a chunk with more to do")
 	}
-	// The batch carries the next tick and the cache write; run them.
 	if b, ok := cmd().(tea.BatchMsg); ok {
 		for _, c := range b {
 			if c != nil {

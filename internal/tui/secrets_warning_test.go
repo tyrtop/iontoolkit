@@ -9,7 +9,6 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// fakeKeyring stands in for a working OS keyring, which a test machine may not have.
 type fakeKeyring struct{ m map[string]string }
 
 func (f fakeKeyring) Backend() string { return "keyring" }
@@ -73,7 +72,7 @@ func TestFormsWarnBeforeASecretIsTyped(t *testing.T) {
 
 	t.Run("a form with no secret stays quiet", func(t *testing.T) {
 		m := warnModel(t, plain)
-		mm, _ := m.openTenantForm(config.AuthBrowser) // name and tsg only
+		mm, _ := m.openTenantForm(config.AuthBrowser)
 		m = mm.(tuiModel)
 		if got := m.plaintextWarning(); got != "" {
 			t.Errorf("plaintextWarning() = %q, want nothing on a form with no secret", got)
@@ -154,7 +153,6 @@ func TestGeneralSectionHasARefreshRow(t *testing.T) {
 		t.Errorf("the General section has no elements row:\n%s", out)
 	}
 
-	// The last row is the refresh; it moved when the jump setting was added.
 	m.setCursor = m.sectionRows() - 1
 	mm, cmd := m.onGeneralKey("enter")
 	got := mm.(tuiModel)

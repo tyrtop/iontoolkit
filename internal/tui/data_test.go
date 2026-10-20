@@ -28,10 +28,6 @@ tenants:
         ha: true
 `
 
-// The whole mode end to end over the fixture transport: pick an element in
-// rich-data mode and read the page. Every view is fetched at once and laid
-// out one after another, so this is also the check that nothing is behind a
-// view switch any more.
 func TestRichDataModeLoadsEveryViewOntoOnePage(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -52,15 +48,12 @@ func TestRichDataModeLoadsEveryViewOntoOnePage(t *testing.T) {
 	if len(m.data) != 1 {
 		t.Fatalf("tabs = %+v, want one", m.data)
 	}
-	// One pane per view, all of them reading.
 	if got, want := len(m.data[0].panes), len(m.viewNames()); got != want {
 		t.Fatalf("%d panes, want %d — one per view", got, want)
 	}
 	if !m.data[0].loading() {
 		t.Error("the tab is not loading, so nothing was queued")
 	}
-	// The ids the views are written against come off the element row, not a
-	// second lookup.
 	if m.data[0].siteID == "" || m.data[0].cluster == "" {
 		t.Errorf("tab = %+v, want the site and cluster ids filled in", m.data[0])
 	}
@@ -70,25 +63,20 @@ func TestRichDataModeLoadsEveryViewOntoOnePage(t *testing.T) {
 		t.Fatal("still loading after every fetch answered")
 	}
 
-	// The whole page, which is longer than the pane: the window onto it is
-	// checked below.
 	page := plain(m.dataPage(m.data[0]).String())
 	for _, want := range []string{
-		"Overview", "Device", "ion 1200", "SPOKE", // the record
-		"Controller", "Rebooted", "2026-10-01", // status, through the utc helper
-		"HA", "Cluster", // gated on the element being clustered, which it is
-		"Interfaces", "PORT", "STATE", "MAC", "CIRCUIT", // the per-row fetch
-		"Circuits", "LABEL", "NETWORK", "ISP 1", // the circuits view
+		"Overview", "Device", "ion 1200", "SPOKE",
+		"Controller", "Rebooted", "2026-10-01",
+		"HA", "Cluster",
+		"Interfaces", "PORT", "STATE", "MAC", "CIRCUIT",
+		"Circuits", "LABEL", "NETWORK", "ISP 1",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page is missing %q:\n%s", want, page)
 		}
 	}
 
-	// The pane shows the top of it, says which element and how much there is.
 	got := plain(m.viewData())
-	// The window onto the page, not its length: the page grows whenever a
-	// view does.
 	for _, want := range []string{"store-0003-rtr-01", "Store 0003", "4 views", "Overview", "1-24 of"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the pane is missing %q:\n%s", want, got)
@@ -101,8 +89,6 @@ func TestRichDataModeLoadsEveryViewOntoOnePage(t *testing.T) {
 	}
 }
 
-// The MAC comes off the interface status, since the interface record carries
-// the field and leaves it null on every real element.
 func TestInterfacesShowTheMACFromTheStatus(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -129,7 +115,6 @@ func TestInterfacesShowTheMACFromTheStatus(t *testing.T) {
 	}
 }
 
-// Which port carries which circuit, from both sides of the join.
 func TestThePageTiesPortsToCircuits(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -140,8 +125,6 @@ func TestThePageTiesPortsToCircuits(t *testing.T) {
 	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	// The port names the circuit it carries rather than printing the id out
-	// of site_wan_interface_ids.
 	port := tableRow(t, paneFor(t, m.data[0], "Interfaces"), "1")
 	if !strings.Contains(strings.Join(port, " "), "ISP 1") {
 		t.Errorf("port 1 does not name its circuit: %q", port)
@@ -150,24 +133,21 @@ func TestThePageTiesPortsToCircuits(t *testing.T) {
 	circuit := tableRow(t, paneFor(t, m.data[0], "Circuits"), "ISP 1")
 	joined := strings.Join(circuit, " | ")
 	for _, want := range []string{
-		"Circuit to ISP 1", // the label, looked up by label_id
-		"Internet 1",       // the network, looked up by network_id
-		"ctrl",             // and that this is the controller's circuit
-		"up",               // the circuit's own status
-		"operational",      // and this element's view of it
+		"Circuit to ISP 1",
+		"Internet 1",
+		"ctrl",
+		"up",
+		"operational",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the circuit row is missing %q: %s", want, joined)
 		}
 	}
-	// The other direction of the same join: the circuit names its port.
 	if !containsCell(circuit, "1") {
 		t.Errorf("the circuit does not name the port carrying it: %s", joined)
 	}
 }
 
-// alt+up and alt+down move a heading at a time, which is how a page this long
-// gets read.
 func TestAltUpDownJumpsBetweenHeadings(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -185,7 +165,6 @@ func TestAltUpDownJumpsBetweenHeadings(t *testing.T) {
 	}
 	rows := paneRows(m)
 
-	// Down lands on the first heading past where the pane is held.
 	nx, _ := m.onDataKey("alt+down")
 	m = nx.(tuiModel)
 	if got, want := m.data[0].scroll, clampScroll(page.heads[0], len(page.lines), rows); got != want {
@@ -197,15 +176,12 @@ func TestAltUpDownJumpsBetweenHeadings(t *testing.T) {
 		t.Fatalf("two alt+downs put the pane at %d, want the second heading at %d", got, want)
 	}
 
-	// And back up again.
 	nx, _ = m.onDataKey("alt+up")
 	m = nx.(tuiModel)
 	if got, want := m.data[0].scroll, clampScroll(page.heads[0], len(page.lines), rows); got != want {
 		t.Errorf("alt+up put the pane at %d, want back at %d", got, want)
 	}
 
-	// Past the last heading it holds rather than wrapping: a page that jumps
-	// to the top when you press down again has lost your place.
 	m.data[0].scroll = len(page.lines)
 	nx, _ = m.onDataKey("alt+down")
 	if got := nx.(tuiModel).data[0].scroll; got == 0 {
@@ -213,8 +189,6 @@ func TestAltUpDownJumpsBetweenHeadings(t *testing.T) {
 	}
 }
 
-// A refresh refetches every view but keeps the place in the page: the point of
-// refreshing is to watch one value change.
 func TestRefreshKeepsTheScroll(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -240,8 +214,6 @@ func TestRefreshKeepsTheScroll(t *testing.T) {
 	}
 }
 
-// The point of the format: a view nobody shipped, from a file of the user's
-// own, on the same page as the built-ins.
 func TestAUserViewFromTheViewsFlagIsOffered(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "views.yaml")
 	body := `
@@ -282,8 +254,6 @@ views:
 	}
 }
 
-// Opening the same element twice reuses its tab rather than stacking a second
-// page of identical data.
 func TestReopeningAnElementReusesItsTab(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -309,7 +279,6 @@ func TestReopeningAnElementReusesItsTab(t *testing.T) {
 		t.Error("reopening queued no fetch, so the page would keep stale data")
 	}
 
-	// A second element gets a tab of its own.
 	other := set.Tenants[0].Elements[1]
 	next, _ = m.openDataTabs([]sessionTarget{{eid: other.ID, name: other.Name, tsg: m.tenant.TSGID}})
 	if got := len(next.(tuiModel).data); got != 2 {
@@ -317,8 +286,6 @@ func TestReopeningAnElementReusesItsTab(t *testing.T) {
 	}
 }
 
-// A data pane joins the tab ring after the shells, so alt+←/→ walks all of
-// them and the session numbers do not move as data tabs come and go.
 func TestDataTabsJoinTheTabRing(t *testing.T) {
 	m := pickModel(t)
 	m.data = []dataTab{{eid: "1", name: "S0100-RTR-01", tsg: "1"}}
@@ -332,13 +299,11 @@ func TestDataTabsJoinTheTabRing(t *testing.T) {
 		t.Errorf("currentTab() = %d, want 1", got)
 	}
 
-	// alt+left from the pane lands on the element list.
 	next, _ := m.onDataKey("alt+left")
 	if got := next.(tuiModel).phase; got != phasePicking {
 		t.Errorf("phase after alt+left = %v, want the list", got)
 	}
 
-	// alt+k closes it; a pane has no connection to detach, so alt+w does too.
 	closed := m.closeDataTab()
 	if len(closed.data) != 0 || closed.phase != phasePicking {
 		t.Errorf("after close: %d tabs, phase %v", len(closed.data), closed.phase)
@@ -352,13 +317,9 @@ func TestDataTabsJoinTheTabRing(t *testing.T) {
 	}
 }
 
-// Rich-data mode reads the portal, so it must not ask for a device password
-// the way shell and batch do.
 func TestRichDataModeDoesNotAskForADeviceLogin(t *testing.T) {
 	m := pickModel(t)
 	m.mode = modeData
-	// No stored device password for this tenant: shell mode would open the
-	// password form here.
 	if err := m.store.Secrets.Delete(config.IONPassKey("1", "u")); err != nil {
 		t.Fatal(err)
 	}
@@ -376,8 +337,6 @@ func TestScrollingAPaneStaysInsideIt(t *testing.T) {
 	m.dataActive = 0
 	m.phase = phaseData
 
-	// Nothing loaded yet, so there is nothing to scroll and end must not run
-	// the offset off into blank space.
 	next, _ := m.onDataKey("end")
 	if got := next.(tuiModel).data[0].scroll; got != 0 {
 		t.Errorf("scroll = %d with nothing loaded, want 0", got)
@@ -408,7 +367,6 @@ func paneFor(t *testing.T, tab dataTab, view string) dataPane {
 	return dataPane{}
 }
 
-// tableRow is the row of a pane's tables whose first cell is want.
 func tableRow(t *testing.T, p dataPane, want string) []string {
 	t.Helper()
 	for _, sec := range p.rendered.Sections {
@@ -431,8 +389,6 @@ func containsCell(cells []string, want string) bool {
 	return false
 }
 
-// runDataLoads runs every fetch the tab queued and feeds each answer back in,
-// the way the runtime would as they arrive.
 func runDataLoads(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
 	t.Helper()
 	if cmd == nil {
@@ -461,8 +417,6 @@ func runDataLoads(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
 	return m
 }
 
-// alt+up and alt+down jump through the element list by a configurable step,
-// which is what makes a list of thousands navigable without the filter.
 func TestAltUpDownJumpsTheElementList(t *testing.T) {
 	m := pickModel(t)
 	m.cfg.PageStep = 2
@@ -479,14 +433,12 @@ func TestAltUpDownJumpsTheElementList(t *testing.T) {
 		t.Errorf("cursor = %d after alt+up, want back at 0", got)
 	}
 
-	// Nothing saved means the default, not a step of zero.
 	m.cfg.PageStep = 0
 	if got := m.pageStep(); got != DefaultPageStep {
 		t.Errorf("pageStep() = %d with nothing saved, want %d", got, DefaultPageStep)
 	}
 }
 
-// The setting cycles and sticks, since the right step depends on the fleet.
 func TestThePageStepSettingCycles(t *testing.T) {
 	m := pickModel(t)
 	m.phase = phaseSettings
@@ -501,7 +453,6 @@ func TestThePageStepSettingCycles(t *testing.T) {
 		t.Fatalf("pageStep() = %d after enter, want it moved on", m.pageStep())
 	}
 
-	// Saved, so the next run opens on it.
 	cfg, err := m.store.Config()
 	if err != nil {
 		t.Fatal(err)
@@ -510,7 +461,6 @@ func TestThePageStepSettingCycles(t *testing.T) {
 		t.Errorf("saved step = %d, in-memory %d", cfg.PageStep, m.pageStep())
 	}
 
-	// Round the rest of the cycle and back to where it started.
 	for i := 1; i < len(pageSteps); i++ {
 		nx, _ := m.onGeneralKey("enter")
 		m = nx.(tuiModel)
@@ -520,9 +470,6 @@ func TestThePageStepSettingCycles(t *testing.T) {
 	}
 }
 
-// The security zone a port is in, joined through two fetches: the element's
-// bindings hold the interface ids, and the tenant's zone list has the names.
-// The join is the same one the circuit column uses.
 func TestInterfacesShowTheSecurityZone(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
@@ -537,8 +484,6 @@ func TestInterfacesShowTheSecurityZone(t *testing.T) {
 	if pane.err != "" {
 		t.Fatalf("the Interfaces view failed: %s", pane.err)
 	}
-	// The zone fetches must not have failed either: a broken one shows as a
-	// warn line rather than taking the view down.
 	for _, e := range pane.rendered.Errs {
 		t.Errorf("a fetch failed: %s", e)
 	}
@@ -559,9 +504,6 @@ func TestInterfacesShowTheSecurityZone(t *testing.T) {
 		t.Fatalf("no ZONE column in %v", headers)
 	}
 
-	// The zone hangs off the vlan interface, which is where a real element
-	// carries it: in interface.har every vlan row has a zone and every port,
-	// switch_port and bypasspair row has none.
 	vlan := tableRow(t, pane, "vlan1")
 	if got := vlan[zoneAt]; got != "Store - LAN" {
 		t.Errorf("vlan1 zone = %q, want the zone name", got)
@@ -573,9 +515,6 @@ func TestInterfacesShowTheSecurityZone(t *testing.T) {
 	}
 }
 
-// The data page is long -- four views, a 27-row interface table on a real
-// element -- so `/` narrows it to the lines that match, keeping each line's
-// view heading and its table header so a row is still readable.
 func TestTheDataPageCanBeFiltered(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase, m.mode = phasePicking, modeData
@@ -591,7 +530,6 @@ func TestTheDataPageCanBeFiltered(t *testing.T) {
 		t.Fatalf("the page is %d lines, want a long one to filter", whole)
 	}
 
-	// / opens it and typing narrows the page.
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
 	m = mm.(tuiModel)
 	if !m.dataFilterOn {
@@ -613,24 +551,19 @@ func TestTheDataPageCanBeFiltered(t *testing.T) {
 	if !strings.Contains(text, "vlan1") {
 		t.Errorf("the filtered page lost its match:\n%s", text)
 	}
-	// The view heading and the table's header come with it, or the row is a
-	// line of unlabelled columns.
 	for _, want := range []string{"Interfaces", "PORT"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the filtered page is missing %q:\n%s", want, text)
 		}
 	}
-	// And nothing from the other views is left.
 	if strings.Contains(text, "Rebooted") {
 		t.Errorf("the filtered page kept lines that do not match:\n%s", text)
 	}
 
-	// The pane says how much matched.
 	if got := plain(m.viewData()); !strings.Contains(got, "of") || !strings.Contains(got, "lines") {
 		t.Errorf("the pane does not say how much matched:\n%s", got)
 	}
 
-	// Backspacing to nothing keeps the filter open; one more closes it.
 	for range "vlan1" {
 		mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
 		m = mm.(tuiModel)
@@ -642,7 +575,6 @@ func TestTheDataPageCanBeFiltered(t *testing.T) {
 	if mm.(tuiModel).dataFilterOn {
 		t.Error("the filter is still open after backspacing the empty query")
 	}
-	// The whole page is back.
 	if got := len(m.visiblePage(m.data[0]).lines); got != whole {
 		t.Errorf("%d lines with an empty query, want the whole page of %d", got, whole)
 	}

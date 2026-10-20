@@ -37,9 +37,6 @@ func SpinnerName(name string) string {
 	return spinnerChoices[spinnerIndex(name)].name
 }
 
-// KnownSpinner and SpinnerNames are for validating a theme's shape at load:
-// spinnerIndex falls back to the default, which in a config file would look
-// like the name being ignored.
 func KnownSpinner(name string) bool {
 	for _, c := range spinnerChoices {
 		if c.name == name {
@@ -64,12 +61,12 @@ func NewSpinner(name string) spinner.Model {
 	return s
 }
 
-// SpinnerFrame is one frame of a shape, for a preview that has to show a
-// spinner without running one.
-func SpinnerFrame(name string) string {
+func SpinnerFrame(name string) string { return SpinnerFrameAt(name, 0) }
+
+func SpinnerFrameAt(name string, at int) string {
 	frames := spinnerChoices[spinnerIndex(name)].spin.Frames
 	if len(frames) == 0 {
 		return ""
 	}
-	return frames[0]
+	return frames[((at%len(frames))+len(frames))%len(frames)]
 }

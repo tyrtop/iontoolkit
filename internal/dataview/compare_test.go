@@ -7,8 +7,6 @@ import (
 	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
-// The one captured piece of real CLI output, from an ion running 6.3.4-b2:
-// keys and values separated by a tab and a colon, which is what kv reads.
 const dumpInterfaceStatus4 = `Interface	: 4
 Device		: e382
 ID		: 1724777596590008596
@@ -26,8 +24,6 @@ func TestCLIHelpersReadDeviceOutput(t *testing.T) {
 	}{
 		{"a key and its value", `{{ kv .out "State" }}`, "down"},
 		{"a key holding a space", `{{ kv .out "MAC Address" }}`, "04:47:2a:18:0e:05"},
-		// Anchored at the line start, so "State" cannot match the "Not
-		// connected" that "Status" holds.
 		{"a key that is a prefix of another", `{{ kv .out "Status" }}`, "Not connected"},
 		{"a key the firmware did not print", `{{ kv .out "Speed" }}`, ""},
 		{"case does not matter", `{{ kv .out "state" }}`, "down"},
@@ -58,8 +54,6 @@ func TestVerdictIgnoresCaseAndSpacing(t *testing.T) {
 		{"padded by the device", "6.3.4-b2", " 6.3.4-b2 ", Agree},
 		{"columns of space", "ion 1200", "ion  1200", Agree},
 		{"two answers", "up", "down", Differ},
-		// A key this firmware does not print is not a disagreement: marking
-		// it as one would cry wolf on every element.
 		{"the device said nothing", "up", "", Unknown},
 		{"the portal has not got it", "", "up", Unknown},
 	}
@@ -72,8 +66,6 @@ func TestVerdictIgnoresCaseAndSpacing(t *testing.T) {
 	}
 }
 
-// One session for the whole page, so the same command asked for by two views
-// is run once.
 func TestCompareCommandsAreDeduplicated(t *testing.T) {
 	views := []View{
 		{Name: "A", Compare: &Compare{Commands: map[string]string{"dev": "dump device status"}}},
@@ -90,8 +82,6 @@ func TestCompareCommandsAreDeduplicated(t *testing.T) {
 	}
 }
 
-// The gate is checked before anything is dialled: asking an unclustered
-// appliance about HA costs the same session as asking a clustered one.
 func TestCompareViewsSkipWhatTheElementHasNotGot(t *testing.T) {
 	views := []View{
 		{Name: "Always", Compare: &Compare{Commands: map[string]string{"a": "dump device status"}}},
@@ -123,8 +113,6 @@ func names(views []View) []string {
 	return out
 }
 
-// The whole comparison: a portal fetch of its own, the device output keyed by
-// command, and a verdict per row.
 func TestRenderCompareMarksEachRow(t *testing.T) {
 	set, err := Parse([]byte(`
 views:
@@ -165,8 +153,6 @@ views:
 	if err != nil {
 		t.Fatalf("FetchCompare() error = %v", err)
 	}
-	// The comparison reads the portal itself rather than reusing the page: a
-	// page can be minutes old, and two moments are not a comparison.
 	if len(f.asked) != 1 {
 		t.Errorf("asked %v, want the compare block's own fetch", f.asked)
 	}
@@ -192,8 +178,6 @@ views:
 	}
 }
 
-// A portal fetch that fails leaves the device side readable and says why the
-// other half is blank.
 func TestRenderCompareReportsAFailedFetch(t *testing.T) {
 	v := View{
 		Name: "Check",
@@ -223,8 +207,6 @@ func TestRenderCompareReportsAFailedFetch(t *testing.T) {
 	}
 }
 
-// A view is editable data and iontk's session can type anything into a
-// production appliance, so only the read-only verbs load.
 func TestLoadRejectsABadCompareBlock(t *testing.T) {
 	tests := []struct {
 		name string
@@ -270,8 +252,6 @@ func TestLoadRejectsABadCompareBlock(t *testing.T) {
 	}
 }
 
-// The shipped comparisons are data like any other view, and a write verb in
-// one would reach an appliance.
 func TestBuiltinComparisonsOnlyRead(t *testing.T) {
 	set, err := Builtin()
 	if err != nil {

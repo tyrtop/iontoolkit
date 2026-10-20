@@ -6,6 +6,8 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,33 +19,96 @@ import (
 //go:embed themes.yaml
 var builtinFS embed.FS
 
-const ThemesFileName = "themes.yaml"
+const (
+	ThemesFileName = "themes.yaml"
+	ThemesDirName  = "themes"
+)
 
-// colour per role, not per widget: nothing here asks for "blue"
-type Theme struct {
-	Name  string `yaml:"name"`
-	Blurb string `yaml:"blurb"`
-
-	OK      string `yaml:"ok"`
-	Err     string `yaml:"err"`
-	Warn    string `yaml:"warn"`
-	Cmd     string `yaml:"cmd"`
-	Element string `yaml:"element"`
-	Row     string `yaml:"row"`
-	Hot     string `yaml:"hot"`
-	Border  string `yaml:"border"`
-	Divider string `yaml:"divider"`
-	// the spinner is part of the scheme too
-	Spinner      string   `yaml:"spinner"`
-	SpinnerColor string   `yaml:"spinner_color"`
-	Tabs         []string `yaml:"tabs"`
-
-	// attributes instead of colour: roles still have to differ
-	Mono bool `yaml:"mono"`
+func ThemeFileName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "scheme.yaml"
+	}
+	return b.String() + ".yaml"
 }
 
-// Dim and Ghost are attributes: a fixed grey is wrong on half of
-// the backgrounds there are.
+func pathIsFile(path string) bool {
+	if fi, err := os.Stat(path); err == nil {
+		return !fi.IsDir()
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".yaml" || ext == ".yml"
+}
+
+func userThemeFiles(path string) ([]string, error) {
+	if pathIsFile(path) {
+		return []string{path}, nil
+	}
+
+	var out []string
+	if legacy := strings.TrimSuffix(path, string(filepath.Separator)) + ".yaml"; legacy != "" {
+		if fi, err := os.Stat(legacy); err == nil && !fi.IsDir() {
+			out = append(out, legacy)
+		}
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return out, nil
+		}
+		return out, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(e.Name())) {
+		case ".yaml", ".yml":
+			names = append(names, e.Name())
+		}
+	}
+	slices.Sort(names)
+	for _, n := range names {
+		out = append(out, filepath.Join(path, n))
+	}
+	return out, nil
+}
+
+type Theme struct {
+	Name  string `yaml:"name"`
+	Blurb string `yaml:"blurb,omitempty"`
+
+	OK        string `yaml:"ok,omitempty"`
+	Err       string `yaml:"err,omitempty"`
+	Warn      string `yaml:"warn,omitempty"`
+	Cmd       string `yaml:"cmd,omitempty"`
+	Element   string `yaml:"element,omitempty"`
+	Row       string `yaml:"row,omitempty"`
+	Hot       string `yaml:"hot,omitempty"`
+	Border    string `yaml:"border,omitempty"`
+	Divider   string `yaml:"divider,omitempty"`
+	Bg        string `yaml:"bg,omitempty"`
+	Fg        string `yaml:"fg,omitempty"`
+	Animation string `yaml:"animation,omitempty"`
+
+	TabMode  string   `yaml:"tab_mode,omitempty"`
+	TabShell []string `yaml:"tab_shell,omitempty"`
+	TabData  []string `yaml:"tab_data,omitempty"`
+
+	Spinner      string   `yaml:"spinner,omitempty"`
+	SpinnerColor string   `yaml:"spinner_color,omitempty"`
+	Tabs         []string `yaml:"tabs,omitempty"`
+
+	Mono bool `yaml:"mono,omitempty"`
+}
+
 type Styles struct {
 	OK      lipgloss.Style
 	Err     lipgloss.Style
@@ -57,11 +122,61 @@ type Styles struct {
 	Divider lipgloss.Style
 	Spinner lipgloss.Style
 
-	Border color.Color
-	Tabs   []lipgloss.Style
+	Border    color.Color
+	Tabs      []lipgloss.Style
+	TabsShell []lipgloss.Style
+	TabsData  []lipgloss.Style
 }
 
-// something has to draw if themes.yaml breaks
+type TabKind int
+
+const (
+	TabList TabKind = iota
+	TabShell
+	TabData
+)
+
+const (
+	TabRotate = "rotate"
+	TabByType = "type"
+	TabBoth   = "both"
+	TabShared = "shared"
+)
+
+func TabModes() []string { return []string{TabRotate, TabByType, TabBoth, TabShared} }
+
+var TabModeBlurb = map[string]string{
+	TabRotate: "a colour per position in the bar",
+	TabByType: "one colour for shells, one for data",
+	TabBoth:   "a rotation of its own per kind",
+	TabShared: "one rotation, counted within the kind",
+}
+
+func KnownTabMode(mode string) bool {
+	return mode == "" || slices.Contains(TabModes(), mode)
+}
+
+func TabFallback(kind TabKind) int {
+	if kind == TabData {
+		return 1
+	}
+	return 0
+}
+
+func (t Theme) TabColours(kind TabKind) []string {
+	switch kind {
+	case TabShell:
+		if len(t.TabShell) > 0 {
+			return t.TabShell
+		}
+	case TabData:
+		if len(t.TabData) > 0 {
+			return t.TabData
+		}
+	}
+	return t.Tabs
+}
+
 var fallback = Theme{
 	Name:  "classic",
 	Blurb: "your terminal's own 16 colours",
@@ -72,8 +187,7 @@ var fallback = Theme{
 }
 
 var (
-	loaded []Theme
-	// only ever a themes.yaml that would not parse
+	loaded  []Theme
 	loadErr string
 )
 
@@ -81,8 +195,39 @@ type themeSet struct {
 	Themes []Theme `yaml:"themes"`
 }
 
-// picker order, default first
+var hidden []string
+
+func HideThemes(names []string) { hidden = slices.Clone(names) }
+
+func HiddenThemes() []string { return slices.Clone(hidden) }
+
+func IsHidden(name string) bool {
+	for _, h := range hidden {
+		if strings.EqualFold(h, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func Themes() []Theme {
+	all := allThemes()
+	if len(hidden) == 0 {
+		return all
+	}
+	out := make([]Theme, 0, len(all))
+	for _, t := range all {
+		if !IsHidden(t.Name) {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return []Theme{fallback}
+	}
+	return out
+}
+
+func allThemes() []Theme {
 	if loaded == nil {
 		set, err := builtin()
 		if err != nil {
@@ -111,7 +256,6 @@ func builtin() ([]Theme, error) {
 	return set, nil
 }
 
-// a broken file leaves the built-ins; a missing one is normal
 func LoadThemes(path string) error {
 	set, err := builtin()
 	if err != nil {
@@ -123,34 +267,58 @@ func LoadThemes(path string) error {
 	if path == "" {
 		return nil
 	}
-	b, err := os.ReadFile(path)
+	files, err := userThemeFiles(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
 		loadErr = fmt.Sprintf("read %s: %s", filepath.Base(path), err)
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	user, err := ParseThemes(b)
-	if err != nil {
-		loadErr = fmt.Sprintf("%s: %s", filepath.Base(path), err)
-		return fmt.Errorf("%s: %w", filepath.Base(path), err)
-	}
 
-	for _, t := range user {
-		if i := indexOf(loaded, t.Name); i >= 0 {
-			loaded[i] = t
+	for _, f := range files {
+		b, rerr := os.ReadFile(f)
+		if rerr != nil {
+			if os.IsNotExist(rerr) {
+				continue
+			}
+			loadErr = fmt.Sprintf("read %s: %s", filepath.Base(f), rerr)
+			return fmt.Errorf("read %s: %w", f, rerr)
+		}
+		user, perr := ParseThemes(b)
+		if perr != nil {
+			loadErr = fmt.Sprintf("%s: %s", filepath.Base(f), perr)
 			continue
 		}
-		loaded = append(loaded, t)
+		for _, t := range user {
+			if i := indexOf(loaded, t.Name); i >= 0 {
+				loaded[i] = t
+				continue
+			}
+			loaded = append(loaded, t)
+		}
+	}
+	if loadErr != "" {
+		return fmt.Errorf("%s", loadErr)
 	}
 	return nil
 }
 
+var setShape = regexp.MustCompile(`(?m)^themes:`)
+
 func ParseThemes(b []byte) ([]Theme, error) {
+	if !setShape.Match(b) {
+		var one Theme
+		dec := yaml.NewDecoder(strings.NewReader(string(b)))
+		dec.KnownFields(true)
+		if err := dec.Decode(&one); err != nil {
+			return nil, fmt.Errorf("parse: %w", err)
+		}
+		if err := one.validate(); err != nil {
+			return nil, err
+		}
+		return []Theme{one}, nil
+	}
+
 	var set themeSet
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
-	// a misspelled key otherwise looks like the scheme not working
 	dec.KnownFields(true)
 	if err := dec.Decode(&set); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
@@ -168,20 +336,24 @@ func (t Theme) validate() error {
 	if strings.TrimSpace(t.Name) == "" {
 		return fmt.Errorf("a theme needs a name")
 	}
-	for _, role := range [][2]string{
-		{"ok", t.OK}, {"err", t.Err}, {"warn", t.Warn}, {"cmd", t.Cmd},
-		{"element", t.Element}, {"row", t.Row}, {"hot", t.Hot},
-		{"border", t.Border}, {"divider", t.Divider},
-		{"spinner_color", t.SpinnerColor},
-	} {
-		if err := checkColour(role[1]); err != nil {
-			return fmt.Errorf("theme %s: %s: %w", t.Name, role[0], err)
+	for _, role := range RoleNames() {
+		if err := checkColour(t.Role(role)); err != nil {
+			return fmt.Errorf("theme %s: %s: %w", t.Name, role, err)
 		}
 	}
-	for i, c := range t.Tabs {
-		if err := checkColour(c); err != nil {
-			return fmt.Errorf("theme %s: tab %d: %w", t.Name, i+1, err)
+	for _, set := range []struct {
+		what    string
+		colours []string
+	}{{"tab", t.Tabs}, {"tab_shell", t.TabShell}, {"tab_data", t.TabData}} {
+		for i, c := range set.colours {
+			if err := checkColour(c); err != nil {
+				return fmt.Errorf("theme %s: %s %d: %w", t.Name, set.what, i+1, err)
+			}
 		}
+	}
+	if !KnownTabMode(t.TabMode) {
+		return fmt.Errorf("theme %s: tab_mode %q is not one of %s",
+			t.Name, t.TabMode, strings.Join(TabModes(), ", "))
 	}
 	if t.Spinner != "" && !KnownSpinner(t.Spinner) {
 		return fmt.Errorf("theme %s: spinner %q is not one of %s",
@@ -189,6 +361,8 @@ func (t Theme) validate() error {
 	}
 	return nil
 }
+
+func CheckColour(spec string) error { return checkColour(spec) }
 
 func checkColour(spec string) error {
 	switch {
@@ -245,7 +419,6 @@ func (t Theme) fg(spec string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(spec))
 }
 
-// built once, so no view asks the theme anything at render time
 func (t Theme) Styles() Styles {
 	s := Styles{
 		Dim:   lipgloss.NewStyle().Faint(true),
@@ -263,7 +436,6 @@ func (t Theme) Styles() Styles {
 		s.Divider = lipgloss.NewStyle().Faint(true)
 		s.Spinner = lipgloss.NewStyle()
 		s.Border = lipgloss.NoColor{}
-		// StyleTab reverses the active one
 		s.Tabs = []lipgloss.Style{lipgloss.NewStyle()}
 		return s
 	}
@@ -281,16 +453,29 @@ func (t Theme) Styles() Styles {
 	for _, c := range t.Tabs {
 		s.Tabs = append(s.Tabs, t.fg(c))
 	}
+	for _, c := range t.TabShell {
+		s.TabsShell = append(s.TabsShell, t.fg(c))
+	}
+	for _, c := range t.TabData {
+		s.TabsData = append(s.TabsData, t.fg(c))
+	}
 	if len(s.Tabs) == 0 {
 		s.Tabs = []lipgloss.Style{lipgloss.NewStyle()}
 	}
 	return s
 }
 
-// outside ANSI 0-15, so it depends on the terminal's depth
 func (t Theme) Deep() bool {
-	for _, c := range append([]string{t.OK, t.Err, t.Warn, t.Cmd, t.Element,
-		t.Row, t.Hot, t.Border, t.Divider, t.SpinnerColor}, t.Tabs...) {
+	specs := make([]string, 0, len(RoleNames())+len(t.Tabs))
+	for _, role := range RoleNames() {
+		if role == "background" || role == "other" {
+			continue
+		}
+		specs = append(specs, t.Role(role))
+	}
+	specs = append(specs, t.TabShell...)
+	specs = append(specs, t.TabData...)
+	for _, c := range append(specs, t.Tabs...) {
 		if strings.HasPrefix(c, "#") {
 			return true
 		}
@@ -313,40 +498,26 @@ func (t Theme) Swatch() string {
 	return b.String()
 }
 
-// One process, one theme, so package state rather than threaded through
-// every view. Written from Update, read by the next render.
 var (
-	current  = fallback
-	styles   = fallback.Styles()
-	StyleOK  = styles.OK
-	StyleErr = styles.Err
-	// StyleWarn is a thing worth noticing that is not a failure: an offline
-	// ION next to a live session, a tenant that keeps refusing.
+	current      = fallback
+	styles       = fallback.Styles()
+	StyleOK      = styles.OK
+	StyleErr     = styles.Err
 	StyleWarn    = styles.Warn
 	StyleCmd     = styles.Cmd
 	StyleElement = styles.Element
 	StyleDim     = styles.Dim
-	// StyleHot is a session about to go.
-	StyleHot = styles.Hot
-	// StyleRow is the highlight on the row a list is on, and on the line an
-	// open result is scrolled to. Defined here rather than taken from the
-	// table widget's default, which is a 256-colour pink a terminal theme
-	// cannot remap.
-	StyleRow = styles.Row
-	// StyleGhost is a line that is not there yet: the next command a macro
-	// would take, or the macro that would be made, before anyone has typed
-	// anything.
+	StyleHot     = styles.Hot
+	StyleRow     = styles.Row
 	StyleGhost   = styles.Ghost
+	StyleBold    = lipgloss.NewStyle().Bold(true)
 	StyleDivider = styles.Divider
-	// Set into the bubbles widget when a spinner is made, so a theme change
-	// has to make it again.
 	StyleSpinner = styles.Spinner
 
 	MarkCheck = StyleOK.SetString("✓")
 	MarkCross = StyleErr.SetString("✗")
 )
 
-// unknown name lands on the default: a stale preference still draws
 func UseTheme(name string) bool {
 	t, ok := ThemeByName(name)
 	Apply(t)
@@ -366,23 +537,70 @@ func Apply(t Theme) {
 
 func CurrentTheme() Theme { return current }
 
-// reversed, not recoloured: legible in a scheme with few colours
-func StyleTab(i int, active bool) lipgloss.Style {
-	s := styles.Tabs[i%len(styles.Tabs)]
+func StyleTab(kind TabKind, ring, nth int, active bool) lipgloss.Style {
+	s := tabStyle(kind, ring, nth)
 	if active {
 		return s.Reverse(true).Bold(true)
 	}
 	return s
 }
 
+func tabStyle(kind TabKind, ring, nth int) lipgloss.Style {
+	if kind == TabList {
+		return atTab(styles.Tabs, 0)
+	}
+
+	set, at := styles.TabsShell, 0
+	if kind == TabData {
+		set, at = styles.TabsData, TabFallback(TabData)
+	}
+	if len(set) == 0 {
+		set, nth = styles.Tabs, nth+at
+	} else {
+		at = 0
+	}
+
+	switch current.TabMode {
+	case TabByType:
+		return atTab(set, at)
+	case TabBoth:
+		return atTab(set, nth)
+	case TabShared:
+		return atTab(styles.Tabs, nth)
+	}
+	return atTab(styles.Tabs, ring)
+}
+
+func atTab(set []lipgloss.Style, i int) lipgloss.Style {
+	if len(set) == 0 {
+		return lipgloss.NewStyle()
+	}
+	return set[((i%len(set))+len(set))%len(set)]
+}
+
 func BorderColor() color.Color { return styles.Border }
 
-// the renderer downsamples for us; this only says a scheme is approximated
+func Background() color.Color { return terminalColour(current.Bg) }
+
+func Foreground() color.Color { return terminalColour(current.Fg) }
+
+func terminalColour(spec string) color.Color {
+	c, ok := RGBOf(spec)
+	if !ok {
+		return nil
+	}
+	return color.RGBA{R: c[0], G: c[1], B: c[2], A: 0xff}
+}
+
 var profile colorprofile.Profile
 
 func SetProfile(p colorprofile.Profile) { profile = p }
 
 func Profile() colorprofile.Profile { return profile }
+
+func TrueColor() bool {
+	return profile == colorprofile.Unknown || profile >= colorprofile.TrueColor
+}
 
 func ProfileName() string {
 	switch profile {
@@ -398,12 +616,10 @@ func ProfileName() string {
 	return ""
 }
 
-// XTGETTCAP corrupts the frame on some terminals, so only a deep scheme asks
 func ShouldQueryDepth() bool {
 	return current.Deep() && profile != colorprofile.Unknown && profile < colorprofile.TrueColor
 }
 
-// empty unless a deep scheme is being approximated here
 func ThemeNote(t Theme) string {
 	if !t.Deep() || profile == colorprofile.Unknown || profile >= colorprofile.TrueColor {
 		return ""
@@ -415,7 +631,22 @@ func ThemeNote(t Theme) string {
 }
 
 func RoleNames() []string {
-	return []string{"ok", "err", "warn", "cmd", "element", "row", "hot", "border", "divider", "spinner_color"}
+	return []string{"ok", "err", "warn", "cmd", "element", "row", "hot",
+		"border", "divider", "other", "background", "spinner_color"}
+}
+
+var roleLabels = map[string]string{
+	"ok": "OK", "err": "Err", "warn": "Warn", "cmd": "Cmd",
+	"element": "Element", "row": "Row", "hot": "Hot", "border": "Border",
+	"divider": "Divider", "other": "Other", "background": "Background",
+	"spinner_color": "Spinner Colour",
+}
+
+func RoleLabel(role string) string {
+	if l, ok := roleLabels[role]; ok {
+		return l
+	}
+	return role
 }
 
 func (t Theme) Role(name string) string {
@@ -438,13 +669,16 @@ func (t Theme) Role(name string) string {
 		return t.Border
 	case "divider":
 		return t.Divider
+	case "background":
+		return t.Bg
+	case "other":
+		return t.Fg
 	case "spinner_color":
 		return t.SpinnerColor
 	}
 	return ""
 }
 
-// an unparseable colour would store as invisible
 func (t *Theme) SetRole(name, spec string) error {
 	spec = strings.TrimSpace(spec)
 	if err := checkColour(spec); err != nil {
@@ -469,6 +703,10 @@ func (t *Theme) SetRole(name, spec string) error {
 		t.Border = spec
 	case "divider":
 		t.Divider = spec
+	case "background":
+		t.Bg = spec
+	case "other":
+		t.Fg = spec
 	case "spinner_color":
 		t.SpinnerColor = spec
 	default:
@@ -477,7 +715,6 @@ func (t *Theme) SetRole(name, spec string) error {
 	return nil
 }
 
-// what left/right cycles through
 func Palette() []string {
 	out := make([]string, 0, 64)
 	seen := map[string]bool{}
@@ -502,7 +739,6 @@ func Palette() []string {
 	return out
 }
 
-// a typed colour is not in the palette, so it starts at the top
 func NextInPalette(spec string, delta int) string {
 	p := Palette()
 	at := 0
@@ -527,7 +763,6 @@ func NextSpinner(name string, delta int) string {
 	return names[((at+delta)%len(names)+len(names))%len(names)]
 }
 
-// editing a built-in writes an override; the file's comments do not survive
 func SaveUserTheme(path string, t Theme) error {
 	if path == "" {
 		return fmt.Errorf("no themes file to write to")
@@ -536,11 +771,14 @@ func SaveUserTheme(path string, t Theme) error {
 		return err
 	}
 
+	if !pathIsFile(path) {
+		return saveThemeFile(path, t)
+	}
+
 	set := themeSet{}
 	if b, err := os.ReadFile(path); err == nil {
 		existing, perr := ParseThemes(b)
 		if perr != nil {
-			// the file is the user's, maybe half-written by hand
 			return fmt.Errorf("%s will not parse, so it was left alone: %w", filepath.Base(path), perr)
 		}
 		set.Themes = existing
@@ -560,7 +798,6 @@ func SaveUserTheme(path string, t Theme) error {
 	}
 	header := "# Written by iontk's theme editor. A scheme here replaces the built-in\n" +
 		"# one of the same name; anything not set falls back to no colour.\n"
-	// the editor writes on every keypress
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, append([]byte(header), b...), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", tmp, err)
@@ -571,7 +808,6 @@ func SaveUserTheme(path string, t Theme) error {
 	return LoadThemes(path)
 }
 
-// the editor's way back from an override
 func BuiltinTheme(name string) (Theme, bool) {
 	set, err := builtin()
 	if err != nil {
@@ -583,9 +819,150 @@ func BuiltinTheme(name string) (Theme, bool) {
 	return Theme{}, false
 }
 
+func (t Theme) Clone() Theme {
+	t.Tabs = slices.Clone(t.Tabs)
+	t.TabShell = slices.Clone(t.TabShell)
+	t.TabData = slices.Clone(t.TabData)
+	return t
+}
+
+func (t Theme) Equal(o Theme) bool {
+	if t.Name != o.Name || t.Blurb != o.Blurb || t.Mono != o.Mono ||
+		t.Spinner != o.Spinner || t.Animation != o.Animation ||
+		t.TabMode != o.TabMode || !slices.Equal(t.Tabs, o.Tabs) ||
+		!slices.Equal(t.TabShell, o.TabShell) || !slices.Equal(t.TabData, o.TabData) {
+		return false
+	}
+	for _, role := range RoleNames() {
+		if t.Role(role) != o.Role(role) {
+			return false
+		}
+	}
+	return true
+}
+
+func ColourStyle(spec string) lipgloss.Style {
+	if spec == "" {
+		return lipgloss.NewStyle()
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(spec))
+}
+
 func (t Theme) RoleStyle(role string) lipgloss.Style {
 	if t.Mono {
 		return t.Styles().Dim
 	}
 	return t.fg(t.Role(role))
+}
+
+const themeFileHeader = "# Written by iontk's theme editor. One scheme to a file; a scheme here\n" +
+	"# replaces the built-in of the same name, and deleting the file puts it back.\n"
+
+func saveThemeFile(dir string, t Theme) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("make %s: %w", dir, err)
+	}
+	b, err := yaml.Marshal(t)
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", t.Name, err)
+	}
+
+	path := filepath.Join(dir, ThemeFileName(t.Name))
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append([]byte(themeFileHeader), b...), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return LoadThemes(dir)
+}
+
+func DeleteUserTheme(path, name string) error {
+	file, ok := userThemeSource(path, name)
+	if !ok {
+		return fmt.Errorf("%s has no file of yours to delete", name)
+	}
+
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", filepath.Base(file), err)
+	}
+	existing, err := ParseThemes(b)
+	if err != nil {
+		return fmt.Errorf("%s will not parse, so it was left alone: %w", filepath.Base(file), err)
+	}
+
+	i := indexOf(existing, name)
+	if i < 0 {
+		return fmt.Errorf("%s has no file of yours to delete", name)
+	}
+	rest := slices.Delete(slices.Clone(existing), i, i+1)
+
+	if len(rest) == 0 {
+		if err := os.Remove(file); err != nil {
+			return fmt.Errorf("remove %s: %w", filepath.Base(file), err)
+		}
+		return LoadThemes(path)
+	}
+
+	out, err := yaml.Marshal(themeSet{Themes: rest})
+	if err != nil {
+		return fmt.Errorf("encode themes: %w", err)
+	}
+	tmp := file + ".tmp"
+	if err := os.WriteFile(tmp, append([]byte(themeFileHeader), out...), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, file); err != nil {
+		return fmt.Errorf("write %s: %w", file, err)
+	}
+	return LoadThemes(path)
+}
+
+func RemoveOverrides(path string) (int, error) {
+	shipped, err := builtin()
+	if err != nil {
+		return 0, err
+	}
+	var n int
+	for _, t := range shipped {
+		if !IsUserTheme(path, t.Name) {
+			continue
+		}
+		if derr := DeleteUserTheme(path, t.Name); derr != nil {
+			return n, derr
+		}
+		n++
+	}
+	return n, nil
+}
+
+func IsUserTheme(path, name string) bool {
+	_, ok := userThemeSource(path, name)
+	return ok
+}
+
+func userThemeSource(path, name string) (string, bool) {
+	if path == "" {
+		return "", false
+	}
+	files, err := userThemeFiles(path)
+	if err != nil {
+		return "", false
+	}
+	for _, f := range files {
+		b, rerr := os.ReadFile(f)
+		if rerr != nil {
+			continue
+		}
+		set, perr := ParseThemes(b)
+		if perr != nil {
+			continue
+		}
+		if indexOf(set, name) >= 0 {
+			return f, true
+		}
+	}
+	return "", false
 }

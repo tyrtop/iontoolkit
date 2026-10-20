@@ -3,21 +3,17 @@ package ui
 import (
 	"fmt"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
 )
 
-// LabelWidth is the gutter every key is padded into. A longer key overruns it
-// and collides with its value.
-const LabelWidth = 13
+const LabelWidth = 14
 
 func Label(s string) string { return StyleDim.Render(fmt.Sprintf("%-*s", LabelWidth, s)) }
 
-// Width is the printed width of a string, ignoring its escape codes.
 func Width(s string) int { return ansi.StringWidth(s) }
 
-// Plain is text with its styling taken off, for a line that is about to be
-// restyled: wrapping a highlight around escapes ends it at the inner reset.
 func Plain(s string) string { return ansi.Strip(s) }
 
 func Truncate(s string, n int) string {
@@ -30,8 +26,6 @@ func Truncate(s string, n int) string {
 	return ansi.Truncate(s, n, "…")
 }
 
-// Age formats a cache age coarsely. Sub-second precision is noise for something
-// measured in minutes, and "38m38.9s ago" reads like a stopwatch.
 func Age(d time.Duration) string {
 	switch {
 	case d < time.Minute:
@@ -44,4 +38,19 @@ func Age(d time.Duration) string {
 		return fmt.Sprintf("%dh", h)
 	}
 	return fmt.Sprintf("%dh%dm", h, mins)
+}
+
+func Title(s string) string {
+	out := []rune(s)
+	up := true
+	for i, r := range out {
+		switch {
+		case r == ' ' || r == '-':
+			up = true
+		case up:
+			out[i] = unicode.ToUpper(r)
+			up = false
+		}
+	}
+	return string(out)
 }

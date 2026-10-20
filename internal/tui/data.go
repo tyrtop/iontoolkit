@@ -14,13 +14,8 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// Views is --views: a file of rich-data views to use instead of the one in the
-// config directory. The command sets it before Run.
 var Views string
 
-// ViewsPath is where the views come from: --views if it was given, else
-// views.yaml beside the config. A --debug or --fixtures run has its own throwaway
-// root and so sees only the built-ins, which is why --views exists.
 func ViewsPath(st *config.Store) string {
 	if Views != "" {
 		return Views
@@ -31,29 +26,18 @@ func ViewsPath(st *config.Store) string {
 	return filepath.Join(st.Root, dataview.FileName)
 }
 
-// dataTab is one element's rich-data pane. It is a tab of its own rather than
-// a panel on the list because the data is per element and worth keeping open
-// while the list moves on, which is the same reason a shell is a tab.
 type dataTab struct {
-	eid    string
-	name   string
-	tsg    string
-	site   string
-	siteID string
-	// cluster is the HA cluster the element record named, which the views that
-	// ask about HA need and cannot derive.
+	eid     string
+	name    string
+	tsg     string
+	site    string
+	siteID  string
 	cluster string
 
-	// One pane per view, in view order, all fetched at once: the whole of
-	// what the portal knows about an element belongs on one scrollable page
-	// rather than behind a mode switch per view. They arrive separately, so
-	// each carries its own loading and error state and the page fills in.
 	panes  []dataPane
 	at     time.Time
 	scroll int
 
-	// The GUI-vs-CLI comparison, which exists only once asked for: it is the
-	// one thing in this mode that dials the element.
 	cmp compareState
 }
 
@@ -78,10 +62,6 @@ func (m tuiModel) viewNames() []string {
 	return m.views.Names()
 }
 
-// dataVars is what a view's paths are written against. The cluster is the one
-// id that is not on the element row, so it comes from the record the view
-// itself fetched on a previous pass -- or empty, and the HA sections stay
-// gated off.
 func (t dataTab) vars() dataview.Vars {
 	return dataview.Vars{
 		"element_id": t.eid,
@@ -105,9 +85,6 @@ func loadDataCmd(ctx contextLike, g dataview.Getter, v dataview.View, t dataTab)
 	}
 }
 
-// openDataTabs opens a pane per element. No device login is asked for: the
-// portal half of iontk is the first useful thing someone has before they have
-// ION credentials at all, which is the whole reason this mode exists.
 func (m tuiModel) openDataTabs(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	if len(targets) == 0 {
 		return m, nil
@@ -120,8 +97,6 @@ func (m tuiModel) openDataTabs(targets []sessionTarget) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// A tenant that has not authenticated yet is connected first and the
-	// request replayed, the way opening a session does it.
 	if m.needsSignIn(tsgsOf(targets)) {
 		m.resumeData = targets
 		return m.startSignIn()
@@ -143,9 +118,6 @@ func (m tuiModel) openDataTabs(targets []sessionTarget) (tea.Model, tea.Cmd) {
 		}
 
 		tab := dataTab{eid: t.eid, name: t.name, tsg: t.tsg}
-		// An element the list already knows carries its site and cluster, so
-		// the first fetch can ask for interfaces without waiting on the
-		// record to come back first.
 		if el, ok := m.elementByKey(t.tsg + "/" + t.eid); ok {
 			tab.siteID = el.SiteID
 			tab.site = m.siteName(el)
@@ -156,8 +128,6 @@ func (m tuiModel) openDataTabs(targets []sessionTarget) (tea.Model, tea.Cmd) {
 			tab.panes = append(tab.panes, dataPane{view: name, loading: true})
 		}
 
-		// Opening an element that already has a tab reuses it rather than
-		// stacking a second page of the same data.
 		if i := m.dataIndex(t.tsg, t.eid); i >= 0 {
 			tab.scroll = m.data[i].scroll
 			m.data[i] = tab
@@ -190,10 +160,6 @@ func (m tuiModel) dataIndex(tsg, eid string) int {
 	return -1
 }
 
-// loadTab is one fetch per view. They run as separate commands so the page
-// paints as each answers: the whole set is thirty-odd requests on a big
-// element, and waiting for the last of them to show the first would be the
-// difference between a pause and a hang.
 func (m tuiModel) loadTab(tab dataTab, c *api.Client) []tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.views.Views))
 	for _, v := range m.views.Views {
@@ -202,8 +168,6 @@ func (m tuiModel) loadTab(tab dataTab, c *api.Client) []tea.Cmd {
 	return cmds
 }
 
-// contextLike is what the fetch needs of the model's context, which is only
-// cancellation.
 type contextLike = interface {
 	Deadline() (time.Time, bool)
 	Done() <-chan struct{}
@@ -239,8 +203,6 @@ func (t dataTab) loading() bool {
 	return false
 }
 
-// failed marks the tab in the bar: one view refused is worth a mark, since
-// the rest of the page looks complete without one.
 func (t dataTab) failed() bool {
 	for _, p := range t.panes {
 		if p.err != "" {
@@ -257,9 +219,6 @@ func (m tuiModel) activeData() (dataTab, bool) {
 	return m.data[m.dataActive], true
 }
 
-// refreshData refetches the whole page, keeping the scroll: a refresh is for
-// watching a value change, and being thrown back to the top to find it again
-// defeats that.
 func (m tuiModel) refreshData() (tea.Model, tea.Cmd) {
 	tab, ok := m.activeData()
 	if !ok {
@@ -309,13 +268,12 @@ func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/":
 		if !m.dataFilterOn {
+			m.dataFilter.SetValue("")
 			m.dataFilterOn = true
 			return m, m.dataFilter.Focus()
 		}
 	case "enter":
 		if m.dataFilterOn {
-			// Applied and left, like the element list: the page's own keys
-			// are letters, so the query has to be finished with.
 			m.dataFilterOn = false
 			m.dataFilter.Blur()
 			return m, nil
@@ -339,9 +297,6 @@ func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
 	page := m.visiblePage(tab)
 	_, rows := m.dataPaneSize()
 
-	// Scrolling keys still work mid-query -- the arrows and the paging keys
-	// are not letters -- but anything that could be typed belongs to the
-	// input.
 	if m.dataFilterOn {
 		switch key {
 		case "down", "up", "pgdown", "pgup", "home", "end", "alt+down", "alt+up":
@@ -363,8 +318,6 @@ func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
 		tab.scroll = 0
 	case "end", "G":
 		tab.scroll = len(page.lines)
-	// The page is long and its headers are what someone is looking for, so
-	// these move a heading at a time rather than a line.
 	case "alt+down", "]", "tab":
 		tab.scroll = nextHead(page.heads, tab.scroll, 1)
 	case "alt+up", "[", "shift+tab":
@@ -377,9 +330,6 @@ func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// nextHead is the header before or after where the pane is held. Going down
-// stops at the last one rather than wrapping: a page that jumps back to the
-// top when you press down again has lost your place.
 func nextHead(heads []int, at, dir int) int {
 	if len(heads) == 0 {
 		return at
@@ -404,13 +354,6 @@ func clampScroll(at, total, rows int) int {
 	return max(0, min(at, max(0, total-rows)))
 }
 
-// visiblePage is the page as the pane shows it: the whole thing, or only the
-// lines matching the query with enough around them to read -- the view heading
-// above them and the table header, if they came out of a table.
-//
-// Narrowing rather than jumping to the next match, because that is what every
-// other `/` in iontk does, and because "where is vlan1000" is answered better
-// by one line than by a cursor somewhere in thirty.
 func (m *tuiModel) visiblePage(tab dataTab) dataPage {
 	page := m.dataPage(tab)
 	q := strings.ToLower(strings.TrimSpace(m.dataFilter.Value()))
@@ -418,7 +361,6 @@ func (m *tuiModel) visiblePage(tab dataTab) dataPage {
 		return page
 	}
 
-	// Which heading and which table header each line sits under.
 	head, hdr := make([]int, len(page.lines)), make([]int, len(page.lines))
 	at, under := -1, -1
 	headAt, hdrAt := 0, 0
@@ -451,7 +393,6 @@ func (m *tuiModel) visiblePage(tab dataTab) dataPage {
 			out.heads = append(out.heads, len(out.lines))
 			add(h)
 		}
-		// The header only belongs with a row of the table it heads.
 		if d := hdr[i]; d >= 0 && d != i && d > head[i] {
 			add(d)
 		}
@@ -464,16 +405,10 @@ func (m tuiModel) dataPaneSize() (int, int) {
 	return max(20, m.width), max(3, m.height-6-m.statsRows())
 }
 
-// dataPage is the whole pane as text, with where its headers are. Built whole
-// and then windowed: a table needs every row's width before it can line up
-// the first, and alt+up/down needs to know which lines are headers.
 type dataPage struct {
 	lines []string
 	heads []int
-	// hdrs is where a table's header row is, so a filtered page can keep the
-	// one above a matching row: a port row with no PORT/TYPE/STATE line above
-	// it is a row of unlabelled columns.
-	hdrs []int
+	hdrs  []int
 }
 
 func (p dataPage) String() string { return strings.Join(p.lines, "\n") }
@@ -484,9 +419,6 @@ func (p *dataPage) head(line string) {
 	p.lines = append(p.lines, line)
 }
 
-// dataPage lays every view out one after another, so the whole of what the
-// portal knows about an element is one page to scroll rather than a mode to
-// switch. Each view's own header is a jump target.
 func (m tuiModel) dataPage(tab dataTab) dataPage {
 	width, _ := m.dataPaneSize()
 	var p dataPage
@@ -528,9 +460,6 @@ func (m tuiModel) dataPage(tab dataTab) dataPage {
 	return p
 }
 
-// tableLines lays a section's table out. Columns are padded plain and styled
-// afterwards: padding a styled cell counts its escape bytes toward the width
-// and the columns drift apart row by row.
 func (m tuiModel) tableLines(sec dataview.RenderedSection, width int) []string {
 	if len(sec.Headers) == 0 {
 		return nil
@@ -542,9 +471,6 @@ func (m tuiModel) tableLines(sec dataview.RenderedSection, width int) []string {
 		return []string{"  " + ui.StyleDim.Render(sec.Empty)}
 	}
 
-	// Sized to content, then capped by whatever the view asked for: an
-	// element's interface names run from "1" to a 40-character Prisma tunnel,
-	// and sizing to the longest would push every other column off the pane.
 	widths := make([]int, len(sec.Headers))
 	for i, h := range sec.Headers {
 		widths[i] = ui.Width(h)
@@ -601,8 +527,6 @@ func (m tuiModel) viewData() string {
 	if tab.site != "" {
 		where += ui.StyleDim.Render(" · " + tab.site)
 	}
-	// How much of the page is still arriving, since every view is fetched at
-	// once and they answer separately.
 	waiting := 0
 	for _, pane := range tab.panes {
 		if pane.loading {
@@ -635,8 +559,6 @@ func (m tuiModel) viewData() string {
 	lines := page.lines
 	_, rows := m.dataPaneSize()
 	at := clampScroll(tab.scroll, len(lines), rows)
-	// The window is padded to the full height whether or not there is enough
-	// to fill it: a frame that changes height makes the terminal twitch.
 	for i := 0; i < rows; i++ {
 		if at+i < len(lines) {
 			b.WriteString(lines[at+i])
@@ -674,17 +596,12 @@ func newDataFilter() textinput.Model {
 	return in
 }
 
-// onDataFilterKey is the typing half of the data pane's filter. It reports
-// whether it took the key: the page's own scrolling keys are not letters, so
-// they go through to onDataKey.
 func (m tuiModel) onDataFilterKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd, bool) {
 	switch key {
 	case "esc", "enter", "down", "up", "pgdown", "pgup", "home", "end",
 		"alt+down", "alt+up", "alt+left", "alt+right", "alt+k", "alt+w", "alt+y":
 		return m, nil, false
 	case "backspace":
-		// On an already-empty query this is the press that closes the filter,
-		// the same two-step as every other one in iontk.
 		if m.dataFilter.Value() == "" {
 			m.dataFilterOn = false
 			m.dataFilter.Blur()
@@ -694,7 +611,6 @@ func (m tuiModel) onDataFilterKey(msg tea.KeyPressMsg, key string) (tea.Model, t
 
 	var cmd tea.Cmd
 	m.dataFilter, cmd = m.dataFilter.Update(msg)
-	// The page shrank or grew under the scroll position.
 	if tab, ok := m.activeData(); ok {
 		_, rows := m.dataPaneSize()
 		tab.scroll = clampScroll(tab.scroll, len(m.visiblePage(tab).lines), rows)

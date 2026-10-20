@@ -35,7 +35,6 @@ func (m *Manager) notify(eid string) {
 }
 
 func (m *Manager) Open(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds Credentials) (*Session, error) {
-
 	s, err := Open(ctx, d, eid, name, cols, rows, creds, m.notify)
 	if err != nil {
 		return nil, err
@@ -176,11 +175,6 @@ func (m *Manager) CloseActive() {
 	m.notify(s.ElementID)
 }
 
-// CloseDeadOn closes any session on this element that has already failed,
-// ended or stopped answering, keeping the live ones. It is how a redial
-// replaces the tab it was asked from, once the new session is actually up:
-// the dead tab is the only record of what the session said, so it stays on
-// screen until there is something to put in its place.
 func (m *Manager) CloseDeadOn(eid string) int {
 	if m == nil {
 		return 0
@@ -197,8 +191,6 @@ func (m *Manager) CloseDeadOn(eid string) int {
 		kept = append(kept, s)
 	}
 	m.sessions = kept
-	// The survivor on that element is what the redial was for, so land on it
-	// rather than wherever the indices happen to leave the cursor.
 	m.active = clampActive(len(m.sessions), m.active)
 	for i, s := range m.sessions {
 		if s.ElementID == eid {
@@ -227,7 +219,6 @@ func clampActive(n, at int) int {
 	return at
 }
 
-// Reap records the element as it goes, so alt+t can reopen it.
 func (m *Manager) Reap() int {
 	if m == nil {
 		return 0
@@ -240,7 +231,6 @@ func (m *Manager) Reap() int {
 			kept = append(kept, s)
 			continue
 		}
-		// The active tab is the one worth offering back.
 		if i == m.active || !m.hasLast {
 			m.lastEID, m.lastName, m.hasLast = s.ElementID, s.Name, true
 		}
@@ -283,8 +273,6 @@ func (m *Manager) Detach() (*Session, bool) {
 	s := m.sessions[m.active]
 	m.sessions = append(m.sessions[:m.active], m.sessions[m.active+1:]...)
 	m.detached = append(m.detached, s)
-	// So alt+t can still dial the element if this session is unusable by the
-	// time it is asked for.
 	m.lastEID, m.lastName, m.hasLast = s.ElementID, s.Name, true
 	if m.active >= len(m.sessions) {
 		m.active = len(m.sessions) - 1
@@ -308,8 +296,6 @@ func (m *Manager) Reattach() (*Session, bool) {
 	for len(m.detached) > 0 {
 		cand := m.detached[len(m.detached)-1]
 		m.detached = m.detached[:len(m.detached)-1]
-		// Handing back a session that died unwatched would restore a tab
-		// showing only how it failed.
 		if cand.Closed() || cand.Ended() || cand.Err() != nil {
 			discard = append(discard, cand)
 			continue

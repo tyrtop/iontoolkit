@@ -1,17 +1,16 @@
 package ui
 
 import (
+	"charm.land/lipgloss/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/colorprofile"
 )
 
-// restore puts the shipped set and the default scheme back. Both are process
-// state, so a test that left one changed would decide what every later test
-// rendered.
 func restore(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -52,8 +51,6 @@ func TestEveryThemeIsUsable(t *testing.T) {
 		}
 		seen[strings.ToLower(th.Name)] = true
 
-		// Every scheme names its spinner: the shape is part of the theme, and
-		// one that named nothing would quietly be somebody else's default.
 		if !KnownSpinner(th.Spinner) {
 			t.Errorf("%s names spinner %q, which is not a shape", th.Name, th.Spinner)
 		}
@@ -71,9 +68,6 @@ func TestEveryThemeIsUsable(t *testing.T) {
 	}
 }
 
-// Tabs are identity, not status: a tab coloured like an error reads as a failed
-// one. The ANSI check is by index; the general one is that no tab may reuse the
-// scheme's own ok, err or warn, which catches a hex palette too.
 func TestTabPalettesCarryNoStatusMeaning(t *testing.T) {
 	reserved := map[string]string{
 		"1": "red", "2": "green", "3": "yellow",
@@ -81,7 +75,7 @@ func TestTabPalettesCarryNoStatusMeaning(t *testing.T) {
 	}
 	for _, th := range Themes() {
 		if th.Mono {
-			continue // nothing to confuse: the active tab is reversed, not coloured
+			continue
 		}
 		if len(th.Tabs) < 4 {
 			t.Errorf("%s has %d tab colours, want enough to tell tabs apart", th.Name, len(th.Tabs))
@@ -98,8 +92,6 @@ func TestTabPalettesCarryNoStatusMeaning(t *testing.T) {
 	}
 }
 
-// The default has to be the one scheme that cannot clash with a terminal's own
-// palette, which is the only reason the 0-15 rule existed.
 func TestOnlyAnOptedInSchemeLeavesTheAnsiRange(t *testing.T) {
 	if Default().Deep() {
 		t.Errorf("the default scheme %q leaves ANSI 0-15", Default().Name)
@@ -118,8 +110,6 @@ func TestOnlyAnOptedInSchemeLeavesTheAnsiRange(t *testing.T) {
 	}
 }
 
-// A themes.yaml in the config root is the whole point of the format: it adds
-// schemes, and replaces a built-in by name.
 func TestAUserFileAddsAndReplaces(t *testing.T) {
 	restore(t)
 	path := filepath.Join(t.TempDir(), ThemesFileName)
@@ -151,7 +141,6 @@ themes:
 	if _, ok := ThemeByName("office"); !ok {
 		t.Error("the file's new scheme was not added")
 	}
-	// Replacing one must not drop the rest.
 	if _, ok := ThemeByName("nord"); !ok {
 		t.Error("a user file replaced the whole built-in set")
 	}
@@ -160,8 +149,6 @@ themes:
 	}
 }
 
-// A scheme that will not load has to say why: lipgloss reads a colour it
-// cannot parse as no colour, so the failure would otherwise be invisible text.
 func TestABrokenThemeFileIsRefusedAndTheBuiltinsSurvive(t *testing.T) {
 	tests := []struct {
 		name string
@@ -200,7 +187,6 @@ func TestABrokenThemeFileIsRefusedAndTheBuiltinsSurvive(t *testing.T) {
 	}
 }
 
-// A missing file is the normal case, not an error.
 func TestNoUserFileIsNotAnError(t *testing.T) {
 	restore(t)
 	if err := LoadThemes(filepath.Join(t.TempDir(), "nothing.yaml")); err != nil {
@@ -225,14 +211,11 @@ func TestUseThemeFallsBackToTheDefault(t *testing.T) {
 	if CurrentTheme().Name != Default().Name {
 		t.Errorf("CurrentTheme() = %q, want the default after an unknown name", CurrentTheme().Name)
 	}
-	// Names are matched the way a hand-edited config spells them.
 	if !UseTheme("BEN'S THEME") {
 		t.Error("UseTheme() is case-sensitive, which a hand-written config will not be")
 	}
 }
 
-// Apply has to rebuild everything derived from the palette, the marks
-// included: they were built from StyleOK and StyleErr at package load.
 func TestApplyRestylesTheMarks(t *testing.T) {
 	restore(t)
 	mono, _ := ThemeByName("mono")
@@ -242,14 +225,11 @@ func TestApplyRestylesTheMarks(t *testing.T) {
 	}
 	nord, _ := ThemeByName("nord")
 	Apply(nord)
-	// nord's green is #a3be8c, which lands on an RGB escape.
 	if got := MarkCheck.String(); !strings.Contains(got, "163") {
 		t.Errorf("MarkCheck = %q, want nord's green", got)
 	}
 }
 
-// Mono is not the palette with the colours taken out: a role that was a
-// colour has to become an attribute or it stops being distinguishable.
 func TestMonoKeepsRolesApartWithoutColour(t *testing.T) {
 	mono, _ := ThemeByName("mono")
 	s := mono.Styles()
@@ -266,8 +246,6 @@ func TestMonoKeepsRolesApartWithoutColour(t *testing.T) {
 	}
 }
 
-// The renderer downsamples what we emit, so the only thing to do about a
-// shallow terminal is say that a deep scheme is being approximated.
 func TestThemeNoteOnlyWarnsWhenItMatters(t *testing.T) {
 	t.Cleanup(func() { SetProfile(colorprofile.Unknown) })
 	nord, _ := ThemeByName("nord")
@@ -297,9 +275,419 @@ func TestThemeNoteOnlyWarnsWhenItMatters(t *testing.T) {
 func TestStyleTabMarksTheActiveOne(t *testing.T) {
 	restore(t)
 	Apply(Default())
-	if StyleTab(0, true).Render("x") == StyleTab(0, false).Render("x") {
+	if StyleTab(TabShell, 1, 0, true).Render("x") == StyleTab(TabShell, 1, 0, false).Render("x") {
 		t.Error("the active tab renders the same as an inactive one")
 	}
-	// Past the end of the palette rather than out of range: tabs wrap.
-	StyleTab(len(styles.Tabs)+3, false)
+	StyleTab(TabShell, len(styles.Tabs)+3, len(styles.Tabs)+3, false)
+}
+
+func TestTheTabModesColourDifferently(t *testing.T) {
+	restore(t)
+	base := Theme{
+		Name: "tabs", OK: "2",
+		Tabs:     []string{"#111111", "#222222", "#333333"},
+		TabShell: []string{"#aa0000", "#bb0000"},
+		TabData:  []string{"#00aa00", "#00bb00"},
+	}
+	tests := []struct {
+		mode string
+		want []string
+	}{
+		{TabRotate, []string{"#111111", "#222222", "#333333", "#111111", "#222222"}},
+		{TabByType, []string{"#111111", "#aa0000", "#aa0000", "#00aa00", "#00aa00"}},
+		{TabBoth, []string{"#111111", "#aa0000", "#bb0000", "#00aa00", "#00bb00"}},
+		{TabShared, []string{"#111111", "#111111", "#222222", "#111111", "#222222"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.mode, func(t *testing.T) {
+			th := base.Clone()
+			th.TabMode = tc.mode
+			Apply(th)
+
+			got := []string{
+				fgOf(StyleTab(TabList, 0, 0, false)),
+				fgOf(StyleTab(TabShell, 1, 0, false)),
+				fgOf(StyleTab(TabShell, 2, 1, false)),
+				fgOf(StyleTab(TabData, 3, 0, false)),
+				fgOf(StyleTab(TabData, 4, 1, false)),
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("mode %s painted %v, want %v", tc.mode, got, tc.want)
+			}
+		})
+	}
+
+	bare := Theme{Name: "bare", Tabs: []string{"#111111", "#222222"}, TabMode: TabBoth}
+	Apply(bare)
+	if got := fgOf(StyleTab(TabShell, 1, 1, false)); got != "#222222" {
+		t.Errorf("with no shell list the tab is %q, want the rotation", got)
+	}
+
+	if err := (&Theme{Name: "x", TabMode: "sideways"}).validate(); err == nil {
+		t.Error("tab_mode sideways was accepted")
+	}
+}
+
+func fgOf(s lipgloss.Style) string {
+	c := s.GetForeground()
+	if c == nil {
+		return ""
+	}
+	r, g, b, _ := c.RGBA()
+	return HexFromRGB([3]uint8{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8)})
+}
+
+func TestTheBackgroundIsOnlySetByASchemeThatAsksForIt(t *testing.T) {
+	restore(t)
+
+	Apply(Theme{Name: "bare", OK: "2"})
+	if got := Background(); got != nil {
+		t.Errorf("Background() = %v for a scheme with no bg, want nil", got)
+	}
+	if got := Foreground(); got != nil {
+		t.Errorf("Foreground() = %v for a scheme with no fg, want nil", got)
+	}
+
+	Apply(Theme{Name: "mocha", Bg: "#1e1e2e", Fg: "#cdd6f4"})
+	bg := Background()
+	if bg == nil {
+		t.Fatal("Background() = nil for a scheme that sets bg")
+	}
+	r, g, b, a := bg.RGBA()
+	if r>>8 != 0x1e || g>>8 != 0x1e || b>>8 != 0x2e || a>>8 != 0xff {
+		t.Errorf("Background() = %04x%04x%04x alpha %04x, want #1e1e2e opaque", r, g, b, a)
+	}
+
+	Apply(Theme{Name: "indexed", Bg: "4"})
+	if got := Background(); got == nil {
+		t.Error("an index background did not resolve")
+	}
+}
+
+func TestBackgroundIsARoleLikeTheOthers(t *testing.T) {
+	restore(t)
+
+	var found int
+	for _, role := range RoleNames() {
+		if role == "background" || role == "other" {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("RoleNames() holds %d of background and other, want both", found)
+	}
+
+	var th Theme
+	if err := th.SetRole("background", "#102030"); err != nil {
+		t.Fatalf("SetRole(background) = %v", err)
+	}
+	if th.Bg != "#102030" || th.Role("background") != "#102030" {
+		t.Errorf("background did not round-trip: %q / %q", th.Bg, th.Role("background"))
+	}
+	if err := (&Theme{Name: "x", Bg: "chartreuse"}).validate(); err == nil {
+		t.Error("a background that will not parse was accepted")
+	}
+
+	classic := Theme{Name: "c", OK: "2", Err: "1", Bg: "#1e1e2e"}
+	if classic.Deep() {
+		t.Error("a scheme in the first sixteen reads as deep because of its bg")
+	}
+}
+
+func TestEveryShippedSchemeSetsABackgroundExceptTwo(t *testing.T) {
+	restore(t)
+	loaded, loadErr = nil, ""
+
+	bare := map[string]string{
+		"classic": "the default, and the terminal's own sixteen colours",
+		"mono":    "no colour at all is the whole premise",
+	}
+
+	for _, th := range Themes() {
+		why, exempt := bare[th.Name]
+		switch {
+		case exempt && (th.Bg != "" || th.Fg != ""):
+			t.Errorf("%s sets bg %q / fg %q, but %s", th.Name, th.Bg, th.Fg, why)
+		case exempt:
+		case th.Bg == "":
+			t.Errorf("%s sets no bg, so choosing it leaves the terminal unchanged", th.Name)
+		case th.Fg == "":
+			t.Errorf("%s sets a bg but no fg, so uncoloured text keeps the old colour", th.Name)
+		}
+
+		for _, role := range []string{"background", "other"} {
+			if spec := th.Role(role); spec != "" {
+				if _, ok := RGBOf(spec); !ok {
+					t.Errorf("%s: %s = %q does not resolve", th.Name, role, spec)
+				}
+			}
+		}
+	}
+}
+
+func TestNoShippedSchemeHidesItsTextInItsBackground(t *testing.T) {
+	restore(t)
+	loaded, loadErr = nil, ""
+
+	for _, th := range Themes() {
+		if th.Bg == "" {
+			continue
+		}
+		bg, _ := RGBOf(th.Bg)
+		_, _, bgv := HSVOf(bg)
+		for _, role := range RoleNames() {
+			if role == "background" || role == "divider" {
+				continue
+			}
+			spec := th.Role(role)
+			if spec == "" {
+				continue
+			}
+			c, ok := RGBOf(spec)
+			if !ok {
+				continue
+			}
+			_, _, v := HSVOf(c)
+			if d := v - bgv; d < 0.2 && d > -0.2 {
+				t.Errorf("%s: %s (%s) is as bright as its background (%s)",
+					th.Name, role, spec, th.Bg)
+			}
+		}
+	}
+}
+
+func TestASchemeIsWrittenToItsOwnFile(t *testing.T) {
+	restore(t)
+	dir := filepath.Join(t.TempDir(), ThemesDirName)
+
+	if got := ThemeFileName("Ben's Theme"); got != "benstheme.yaml" {
+		t.Errorf("ThemeFileName(Ben's Theme) = %q", got)
+	}
+	if got := ThemeFileName("classic"); got != "classic.yaml" {
+		t.Errorf("ThemeFileName(classic) = %q", got)
+	}
+
+	mine := Theme{Name: "workbench", OK: "#a6e3a1", Err: "1", Spinner: "dot"}
+	if err := SaveUserTheme(dir, mine); err != nil {
+		t.Fatalf("SaveUserTheme: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "workbench.yaml"))
+	if err != nil {
+		t.Fatalf("the scheme has no file of its own: %v", err)
+	}
+	if strings.Contains(string(b), "themes:") {
+		t.Errorf("the file still holds a list of schemes:\n%s", b)
+	}
+	if strings.Contains(string(b), `bg: ""`) {
+		t.Errorf("an unset role was written out:\n%s", b)
+	}
+
+	if got, ok := ThemeByName("workbench"); !ok || got.OK != "#a6e3a1" {
+		t.Errorf("the scheme did not load back: %+v", got)
+	}
+	if _, ok := ThemeByName("nord"); !ok {
+		t.Error("writing one scheme took the shipped set with it")
+	}
+}
+
+func TestADirectoryOfSchemesLoadsInNameOrder(t *testing.T) {
+	restore(t)
+	dir := filepath.Join(t.TempDir(), ThemesDirName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"zinc", "amber", "cobalt"} {
+		body := "name: " + name + "\nok: \"2\"\n"
+		if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LoadThemes(dir); err != nil {
+		t.Fatalf("LoadThemes: %v", err)
+	}
+	var mine []string
+	for _, th := range Themes() {
+		switch th.Name {
+		case "zinc", "amber", "cobalt":
+			mine = append(mine, th.Name)
+		}
+	}
+	want := []string{"amber", "cobalt", "zinc"}
+	if !slices.Equal(mine, want) {
+		t.Errorf("loaded %v, want %v", mine, want)
+	}
+}
+
+func TestOneBadFileLeavesTheRestLoaded(t *testing.T) {
+	restore(t)
+	dir := filepath.Join(t.TempDir(), ThemesDirName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "good.yaml"),
+		[]byte("name: good\nok: \"2\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bad.yaml"),
+		[]byte("name: bad\nok: chartreuse\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LoadThemes(dir); err == nil {
+		t.Error("LoadThemes said nothing about the file that will not parse")
+	}
+	if _, ok := ThemeByName("good"); !ok {
+		t.Error("the good scheme was lost with the bad one")
+	}
+	if _, ok := ThemeByName("bad"); ok {
+		t.Error("the scheme with an unparseable colour was loaded anyway")
+	}
+	if ThemesErr() == "" {
+		t.Error("nothing is on the settings page about it")
+	}
+}
+
+func TestALegacyThemesFileIsStillRead(t *testing.T) {
+	restore(t)
+	root := t.TempDir()
+	body := "themes:\n  - name: heirloom\n    ok: \"2\"\n"
+	if err := os.WriteFile(filepath.Join(root, ThemesFileName), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LoadThemes(filepath.Join(root, ThemesDirName)); err != nil {
+		t.Fatalf("LoadThemes: %v", err)
+	}
+	if _, ok := ThemeByName("heirloom"); !ok {
+		t.Error("the legacy themes.yaml was not read")
+	}
+}
+
+func TestDeletingASchemeFileRestoresTheShippedOne(t *testing.T) {
+	restore(t)
+	dir := filepath.Join(t.TempDir(), ThemesDirName)
+
+	override := Theme{Name: "nord", OK: "#ffffff", Spinner: "dot"}
+	if err := SaveUserTheme(dir, override); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := ThemeByName("nord"); got.OK != "#ffffff" {
+		t.Fatalf("the override did not take: ok = %q", got.OK)
+	}
+	if !IsUserTheme(dir, "nord") {
+		t.Error("IsUserTheme says the override is not the user's")
+	}
+	if IsUserTheme(dir, "desert") {
+		t.Error("IsUserTheme claims a scheme with no file of its own")
+	}
+
+	if err := DeleteUserTheme(dir, "nord"); err != nil {
+		t.Fatalf("DeleteUserTheme: %v", err)
+	}
+	got, ok := ThemeByName("nord")
+	if !ok {
+		t.Fatal("nord went away with the override; it is one of the shipped set")
+	}
+	if got.OK == "#ffffff" {
+		t.Error("the override is still in the set after its file was deleted")
+	}
+
+	if err := SaveUserTheme(dir, Theme{Name: "workbench", OK: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteUserTheme(dir, "workbench"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ThemeByName("workbench"); ok {
+		t.Error("the scheme is still in the set after being deleted")
+	}
+	if err := DeleteUserTheme(dir, "workbench"); err == nil {
+		t.Error("deleting it twice did not say there was nothing to delete")
+	}
+}
+
+func TestASchemeInTheLegacyFileIsStillTheUsers(t *testing.T) {
+	restore(t)
+	root := t.TempDir()
+	dir := filepath.Join(root, ThemesDirName)
+	body := "themes:\n  - name: test\n    ok: \"2\"\n  - name: keeper\n    ok: \"3\"\n"
+	if err := os.WriteFile(filepath.Join(root, ThemesFileName), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadThemes(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if !IsUserTheme(dir, "test") {
+		t.Error("a scheme in the legacy file reads as shipped")
+	}
+	if err := DeleteUserTheme(dir, "test"); err != nil {
+		t.Fatalf("DeleteUserTheme: %v", err)
+	}
+	if _, ok := ThemeByName("test"); ok {
+		t.Error("test is still in the set")
+	}
+	if _, ok := ThemeByName("keeper"); !ok {
+		t.Error("deleting one scheme took the rest of the file with it")
+	}
+}
+
+func TestHiddenSchemesAreLeftOutOfTheSet(t *testing.T) {
+	restore(t)
+	t.Cleanup(func() { HideThemes(nil) })
+
+	before := len(Themes())
+	HideThemes([]string{"desert", "evening"})
+	if got := len(Themes()); got != before-2 {
+		t.Errorf("Themes() has %d, want %d", got, before-2)
+	}
+	if _, ok := ThemeByName("desert"); ok {
+		t.Error("a hidden scheme is still in the set")
+	}
+	if !IsHidden("DESERT") {
+		t.Error("IsHidden is case sensitive")
+	}
+	if _, ok := BuiltinTheme("desert"); !ok {
+		t.Error("hiding a scheme reached the embedded set")
+	}
+
+	var all []string
+	for _, th := range allThemes() {
+		all = append(all, th.Name)
+	}
+	HideThemes(all)
+	if got := Themes(); len(got) != 1 {
+		t.Errorf("Themes() = %d schemes with everything hidden, want the fallback", len(got))
+	}
+}
+
+func TestRemoveOverridesLeavesTheUsersOwnSchemes(t *testing.T) {
+	restore(t)
+	dir := filepath.Join(t.TempDir(), ThemesDirName)
+
+	if err := SaveUserTheme(dir, Theme{Name: "nord", OK: "#ffffff"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveUserTheme(dir, Theme{Name: "workbench", OK: "2"}); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := RemoveOverrides(dir)
+	if err != nil {
+		t.Fatalf("RemoveOverrides: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("removed %d, want the one override", n)
+	}
+	if got, _ := ThemeByName("nord"); got.OK == "#ffffff" {
+		t.Error("the override survived")
+	}
+	if _, ok := ThemeByName("workbench"); !ok {
+		t.Error("a scheme of the user's own was removed")
+	}
 }

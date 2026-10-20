@@ -2,15 +2,8 @@ package api
 
 import "fmt"
 
-// Paths and versions come from the portal's own resource map, which it fetches
-// from GET /sdwan/v2.0/api/permissions: resource_uri_map gives each resource a
-// template of the form /{ver}/api/tenants/{tsg}/<rest> and
-// resource_version_map lists the versions the server accepts. The SASE form
-// drops the tenant segment -- the token carries it -- so it is
-// /sdwan/{ver}/api/<rest>, with monitor resources under /sdwan/monitor. The
-// toolkit socket iontk already dials against hardware is that same
-// derivation, which is what makes the rest of this table credible; the
-// versions below are the highest each map offered, confirmed on pan.dev.
+// paths and versions come from GET /sdwan/v2.0/api/permissions, the portal's own
+// resource map; the SASE form drops the map's tenant segment, the token carries it
 const apiHost = "https://api.sase.paloaltonetworks.com"
 
 const (
@@ -24,13 +17,9 @@ const (
 
 const scmBase = apiHost + "/sdwan/" + elementsVer + "/api"
 
-// Sites are on their own version. The portal's own traffic asks v4.13 for them
-// while using v3.2 for elements, and v3.2/sites does not answer, which left
-// every site name unresolved and showing a raw id instead.
+// its own version because v3.2/sites does not answer, which left site names raw
 const sitesBase = apiHost + "/sdwan/" + sitesVer + "/api"
 
-// ElementURL is exported for the one caller that wants to label a raw body
-// with where it came from.
 func ElementURL(eid string) string {
 	return scmBase + "/elements/" + eid
 }
@@ -49,8 +38,6 @@ func clusterStatusURL(siteID, cid string) string {
 		apiHost, clusterStatusVer, siteID, cid)
 }
 
-// query_status_spokeclusters: tenant-wide, because the token carries the
-// tenant. One POST where clusterStatusURL is one GET per cluster.
 func clusterQueryURL() string {
 	return fmt.Sprintf("%s/sdwan/%s/api/spokeclusters/status/query", apiHost, clusterStatusVer)
 }

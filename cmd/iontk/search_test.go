@@ -17,9 +17,8 @@ import (
 	"tyrtop.com/iontk/internal/search"
 )
 
-// searchStore is a store of its own -- not config.OpenDebug, whose root is one
-// fixed path that every test binary clears on first open -- holding two
-// tenants in the working set and a third left out of it.
+// not config.OpenDebug, whose root is one fixed path that every test binary
+// clears on first open
 func searchStore(t *testing.T) *config.Store {
 	t.Helper()
 	t.Cleanup(func() {
@@ -52,8 +51,6 @@ func seedCache(t *testing.T, st *config.Store, tsg string, at time.Time, els []a
 func TestSearchScopeIsTheWorkingSet(t *testing.T) {
 	st := searchStore(t)
 
-	// The default is every added tenant: finding less here than the TUI finds
-	// is the bug this scope exists to prevent.
 	got, err := searchScope(st)
 	if err != nil {
 		t.Fatalf("searchScope() error = %v", err)
@@ -81,7 +78,6 @@ func TestSearchScopeIsTheWorkingSet(t *testing.T) {
 		t.Errorf("searchScope() = %q, want --tsg to narrow the set", names)
 	}
 
-	// A --tsg outside the set is a typo, not an empty fleet.
 	app.Defaults.TSGID = "999"
 	if _, err := searchScope(st); err == nil {
 		t.Error("searchScope() error = nil, want an unknown --tsg to fail")
@@ -107,8 +103,6 @@ func TestSearchScopeFallsBackBeforeAnythingIsAdded(t *testing.T) {
 
 func TestSearchAnswersFromAFreshCacheWithoutDialling(t *testing.T) {
 	st := searchStore(t)
-	// No credentials are saved, so anything reaching for the network fails:
-	// a result here proves the cache answered.
 	seedCache(t, st, "111", time.Now().Add(-time.Minute), []api.Element{
 		{ID: "e1", Name: "s0100-rtr-01", SiteID: "s1", Model: "ion 1200", Connected: true},
 		{ID: "e2", Name: "s0200-rtr-01", SiteID: "s2", Model: "ion 3200"},
@@ -126,7 +120,6 @@ func TestSearchAnswersFromAFreshCacheWithoutDialling(t *testing.T) {
 	if len(hits) != 2 {
 		t.Fatalf("matched %d elements, want the query to span both tenants: %v", len(hits), names(hits))
 	}
-	// Name order, so the list does not shuffle between runs.
 	if got := names(hits); got[0] != "ord-gw-01" || got[1] != "s0100-rtr-01" {
 		t.Errorf("matched %v, want them in name order", got)
 	}
@@ -142,8 +135,6 @@ func TestSearchSaysWhenAnswerIsFromAStaleCache(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
-	// Older than the freshness window, and with no credential to refresh it:
-	// the stale answer is better than no answer, but it has to be labelled.
 	seedCache(t, st, "111", time.Now().Add(-2*config.CacheFresh), []api.Element{
 		{ID: "e1", Name: "s0100-rtr-01", Model: "ion 1200"},
 	}, nil)
@@ -158,8 +149,6 @@ func TestSearchSaysWhenAnswerIsFromAStaleCache(t *testing.T) {
 		t.Fatalf("matched %d, want the stale cache used rather than dropped", len(hits))
 	}
 	out := log.String()
-	// An answer this old has to say so, and say why it could not be renewed:
-	// a stale list that looks live is the whole risk of reading a cache.
 	if !strings.Contains(out, "stale cache") {
 		t.Errorf("a stale answer was not called one:\n%s", out)
 	}
@@ -190,8 +179,6 @@ func TestSearchFormatIsNotTheBatchFormat(t *testing.T) {
 		{"table", searchTable, false},
 		{"IDS", searchIDs, false},
 		{" json ", searchJSON, false},
-		// Valid for results, meaningless for a list of elements. Silently
-		// falling back would print a table the caller did not ask for.
 		{"csv", "", true},
 		{"jsonl", "", true},
 		{"nonsense", "", true},
@@ -216,8 +203,6 @@ func TestPrintHitsIDsAreBareSoTheyPipe(t *testing.T) {
 	if err := printHits(&buf, twoTenantHits(), searchIDs); err != nil {
 		t.Fatalf("printHits() error = %v", err)
 	}
-	// `--search X --format ids | iontk run -f -` is the whole point: anything
-	// but one ID per line breaks it.
 	if got := buf.String(); got != "e1\ne3\n" {
 		t.Errorf("printHits(ids) = %q, want one bare ID per line", got)
 	}
@@ -256,8 +241,6 @@ func TestPrintHitsJSONCarriesTheTenant(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("decoded %d rows, want 2", len(rows))
 	}
-	// An element ID is only unique within its tenant, so the pair has to
-	// survive into anything machine-readable.
 	for _, want := range []string{"id", "tenant", "tsg_id"} {
 		if _, ok := rows[0][want]; !ok {
 			t.Errorf("the JSON row has no %q: %v", want, rows[0])
@@ -281,7 +264,6 @@ func TestConfirmRunRefusesRatherThanHangOnAPipe(t *testing.T) {
 		t.Errorf("a prompt was written to a pipe that cannot answer it:\n%s", w.String())
 	}
 
-	// And with the flag, the same run goes ahead without asking.
 	flagNoValidate = true
 	if err := confirmRun(strings.NewReader(""), &w, false, twoTenantHits()); err != nil {
 		t.Errorf("confirmRun() with --no-validate error = %v, want it skipped", err)
@@ -311,7 +293,6 @@ func TestConfirmRunNeedsAnExplicitYes(t *testing.T) {
 			if (err == nil) != tt.want {
 				t.Errorf("confirmRun(%q) error = %v, want proceed = %v", tt.answer, err, tt.want)
 			}
-			// Whatever the answer, it has to have said what it was about to do.
 			out := w.String()
 			for _, want := range []string{"2 commands on 2 elements", "$ uptime", "s0100-rtr-01", "ord-gw-01", "continue?"} {
 				if !strings.Contains(out, want) {
@@ -352,9 +333,6 @@ func twoTenantHits() []hit {
 }
 
 func TestAnUnreachableTenantDoesNotSinkTheSearch(t *testing.T) {
-	// One tenant with a usable cache and two with neither cache nor
-	// credential. A fleet-wide query has to answer from what it can reach and
-	// say plainly what it could not.
 	st := searchStore(t)
 	seedCache(t, st, "111", time.Now().Add(-time.Minute), []api.Element{
 		{ID: "e1", Name: "s0100-rtr-01", Model: "ion 1200"},
@@ -375,16 +353,12 @@ func TestAnUnreachableTenantDoesNotSinkTheSearch(t *testing.T) {
 	if !strings.Contains(out, "Niagara Bottling: unreachable") {
 		t.Errorf("an unreachable tenant was not reported:\n%s", out)
 	}
-	// Silently searching two tenants when three were asked for is how a
-	// search comes back wrongly empty.
 	if !strings.Contains(out, "Tractor Supply: 1 elements") {
 		t.Errorf("the reachable tenant was not reported:\n%s", out)
 	}
 }
 
 func TestResultsKeepTenantOrderThoughTenantsLoadTogether(t *testing.T) {
-	// Tenants load concurrently now, so the answer must not depend on which
-	// one finishes first.
 	st := searchStore(t)
 	seedCache(t, st, "111", time.Now().Add(-time.Minute), []api.Element{
 		{ID: "e1", Name: "rtr-b"}, {ID: "e2", Name: "rtr-d"},
@@ -425,10 +399,6 @@ func TestWhichTenantsABrowserSignInWouldRescue(t *testing.T) {
 		{"nothing wrong", loaded{note: "refreshed"}, false},
 		{"no credential at all", loaded{err: interactive}, true},
 		{
-			// The subtle one: falling back to a stale cache leaves err nil,
-			// because the tenant did produce elements. It is still a tenant a
-			// sign-in would bring up to date, and treating it as fine is how
-			// an 18-hour-old answer survives a successful sign-in.
 			name: "answered, but only from a stale cache",
 			l:    loaded{els: []api.Element{{ID: "e1"}}, stale: interactive},
 			want: true,
@@ -446,8 +416,6 @@ func TestWhichTenantsABrowserSignInWouldRescue(t *testing.T) {
 }
 
 func TestAStaleAnswerIsMarkedForRetryNotTakenAsGood(t *testing.T) {
-	// End to end through the loader: no credential, a cache past the window,
-	// so the search answers but records that a sign-in would help.
 	st := searchStore(t)
 	if err := st.SaveConfig(&config.Config{Tenants: []config.Tenant{
 		{Name: "Tractor Supply", TSGID: "111", Added: true, Auth: config.AuthBrowser},
@@ -474,7 +442,6 @@ func TestAStaleAnswerIsMarkedForRetryNotTakenAsGood(t *testing.T) {
 }
 
 func TestRenewAsksBeforeOpeningABrowser(t *testing.T) {
-	// A sign-in a search takes on its own is one it can take on every run.
 	st := searchStore(t)
 	tenants := mustScope(t, st)
 
@@ -512,7 +479,6 @@ func TestRenewAsksBeforeOpeningABrowser(t *testing.T) {
 func TestAScriptIsToldWhatToRunRatherThanAsked(t *testing.T) {
 	st := searchStore(t)
 	var log bytes.Buffer
-	// Nothing to read from: a question here would hang a cron job for good.
 	fl := newFleet(st, nil, &log, false, false)
 	if fl.renew(context.Background(), mustScope(t, st)) {
 		t.Error("renew() = true for a scripted run")
@@ -528,8 +494,6 @@ func TestAScriptIsToldWhatToRunRatherThanAsked(t *testing.T) {
 
 func TestABrowserIsNeverOpenedWithoutATerminal(t *testing.T) {
 	t.Cleanup(func() { flagNoLogin = false })
-	// stderr under `go test` is not a terminal, which is the condition a
-	// piped or cron-driven run meets.
 	if canSignIn() {
 		t.Error("canSignIn() = true with no terminal, want a scripted run left alone")
 	}
@@ -541,8 +505,6 @@ func TestABrowserIsNeverOpenedWithoutATerminal(t *testing.T) {
 
 func TestTenantsNeedingACredentialAreNamedWithTheWayOut(t *testing.T) {
 	st := searchStore(t)
-	// Browser tenants with no stored credential and no browser profile on
-	// disk, which fails as ErrNoSession before anything is launched.
 	if err := st.SaveConfig(&config.Config{Tenants: []config.Tenant{
 		{Name: "Tractor Supply", TSGID: "111", Added: true, Auth: config.AuthBrowser},
 	}}); err != nil {
@@ -553,8 +515,6 @@ func TestTenantsNeedingACredentialAreNamedWithTheWayOut(t *testing.T) {
 
 	flagSearch = "s0100"
 	var log bytes.Buffer
-	// Not interactive, so no window: the message is all a scripted run gets,
-	// and it has to be the one that actually fixes things.
 	hits, err := newFleet(st, nil, &log, false, false).find(
 		context.Background(), mustScope(t, st), search.Parse(flagSearch))
 	if err != nil {

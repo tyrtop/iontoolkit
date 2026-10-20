@@ -63,7 +63,6 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
 
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		_ = godotenv.Load()
-		// Before anything resolves a store: the themes are read when one is.
 		app.ThemesFile = flagThemes
 		return loadFixtures(cmd.ErrOrStderr())
 	},
@@ -107,20 +106,11 @@ func init() {
 	pf.IntVarP(&app.Defaults.Concurrency, "concurrency", "n", app.Defaults.Concurrency, "elements worked in parallel")
 	pf.DurationVar(&app.Defaults.ElementTimeout, "element-timeout", app.Defaults.ElementTimeout, "per-element deadline including the CLI session")
 	pf.DurationVar(&app.Defaults.SessionTimeout, "session-timeout", app.Defaults.SessionTimeout, "deadline for a single login attempt")
-	// Defaults to 1 to prevent executing config changes unintentionally.
-	// The toolkit socket sometimes does not come up at all, so a dial is
-	// retried. A session that connected is never re-run: its commands may
-	// already have taken effect on the device.
 	pf.IntVar(&app.Defaults.DialAttempts, "dial-attempts", app.Defaults.DialAttempts, "times to dial an element before dropping it")
 	pf.DurationVar(&app.Defaults.DialTimeout, "dial-timeout", app.Defaults.DialTimeout, "how long one dial may take")
 	pf.IntVar(&app.Defaults.DialAttempts, "attempts", app.Defaults.DialAttempts, "deprecated alias for --dial-attempts")
 	_ = pf.MarkDeprecated("attempts", "use --dial-attempts; the retry now re-dials rather than re-running the session")
-	// Better to turn paging off than to scrape the pager, where the device
-	// allows it. The default works on 6.3.4; the flag is for trying another
-	// firmware's syntax without a rebuild.
 	pf.StringVar(&app.Defaults.PagerOff, "pager-off", app.Defaults.PagerOff, "command sent after login to stop the device paging (empty sends nothing)")
-	// For firmware that pages anyway. The prompt text varies, so it's config
-	// rather than a constant.
 	pf.StringArrayVar(&app.Defaults.PagerPrompts, "pager-prompt", app.Defaults.PagerPrompts, "line to answer with a space when the device pages; repeatable, and empty turns it off")
 	pf.DurationVar(&app.Defaults.HTTPTimeout, "http-timeout", app.Defaults.HTTPTimeout, "timeout for the element lookup")
 	pf.Float64Var(&app.Defaults.RPS, "rps", app.Defaults.RPS, "API requests per second")
@@ -136,8 +126,6 @@ func init() {
 	pf.StringVar(&flagThemes, "themes", "", "YAML file of colour schemes to add to the built-in ones, instead of themes.yaml in the config directory")
 	pf.StringVar(&app.Defaults.TSGID, "tsg", "", "tenant service group ID (overrides SCM_TSG_ID)")
 	pf.StringVar(&flagFormat, "format", "", `batch output format: "json", "jsonl", "text", "table" or "csv" (default from settings, else json)`)
-	// Only the tabular formats have rows to sort, but the flag is accepted
-	// whatever the format so a saved orientation is not a reason to re-run.
 	pf.StringVar(&flagOrient, "orientation", "", `row order for "table" and "csv": "ion" groups each element's commands, "command" puts one command across the fleet together (default from settings, else ion)`)
 	pf.StringVar(&flagOut, "out", "", `write batch output to this file ("-" is stdout; default from settings)`)
 

@@ -13,7 +13,6 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// Orientation is a sort over the same rows, never a pivot.
 const (
 	OrientION     = "ion"
 	OrientCommand = "command"
@@ -21,8 +20,6 @@ const (
 
 var orientations = []string{OrientION, OrientCommand}
 
-// OrientationLabel names an orientation for a header or a status line, where
-// "ion" alone does not say what it did to the rows.
 func OrientationLabel(o string) string {
 	if o == OrientCommand {
 		return "command-first"
@@ -56,9 +53,6 @@ func NextOrientation(o string) string {
 	return OrientION
 }
 
-// tabularHeader is the column order for both tabular formats. Orientation
-// sorts rows; it never moves a column, so one run stays diffable against
-// another taken the other way round.
 var tabularHeader = []string{"element", "element_id", "model", "software", "connected", "command", "output", "error"}
 
 const (
@@ -68,8 +62,6 @@ const (
 )
 
 type tabularRow struct {
-	// The order given rather than the order finished: elements complete
-	// concurrently, and a run has to sort the same way every time.
 	elem, cmd int
 	cells     []string
 }
@@ -78,12 +70,10 @@ func tabularRows(results []sase.Result) []tabularRow {
 	var rows []tabularRow
 	for i, r := range results {
 		if r.ElementID == "" && r.Error == "" && len(r.Commands) == 0 {
-			continue // a gap Add's index padding left for an element that never reported
+			continue
 		}
 		meta := []string{r.Name, r.ElementID, r.Model, r.Software, strconv.FormatBool(r.Connected)}
 
-		// An element that failed before any command ran still gets a row, or a
-		// run where every dial failed would write nothing but a header.
 		if len(r.Commands) == 0 {
 			rows = append(rows, tabularRow{elem: i, cmd: -1, cells: append(slices.Clone(meta), "", "", r.Error)})
 			continue
@@ -95,9 +85,6 @@ func tabularRows(results []sase.Result) []tabularRow {
 	return rows
 }
 
-// An element that failed before any command has no command to group under, so
-// it leads in command-first: a run's failures read better together than
-// scattered between commands they never reached.
 func orderRows(rows []tabularRow, orient string) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		a, b := rows[i], rows[j]
@@ -163,8 +150,6 @@ func (s *tableSink) Close() error {
 	grid = append(grid, tabularHeader)
 	for _, r := range rows {
 		cells := slices.Clone(r.cells)
-		// A table is one line per command. The full text is what json, jsonl
-		// and text are for, and csv keeps it too.
 		cells[colOutput] = flattenCell(cells[colOutput])
 		cells[colError] = flattenCell(cells[colError])
 		grid = append(grid, cells)
@@ -182,9 +167,6 @@ func (s *tableSink) Close() error {
 	return err
 }
 
-// elasticMin is the floor the shrinkable columns stop at. Below it a cell says
-// nothing at all, and the row is better cut by the line truncation than padded
-// out with columns of one character each.
 const elasticMin = 12
 
 const colGap = "  "
@@ -205,10 +187,6 @@ func columnWidths(grid [][]string, width int) []int {
 	return widths
 }
 
-// Zero width is how the renderers are told to skip a column. A clean run's
-// error column is the case that matters: five columns and a gap that the
-// output was going to be read in. Nothing is dropped without a width to fit,
-// where the full header is worth more than the space.
 func dropEmptyColumns(grid [][]string, widths []int, width int) {
 	if width <= 0 || len(grid) < 2 {
 		return
@@ -227,10 +205,6 @@ func dropEmptyColumns(grid [][]string, widths []int, width int) {
 	}
 }
 
-// Output gives up its width before error does, because json and csv still hold
-// the full output while a cut-off error is all a failed row has. The
-// identifying columns never shrink: a truncated 19-digit element ID reads as a
-// different, valid ID.
 func fitWidths(widths []int, width int) {
 	if width <= 0 {
 		return
@@ -276,8 +250,6 @@ func renderRule(widths []int, width int) string {
 	return fitLine(strings.Join(parts, colGap), width)
 }
 
-// fitLine trims the padding off the last column before truncating, so a narrow
-// terminal spends its columns on content rather than on trailing blanks.
 func fitLine(line string, width int) string {
 	line = strings.TrimRight(line, " ")
 	if width > 0 {

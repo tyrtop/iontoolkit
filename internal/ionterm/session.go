@@ -16,8 +16,6 @@ import (
 type Conn interface {
 	Read(ctx context.Context) (websocket.MessageType, []byte, error)
 	Write(ctx context.Context, typ websocket.MessageType, p []byte) error
-	// Ping must be answered by the peer. An idle ION shell sends nothing for
-	// hours, so silence alone cannot tell a hang from a quiet prompt.
 	Ping(ctx context.Context) error
 	Close(code websocket.StatusCode, reason string) error
 }
@@ -35,10 +33,6 @@ type Session struct {
 	emu  *vt.SafeEmulator
 	conn Conn
 
-	// SafeEmulator locks each of its own methods, but Scrollback() hands back
-	// the buffer itself and the lock is gone by the time its lines are read.
-	// This covers a write against the reads that walk them, which is all that
-	// is needed: ionterm owns every emulator call site.
 	emuMu sync.Mutex
 
 	keys   chan uv.KeyEvent
@@ -56,27 +50,17 @@ type Session struct {
 	line     []rune
 	lastSeen time.Time
 
-	// Snapshotted at Open so a session's cadence cannot change under its own
-	// liveness loop.
 	pingEvery time.Duration
 	pongWait  time.Duration
 	handshake time.Duration
 }
 
-// A dial that answers nothing at all is still bounded, but once the socket is
-// up liveness comes from pongs rather than the clock: a slow device that keeps
-// answering is not hung, and one that stops is, whatever the elapsed time.
 var (
-	pingEvery = 15 * time.Second
-	pongWait  = 10 * time.Second
-	// A socket that pongs but never sends a prompt still has to be given up
-	// on: autologin has nothing to answer, and there is no traffic to measure.
+	pingEvery         = 15 * time.Second
+	pongWait          = 10 * time.Second
 	handshakeDeadline = 20 * time.Second
 )
 
-// SetLivenessForTest shortens the ping cadence so another package's tests can
-// reach a hang without waiting out the real one, and restores it afterwards.
-// Sessions snapshot these at Open, so it must be called before one is opened.
 func SetLivenessForTest(ping, pong time.Duration) (restore func()) {
 	oldPing, oldPong := pingEvery, pongWait
 	pingEvery, pongWait = ping, pong
@@ -189,11 +173,7 @@ func (s *Session) pumpKeys(ctx context.Context) {
 	}
 }
 
-// liveness replaces a flat deadline. Traffic is proof enough; only a quiet
-// connection is pinged, and only an unanswered ping is a hang.
 func (s *Session) liveness(ctx context.Context) {
-	// The handshake is a one-shot deadline because there is no traffic yet to
-	// measure; everything after it is paced by pongs.
 	hs := time.NewTimer(s.handshake)
 	defer hs.Stop()
 	t := time.NewTicker(s.pingEvery)
@@ -243,9 +223,6 @@ func (s *Session) liveness(ctx context.Context) {
 	}
 }
 
-// markHung records a connection that stopped answering. It is kept apart from
-// err because it is recoverable: the user can dial the element again, which
-// err offers no route to.
 func (s *Session) markHung() {
 	s.mu.Lock()
 	if s.err == nil && !s.closed && !s.ended {
@@ -255,18 +232,14 @@ func (s *Session) markHung() {
 	s.markDirty()
 }
 
-// Answered reports whether the device has sent anything at all. The socket
-// coming up proves nothing about the appliance: the SASE side accepts a
-// toolkit websocket for an element that is not there, and such a session sits
-// mute until the handshake deadline fails it. The first byte is the only
-// evidence there is an ION on the other end.
+// the SASE side accepts a toolkit websocket for an element that is not there,
+// and that session sits mute until the handshake deadline fails it
 func (s *Session) Answered() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.gotData
 }
 
-// Hung is a session whose connection stopped answering pings.
 func (s *Session) Hung() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -279,8 +252,6 @@ func (s *Session) markDirty() {
 	}
 }
 
-// cleanHangUp is what typing "exit" looks like from here: the device closes the
-// socket. A torn connection is a failure the user needs to see.
 func cleanHangUp(err error) bool {
 	switch websocket.CloseStatus(err) {
 	case websocket.StatusNormalClosure, websocket.StatusGoingAway, websocket.StatusNoStatusRcvd:
@@ -289,8 +260,6 @@ func cleanHangUp(err error) bool {
 	return errors.Is(err, io.EOF)
 }
 
-// end records no error, so the tab closes instead of reporting a failure the
-// user caused on purpose.
 func (s *Session) end() {
 	s.mu.Lock()
 	if s.err == nil && !s.closed {

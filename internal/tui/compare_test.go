@@ -11,8 +11,6 @@ import (
 	"tyrtop.com/iontk/internal/dataview"
 )
 
-// A device that answers one question the way the portal does and one it does
-// not, which is the whole point of the comparison.
 const compareFixtureYAML = `
 tenants:
   - name: Acme Co
@@ -31,10 +29,6 @@ tenants:
             Model	: ion 9999
 `
 
-// The view the test compares with. It takes the name of a built-in, which
-// replaces it: the shipped Overview comparison asks about fields the fixture
-// derives from an element's name, and this one asks about the two the fixture
-// file above states outright.
 const compareViewYAML = `
 views:
   - name: Overview
@@ -62,8 +56,6 @@ views:
           device: "{{ kv .cli.dev \"Serial\" }}"
 `
 
-// The explicit keypress end to end: one session to the playback device, the
-// portal read again beside it, and a mark per row.
 func TestCompareAsksTheDeviceAndMarksEachRow(t *testing.T) {
 	useViews(t, compareViewYAML)
 	m, set := fixtureTUIWith(t, compareFixtureYAML)
@@ -75,8 +67,6 @@ func TestCompareAsksTheDeviceAndMarksEachRow(t *testing.T) {
 	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	// Nothing has been asked of the device yet: the portal half of the mode
-	// is credential-free, and the page says what the key is for.
 	if got := plain(m.dataPage(m.data[0]).String()); !strings.Contains(got, "c asks the device") {
 		t.Errorf("the page does not offer the comparison:\n%s", got)
 	}
@@ -95,23 +85,20 @@ func TestCompareAsksTheDeviceAndMarksEachRow(t *testing.T) {
 	for _, want := range []string{
 		"CLI check", "dump device status",
 		"CHECK", "PORTAL", "DEVICE",
-		"✓ Name",   // both sides say store-0003-rtr-01
-		"✗ Model",  // the portal says ion 1200, the device ion 9999
-		"· Serial", // the device prints no serial, which is not a disagreement
+		"✓ Name",
+		"✗ Model",
+		"· Serial",
 		"ion 9999",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the comparison is missing %q:\n%s", want, page)
 		}
 	}
-	// The marks may be below the window, so the footer carries the count.
 	if got := m.status; !strings.Contains(got, "1 of 3") {
 		t.Errorf("status = %q, want the number of disagreements", got)
 	}
 }
 
-// A comparison logs in to the appliance, so it is the one action in this mode
-// that needs a device credential, and it says so rather than dialling.
 func TestCompareWithoutADeviceLoginAsksForOne(t *testing.T) {
 	useViews(t, compareViewYAML)
 	m, set := fixtureTUIWith(t, compareFixtureYAML)
@@ -140,16 +127,12 @@ func TestCompareWithoutADeviceLoginAsksForOne(t *testing.T) {
 	}
 }
 
-// The gate is checked before the dial: an element that is not clustered is
-// never asked about HA, and the heading does not appear on its page either.
 func TestComparisonsTheElementCannotAnswerAreNotOffered(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
 	m.mode = modeData
 	m.rebuildRows()
 
-	// The HA element of the pair, then a plain spoke in another tenant-less
-	// site: the fixture file marks only the first two as clustered.
 	clustered := set.Tenants[0].Elements[0]
 	next, cmd := m.openDataTabs([]sessionTarget{{eid: clustered.ID, name: clustered.Name, tsg: m.tenant.TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
@@ -175,8 +158,6 @@ func TestComparisonsTheElementCannotAnswerAreNotOffered(t *testing.T) {
 	}
 }
 
-// A dial that fails is reported on the page rather than taking it down: the
-// portal half is still good.
 func TestAFailedComparisonLeavesThePageReadable(t *testing.T) {
 	useViews(t, compareViewYAML)
 	m, set := fixtureTUIWith(t, compareFixtureYAML)
@@ -199,8 +180,6 @@ func TestAFailedComparisonLeavesThePageReadable(t *testing.T) {
 	}
 }
 
-// useViews points --views at a file for the length of one test, which is also
-// how a --fixtures run gets views of its own.
 func useViews(t *testing.T, body string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "views.yaml")
@@ -211,15 +190,11 @@ func useViews(t *testing.T, body string) {
 	t.Cleanup(func() { Views = "" })
 }
 
-// runCompare runs the comparison the keypress queued and feeds the answer
-// back in, the way the runtime would when the session finishes.
 func runCompare(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
 	t.Helper()
 	if cmd == nil {
 		t.Fatal("no command to run")
 	}
-	// Run them one at a time and stop at the comparison: the batch also holds
-	// the spinner tick, which would sit out a frame for nothing.
 	cmds := []tea.Cmd{cmd}
 	if batch, ok := cmd().(tea.BatchMsg); ok {
 		cmds = batch

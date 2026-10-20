@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-// jwt builds an unsigned token whose payload is claims. Only the payload is
-// read, so the header and signature are placeholders.
 func jwt(t *testing.T, claims map[string]any) string {
 	t.Helper()
 	body, err := json.Marshal(claims)
@@ -113,7 +111,6 @@ func TestIdentityFromMalformedTokens(t *testing.T) {
 		{IDToken: "a.!!!notbase64!!!.c"},
 		{IDToken: "eyJhbGciOiJSUzI1NiJ9." + base64.RawURLEncoding.EncodeToString([]byte("{not json")) + ".sig"},
 	} {
-		// The point is that reading a junk token yields nothing rather than panicking.
 		id := identityFrom(tok)
 		if id.Name != "" || id.Email != "" {
 			t.Errorf("identityFrom(%v) = %+v, want empty", tok, id)

@@ -1,11 +1,3 @@
-// Package fixture is iontk's testing mode: fake tenants, elements and CLI
-// sessions read from a YAML file, so the TUI and batch runs can be exercised
-// with no appliance and no credentials.
-//
-// It is deliberately not a mock. The REST calls go through the real client over
-// a transport that answers them, and a session goes through the real autologin
-// and pager code against a device that plays back the login exchange. What is
-// fake is the appliance, not iontk.
 package fixture
 
 import (
@@ -20,13 +12,9 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-// Set is a loaded fixture file.
 type Set struct {
-	Tenants []Tenant `yaml:"tenants"`
-	// UnknownResponse is what the device answers a command it has no response
-	// for. "{command}" is replaced with what was typed. The default text is
-	// invented, not observed on an appliance.
-	UnknownResponse string `yaml:"unknown_response"`
+	Tenants         []Tenant `yaml:"tenants"`
+	UnknownResponse string   `yaml:"unknown_response"`
 }
 
 type Tenant struct {
@@ -42,21 +30,15 @@ type User struct {
 }
 
 type Element struct {
-	Name      string `yaml:"name"`
-	ID        string `yaml:"id"`
-	HWID      string `yaml:"hw_id"`
-	Model     string `yaml:"model"`
-	Software  string `yaml:"software"`
-	Site      string `yaml:"site"`
-	Connected bool   `yaml:"connected"`
-	// HA puts the element in a spoke HA cluster with the site's other HA
-	// elements, so the cluster status endpoint has something to answer.
-	HA bool `yaml:"ha"`
-	// Pages makes long output stop on a pager prompt and wait for a space,
-	// which is the one device behaviour that cost a hardware round trip. The
-	// prompt is the one an ion 1200-s running 6.3.4-b2 printed.
-	Pages bool `yaml:"pages"`
-	// PageLines is how many lines go by before it pages. Zero means the default.
+	Name      string            `yaml:"name"`
+	ID        string            `yaml:"id"`
+	HWID      string            `yaml:"hw_id"`
+	Model     string            `yaml:"model"`
+	Software  string            `yaml:"software"`
+	Site      string            `yaml:"site"`
+	Connected bool              `yaml:"connected"`
+	HA        bool              `yaml:"ha"`
+	Pages     bool              `yaml:"pages"`
 	PageLines int               `yaml:"page_lines"`
 	Responses map[string]string `yaml:"responses"`
 
@@ -71,8 +53,6 @@ const (
 	defaultPageLines = 20
 	defaultUnknown   = "% unknown command: {command}"
 
-	// Verified on an ion 1200-s running 6.3.4-b2. Two of ioncli.DefaultPagers
-	// match it, which is why the scraper cuts the earliest match in the line.
 	pagerPrompt = "--More--(4%)[Press space to continue, 'q' to quit.]"
 )
 
@@ -83,8 +63,6 @@ func Load(path string) (*Set, error) {
 	}
 	var s Set
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
-	// A misspelled key is the whole failure mode of a hand-written fixture, and
-	// silently ignoring it looks like the fixture not working.
 	dec.KnownFields(true)
 	if err := dec.Decode(&s); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
@@ -129,8 +107,6 @@ func (s *Set) normalize() error {
 				return fmt.Errorf("tenant %s: element %d has no name", t.Name, j+1)
 			}
 			if el.ID == "" {
-				// 19 digits, because that is what the API returns and what the
-				// filter's own tests are built around.
 				el.ID = syntheticID("element/"+t.TSGID+"/"+el.Name, 19)
 			}
 			if where, dup := seen[el.ID]; dup {
@@ -155,8 +131,6 @@ func (s *Set) normalize() error {
 	return nil
 }
 
-// syntheticID is a stable digit string for a name, so an element keeps its ID
-// across runs and a cached fixture still resolves.
 func syntheticID(seed string, digits int) string {
 	sum := sha256.Sum256([]byte(seed))
 	var b strings.Builder
@@ -164,22 +138,18 @@ func syntheticID(seed string, digits int) string {
 		fmt.Fprintf(&b, "%019d", binary.BigEndian.Uint64(sum[i%24:])%1e19)
 	}
 	out := b.String()[:digits]
-	// A leading zero would read as a shorter number than the API ever returns.
 	if out[0] == '0' {
 		out = "1" + out[1:]
 	}
 	return out
 }
 
-// SavedTenants are the tenants to write into the config store, so the TUI's
-// ordinary tenant flow is what runs.
 func (s *Set) SavedTenants() []config.Tenant {
 	out := make([]config.Tenant, 0, len(s.Tenants))
 	for _, t := range s.Tenants {
 		ct := config.Tenant{
-			Name:  t.Name,
-			TSGID: t.TSGID,
-			// A service account, because the browser legs would need a browser.
+			Name:     t.Name,
+			TSGID:    t.TSGID,
 			Auth:     config.AuthServiceAccount,
 			ClientID: "fixture",
 			Added:    true,
@@ -192,8 +162,6 @@ func (s *Set) SavedTenants() []config.Tenant {
 	return out
 }
 
-// Passwords are the device logins to put in the store's secrets, keyed the way
-// the rest of iontk keys them.
 func (s *Set) Passwords() map[string]string {
 	out := map[string]string{}
 	for _, t := range s.Tenants {
@@ -213,8 +181,6 @@ func (s *Set) tenant(tsg string) *Tenant {
 	return nil
 }
 
-// element finds an element by ID in any tenant: a session is opened with an ID
-// and nothing else.
 func (s *Set) element(eid string) *Element {
 	for i := range s.Tenants {
 		for j := range s.Tenants[i].Elements {
@@ -258,8 +224,6 @@ func (e Element) apiElement() api.Element {
 		FIPSMode:     "non_fips",
 	}
 	if e.HA {
-		// A real clustered spoke left the record's own cluster_id null and
-		// carried the cluster here, so the fixture does the same.
 		el.SpokeHA = &api.SpokeHA{
 			ClusterID:       e.clusterID(),
 			Enable:          true,
@@ -273,9 +237,6 @@ func (e Element) apiElement() api.Element {
 	return el
 }
 
-// siteID is derived from the site name, because the portal gives elements a
-// site ID and names are only resolvable through the sites endpoint. An element
-// with no site keeps the API's own "unassigned" marker.
 func (e Element) siteID() string {
 	if e.Site == "" {
 		return ""
@@ -301,7 +262,6 @@ func (s *Set) apiSites(tsg string) []api.Site {
 	return out
 }
 
-// login reports whether a user and password pair is one of the tenant's.
 func (t *Tenant) login(user, pass string) bool {
 	for _, u := range t.Users {
 		if u.Name == user {

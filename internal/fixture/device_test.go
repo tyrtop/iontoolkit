@@ -42,8 +42,6 @@ func TestASessionRunsTheRealLoginAndReturnsFixtureOutput(t *testing.T) {
 	if len(outs) != 1 {
 		t.Fatalf("got %d command outputs, want 1", len(outs))
 	}
-	// Exactly the fixture's text: the echoed command and the prompt must not
-	// leak into the output, which is what the clean-up code is for.
 	want := "Serial     : FAKE0001\nUptime     : 4 days"
 	if outs[0].Output != want {
 		t.Errorf("output = %q, want %q", outs[0].Output, want)
@@ -57,8 +55,6 @@ func TestTheWrongPasswordIsRejectedRatherThanAccepted(t *testing.T) {
 	ctx, cancel := contextWithTimeout(t, 2*time.Second)
 	defer cancel()
 
-	// A fixture that let any password through would make autologin look right
-	// when it was sending the wrong thing.
 	_, err := s.SessionClient("", nil).
 		ToolkitSession(ctx, el.ID, el.Name+"#", "admin", "wrong", []string{"dump device status"})
 	if err == nil {
@@ -103,8 +99,6 @@ func TestWithNothingAnsweringThePagerTheReadTimesOutCarryingTheTail(t *testing.T
 	ctx, cancel := contextWithTimeout(t, 500*time.Millisecond)
 	defer cancel()
 
-	// The bug phase 0b fixed: without either defence a paging command uses up
-	// the whole session timeout, and the tail is the only clue why.
 	_, err := s.SessionClient("", []string{}).
 		ToolkitSession(ctx, el.ID, el.Name+"#", "admin", "ion", []string{"help"})
 	if err == nil {
@@ -124,8 +118,6 @@ func TestAnUnknownCommandAnswersPlausibly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToolkitSession() error = %v", err)
 	}
-	// Empty output would teach a tutorial nothing; the failure case is one of
-	// the things a fixture exists to show.
 	if !strings.Contains(outs[0].Output, "unknown command") || !strings.Contains(outs[0].Output, "dump nonsense") {
 		t.Errorf("output = %q, want it to name the command it rejected", outs[0].Output)
 	}
@@ -153,8 +145,6 @@ func TestATUISessionLogsInThroughTheRealAutologin(t *testing.T) {
 	}
 	t.Cleanup(sess.Close)
 
-	// The pane is what the user sees, so the prompt arriving there is the proof
-	// that autologin answered both prompts.
 	waitFor(t, func() bool { return strings.Contains(pane(sess), el.Name+"#") })
 	if got := pane(sess); strings.Contains(got, "Login incorrect") {
 		t.Errorf("autologin was rejected:\n%s", got)
@@ -172,8 +162,6 @@ func TestATUISessionLogsInThroughTheRealAutologin(t *testing.T) {
 
 func pane(s *ionterm.Session) string { return s.Render() }
 
-// waitFor polls because the device answers on its own goroutine; a session has
-// no "settled" to wait on.
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)

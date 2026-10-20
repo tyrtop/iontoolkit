@@ -10,8 +10,6 @@ import (
 	"tyrtop.com/iontk/internal/ionterm"
 )
 
-// Dialer hands out playback devices. It satisfies ionterm.Dialer, so a TUI
-// session in fixture mode goes through the real pane, autologin and emulator.
 func (s *Set) Dialer() ionterm.Dialer { return dialer{s} }
 
 type dialer struct{ set *Set }
@@ -23,8 +21,6 @@ func (d dialer) DialToolkit(ctx context.Context, eid string, cols, rows int) (io
 func (s *Set) dial(eid string) (*conn, error) {
 	el := s.element(eid)
 	if el == nil {
-		// The shape a rejected handshake takes, so the dial error paths are the
-		// ones being exercised.
 		return nil, fmt.Errorf("expected handshake response status 101 but got 404")
 	}
 	t := s.tenant(el.tsg)
@@ -38,14 +34,8 @@ func (s *Set) dial(eid string) (*conn, error) {
 	return c, nil
 }
 
-// What a read or write gets after the device hung up. The real client reports a
-// websocket close error, and ionterm tells a clean hang-up from a failure by
-// inspecting it.
 var errClosed = websocket.CloseError{Code: websocket.StatusNormalClosure}
 
-// conn is a websocket-shaped pipe to a playback device. It satisfies both
-// ionterm.Conn and ioncli.Conn, which is what lets one device serve the TUI's
-// sessions and a batch run's.
 type conn struct {
 	out    chan []byte
 	in     chan []byte
@@ -69,7 +59,6 @@ func (c *conn) Read(ctx context.Context) (websocket.MessageType, []byte, error) 
 }
 
 func (c *conn) Write(ctx context.Context, _ websocket.MessageType, p []byte) error {
-	// Copied: the caller owns the buffer, and the device reads it later.
 	b := append([]byte(nil), p...)
 	select {
 	case <-ctx.Done():
@@ -81,8 +70,6 @@ func (c *conn) Write(ctx context.Context, _ websocket.MessageType, p []byte) err
 	}
 }
 
-// A playback device always answers, so there is nothing to time out. Returning
-// an error once closed is what stops ionterm calling it a hang.
 func (c *conn) Ping(ctx context.Context) error {
 	select {
 	case <-c.closed:
@@ -110,8 +97,6 @@ func (c *conn) send(s string) bool {
 	}
 }
 
-// line collects typed bytes up to a carriage return, which is how the device
-// sees a command: iontk writes keystrokes, not lines.
 func (c *conn) line() (string, bool) {
 	var b strings.Builder
 	for {
@@ -124,7 +109,6 @@ func (c *conn) line() (string, bool) {
 				case '\r', '\n':
 					return b.String(), true
 				case 0x7f, '\b':
-					// Backspace, so a typed-then-corrected command still works.
 					if s := b.String(); s != "" {
 						b.Reset()
 						b.WriteString(s[:len(s)-1])
@@ -142,13 +126,10 @@ func (c *conn) serve(d *device) {
 	d.run(c)
 }
 
-// device is one appliance's CLI: the login exchange, then a command loop.
 type device struct {
-	set    *Set
-	tenant *Tenant
-	el     *Element
-	// pagingOff is set by the command --pager-off sends, so the fixture honours
-	// the thing iontk does to avoid the pager.
+	set       *Set
+	tenant    *Tenant
+	el        *Element
 	pagingOff bool
 }
 
@@ -167,8 +148,6 @@ func (d *device) run(c *conn) {
 		if !ok {
 			return
 		}
-		// The device echoes what is typed; without this the pane stays blank
-		// while autologin works, which is the bug a fixture should catch.
 		if !c.send(user+"\r\n") || !c.send("Password: ") {
 			return
 		}
@@ -196,9 +175,6 @@ func (d *device) run(c *conn) {
 		if !ok {
 			return
 		}
-		// The echo redraws the prompt and the command from column zero, which
-		// is the frame shape the appliance produces: the pane overwrites the
-		// prompt it already has, and ioncli finds the marker it cuts output at.
 		if !c.send("\r" + d.prompt() + " " + cmd + "\r\n") {
 			return
 		}
@@ -229,8 +205,6 @@ func (d *device) response(cmd string) string {
 	return strings.ReplaceAll(d.set.UnknownResponse, "{command}", cmd) + "\n"
 }
 
-// write sends a command's output, pausing on the pager prompt when the element
-// is set to page and paging has not been turned off.
 func (d *device) write(c *conn, out string) bool {
 	out = strings.TrimRight(out, "\n")
 	if out == "" {
@@ -250,15 +224,12 @@ func (d *device) write(c *conn, out string) bool {
 		if end == len(lines) {
 			break
 		}
-		// No newline after the prompt: the device stops there and waits, which
-		// is what makes the scraper's last-line matching necessary.
 		if !c.send(pagerPrompt) {
 			return false
 		}
 		if _, ok := d.awaitSpace(c); !ok {
 			return false
 		}
-		// Erased in place, the way the appliance does it.
 		if !c.send(strings.Repeat("\b", len(pagerPrompt))) {
 			return false
 		}
@@ -266,8 +237,6 @@ func (d *device) write(c *conn, out string) bool {
 	return true
 }
 
-// awaitSpace waits for the keypress the pager asked for. A q gives up on the
-// rest, which is the other half of what the prompt offers.
 func (d *device) awaitSpace(c *conn) (quit bool, ok bool) {
 	for {
 		select {

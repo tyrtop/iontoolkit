@@ -31,8 +31,6 @@ tenants:
         site: Store 0100
 `
 
-// fixtureTUI is the whole startup path in fixture mode: a seeded store, a real
-// client over the fixture transport, and the tenant load the TUI itself runs.
 func fixtureTUI(t *testing.T) (tuiModel, *fixture.Set) {
 	t.Helper()
 	return fixtureTUIWith(t, fixtureYAML)
@@ -86,8 +84,6 @@ func TestFixtureModeFillsTheElementList(t *testing.T) {
 			t.Errorf("the list is missing %q:\n%s", want, got)
 		}
 	}
-	// Site names come from the sites endpoint, so a fixture that did not answer
-	// it would show a raw 19-digit id here.
 	if !strings.Contains(got, "Store 0003") {
 		t.Errorf("site name unresolved:\n%s", got)
 	}
@@ -106,7 +102,6 @@ func TestFixtureModeOpensASessionThroughTheRealPane(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("openSession queued nothing")
 	}
-	// The command dials and opens; running it is what a real tick would do.
 	runCmd(t, cmd)
 
 	waitForTUI(t, func() bool {
@@ -121,8 +116,6 @@ func TestFixtureModeOpensASessionThroughTheRealPane(t *testing.T) {
 	if err := s.Err(); err != nil {
 		t.Fatalf("session error = %v", err)
 	}
-	// Autologin typed both answers; a pane still sitting on the password prompt
-	// is the failure this is here to catch.
 	if got := s.Render(); strings.Contains(got, "Login incorrect") {
 		t.Errorf("autologin was rejected:\n%s", got)
 	}
@@ -131,7 +124,6 @@ func TestFixtureModeOpensASessionThroughTheRealPane(t *testing.T) {
 	waitForTUI(t, func() bool { return strings.Contains(s.Render(), "FAKE0001") })
 }
 
-// runCmd runs a tea.Cmd, and any batch it is made of, the way the runtime does.
 func runCmd(t *testing.T, cmd tea.Cmd) {
 	t.Helper()
 	if cmd == nil {

@@ -20,13 +20,10 @@ func TestTheRealClientTakesAPortalSnapshotOfAFixtureElement(t *testing.T) {
 	if !ok {
 		t.Fatalf("no config_and_events channel in %+v", snap.Status.Channels)
 	}
-	// The element is connected in the demo file, so the channel that decides
-	// what the portal calls connected has to agree.
 	if !ch.Connected || ch.On == 0 {
 		t.Errorf("channel = %+v, want it connected with a timestamp", ch)
 	}
 
-	// The ports, plus the one vlan interface that carries the security zone.
 	if want := el.ports() + 1; len(snap.Interfaces) != want {
 		t.Fatalf("got %d interfaces, want %d", len(snap.Interfaces), want)
 	}
@@ -44,15 +41,11 @@ func TestTheRealClientTakesAPortalSnapshotOfAFixtureElement(t *testing.T) {
 	if up.Port == nil || !up.Port.Connected {
 		t.Errorf("port = %+v, want the link up", up.Port)
 	}
-	// A port nobody wired up is down, which is what makes an interface list
-	// worth drawing at all.
 	lastPort := snap.Interfaces[el.ports()-1]
 	if lastPort.Status[0].OperationalState != "down" {
 		t.Errorf("last port status = %+v, want it down", lastPort.Status[0])
 	}
 
-	// The vlan interface comes last, and its status has no port block: a real
-	// element answers with port null on anything that is not a physical port.
 	vlan := snap.Interfaces[len(snap.Interfaces)-1]
 	if vlan.Interface.Type != "vlan" || vlan.Interface.UsedFor != "lan" {
 		t.Errorf("last interface = %+v, want the vlan", vlan.Interface)
@@ -89,8 +82,6 @@ func TestADisconnectedFixtureElementHasEveryChannelDown(t *testing.T) {
 	t.Skip("no disconnected element in the demo fixture")
 }
 
-// A pair, because a cluster of one would not show that both members come back
-// from the one endpoint.
 const haPair = `
 tenants:
   - name: Acme Co
@@ -110,8 +101,6 @@ func TestAClusteredElementReportsItsClusterStatus(t *testing.T) {
 	c := fixtureClient(s, tenant.TSGID)
 
 	el := tenant.Elements[0].apiElement()
-	// The cluster id lives in spoke_ha_config, not the record's own
-	// cluster_id, which a real clustered spoke left null.
 	if el.Cluster != "" || el.ClusterID() == "" {
 		t.Fatalf("cluster_id = %q, spoke_ha cluster = %q", el.Cluster, el.ClusterID())
 	}
@@ -126,8 +115,6 @@ func TestAClusteredElementReportsItsClusterStatus(t *testing.T) {
 	if snap.Cluster == nil {
 		t.Fatal("no cluster status for a clustered element")
 	}
-	// Both members of the pair, from the one call, and only the connected one
-	// is active.
 	if len(snap.Cluster.Members) != 2 {
 		t.Fatalf("%d cluster members, want 2: %+v", len(snap.Cluster.Members), snap.Cluster.Members)
 	}
@@ -139,8 +126,6 @@ func TestAClusteredElementReportsItsClusterStatus(t *testing.T) {
 		t.Errorf("the offline peer reads %q, want unknown", got)
 	}
 
-	// An element outside a cluster is not asked about at all, so nothing
-	// fails and nothing is reported.
 	alone := load(t, demo)
 	c2 := fixtureClient(alone, alone.Tenants[0].TSGID)
 	snap2 := c2.ElementSnapshot(t.Context(), alone.Tenants[0].Elements[0].apiElement())
@@ -159,8 +144,6 @@ func TestPortalEndpointsAreTenantScopedToo(t *testing.T) {
 		t.Error("another tenant's element status resolved")
 	}
 
-	// Through our own site, because the site in the path is beside the point:
-	// the element not being this tenant's is what makes it a 404.
 	ours := acme.Elements[0].apiElement()
 	_, err := c.ListInterfaces(t.Context(), ours.SiteID, theirs.ID)
 	if err == nil {

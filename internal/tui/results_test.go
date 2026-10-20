@@ -96,9 +96,6 @@ func TestResultsEnterExpandsInlineNotANewTab(t *testing.T) {
 	}
 }
 
-// An open result scrolls on the keys the list moves on, with the highlight on
-// the line it is scrolled to. It used to close on the first ↑↓, which made
-// reading a screen of output a matter of pgdn and hope.
 func TestAnOpenResultScrollsWithAHighlight(t *testing.T) {
 	m := resultsModel(t)
 	m.height = 20
@@ -123,7 +120,6 @@ func TestAnOpenResultScrollsWithAHighlight(t *testing.T) {
 	if moved.resTable.Cursor() != 0 {
 		t.Errorf("cursor = %d, want the list left where it was", moved.resTable.Cursor())
 	}
-	// j and k do the same, and the highlight is drawn on the line.
 	mm, _ = moved.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 	moved = mm.(tuiModel)
 	if moved.resLine != 2 {
@@ -137,12 +133,10 @@ func TestAnOpenResultScrollsWithAHighlight(t *testing.T) {
 	if got := moved.viewResults(); !strings.Contains(got, ui.StyleRow.Render("")[:4]) {
 		t.Error("no highlight anywhere in the open output")
 	}
-	// The footer says where in the output the highlight is.
 	if got := plain(moved.viewResults()); !strings.Contains(got, "line 2 of") {
 		t.Errorf("the footer does not say where the highlight is:\n%s", got)
 	}
 
-	// Closing hands the keys back to the list.
 	mm, _ = moved.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
 	closed := mm.(tuiModel)
 	if closed.resOpen {
@@ -325,8 +319,6 @@ func TestResultsHeaderNamesTheSaveFormat(t *testing.T) {
 		t.Errorf("results header does not name the format and orientation:\n%s", got)
 	}
 
-	// json has no rows to sort, so naming an orientation would claim something
-	// the save does not do.
 	m.cfg.BatchFormat = output.FormatJSON
 	got := plain(m.viewResults())
 	if !strings.Contains(got, "json") {
@@ -337,12 +329,6 @@ func TestResultsHeaderNamesTheSaveFormat(t *testing.T) {
 	}
 }
 
-// Results arrive in whatever order the elements finish, and the table is in
-// run order, so a later element finishing first and an earlier one landing
-// after it moves every row below it. The cursor has to follow the ION it was
-// on, not the row number it was on -- otherwise the highlight lands on a
-// different element under the user's hands, and an open pane shows one ION's
-// output under another's name.
 func TestTheResultsCursorFollowsItsElementAsResultsArrive(t *testing.T) {
 	m := pickModel(t)
 	m.width, m.height = 100, 30
@@ -359,14 +345,12 @@ func TestTheResultsCursorFollowsItsElementAsResultsArrive(t *testing.T) {
 		m.applyResultFilter()
 	}
 
-	// The last element finishes first, so it is the only row.
 	done(3, "S0100-RTR-04")
 	idx, ok := m.currentResult()
 	if !ok || m.results[idx].Name != "S0100-RTR-04" {
 		t.Fatalf("cursor is on %+v, want the only finished element", m.results[idx])
 	}
 
-	// Now an earlier one lands, which pushes that row down.
 	done(1, "S0100-RTR-02")
 	idx, ok = m.currentResult()
 	if !ok {
@@ -376,14 +360,12 @@ func TestTheResultsCursorFollowsItsElementAsResultsArrive(t *testing.T) {
 		t.Errorf("cursor moved to %s, want it to stay on S0100-RTR-04", got)
 	}
 
-	// And an open pane still shows the element the row names.
 	m.resOpen = true
 	out := plain(m.viewResults())
 	if !strings.Contains(out, "S0100-RTR-04 output") {
 		t.Errorf("the open pane is not the element under the cursor:\n%s", out)
 	}
 
-	// Moving down then having another arrive keeps the new choice too.
 	m.moveResultCursor(-1)
 	before, _ := m.currentResult()
 	name := m.results[before].Name
@@ -394,8 +376,6 @@ func TestTheResultsCursorFollowsItsElementAsResultsArrive(t *testing.T) {
 	}
 }
 
-// The results filter follows the same rule as the others: empty first, leave
-// second.
 func TestBackspacingTheResultsQueryEmptiesItThenLeaves(t *testing.T) {
 	m := resultsModel(t)
 	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))

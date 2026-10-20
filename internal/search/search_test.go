@@ -7,8 +7,6 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-// fleet is the shape the filter bug reports came in on: padded store numbers,
-// two tenants, and a site that resolves to a name.
 func fleet() []Record {
 	sites := SiteMap{
 		"111/s100": "Store 0100",
@@ -67,8 +65,6 @@ func TestEveryTermHasToMatchSomeField(t *testing.T) {
 		want  []string
 	}{
 		{
-			// The case that prompted splitting on whitespace: a term each for
-			// site, model and tenant.
 			name:  "site, model and tenant together",
 			query: "100 1200 tract",
 			want:  []string{"s0100-rtr-01"},
@@ -99,8 +95,6 @@ func TestEveryTermHasToMatchSomeField(t *testing.T) {
 }
 
 func TestOnlyNamesThatContainTheTermMatch(t *testing.T) {
-	// No out-of-order matching: s502 must not reach s1405, and a padded store
-	// number is found by typing it as written.
 	var records []Record
 	for _, el := range []api.Element{
 		{ID: "e1", Name: "s1405-rtr-02", Model: "ion 2000"},
@@ -121,8 +115,6 @@ func TestOnlyNamesThatContainTheTermMatch(t *testing.T) {
 }
 
 func TestTwoCharacterTermsStayLiteral(t *testing.T) {
-	// Two characters are too few to match out of order: nearly everything
-	// would qualify, which makes the filter useless rather than forgiving.
 	for _, r := range fleet() {
 		if !Parse("or").Match(r) {
 			continue
@@ -140,8 +132,6 @@ func TestTwoCharacterTermsStayLiteral(t *testing.T) {
 }
 
 func TestOpaqueIdentifiersNeedTheWholeValue(t *testing.T) {
-	// An element ID is a 19-digit number, so a partial match in one is
-	// coincidence. "1200" found an ion 2000 this way.
 	r := Of(api.Element{
 		ID: "1695401228372008796", Name: "s1405-rtr-01",
 		SiteID: "1695401228372008796", Model: "ion 2000", HWID: "0123456789",
@@ -152,7 +142,6 @@ func TestOpaqueIdentifiersNeedTheWholeValue(t *testing.T) {
 			t.Errorf("query %q matched a partial identifier", partial)
 		}
 	}
-	// The whole value still works, for pasting one in.
 	for _, whole := range []string{"1695401228372008796", "1234567890", "0123456789"} {
 		if !Parse(whole).Match(r) {
 			t.Errorf("query %q did not match the identifier it names in full", whole)
@@ -161,8 +150,6 @@ func TestOpaqueIdentifiersNeedTheWholeValue(t *testing.T) {
 }
 
 func TestAnUnresolvedSiteIsTreatedAsOpaque(t *testing.T) {
-	// When site names do not resolve the column shows a raw ID, which must not
-	// become a substring haystack.
 	el := api.Element{ID: "e1", Name: "s1405-rtr-01", SiteID: "1695401228372008796", Model: "ion 2000"}
 
 	unresolved := Of(el, "111", "Tractor Supply", SiteMap{})
@@ -173,7 +160,6 @@ func TestAnUnresolvedSiteIsTreatedAsOpaque(t *testing.T) {
 		t.Error("a term matched inside an unresolved site id")
 	}
 
-	// A resolved site name is searchable as normal.
 	resolved := Of(el, "111", "Tractor Supply", SiteMap{"111/1695401228372008796": "Store 1405"})
 	if !Parse("store 1405").Match(resolved) {
 		t.Error("a resolved site name is not searchable")
@@ -181,8 +167,6 @@ func TestAnUnresolvedSiteIsTreatedAsOpaque(t *testing.T) {
 }
 
 func TestASiteResolvedInAnotherTenantDoesNotCountHere(t *testing.T) {
-	// Two tenants can use the same site identifier for different places, so
-	// the name must not leak across the pair.
 	sites := SiteMap{"111/s100": "Store 0100"}
 	r := Of(api.Element{ID: "e1", Name: "ord-gw-01", SiteID: "s100"}, "222", "Niagara Bottling", sites)
 	if r.SiteKnown {
@@ -194,8 +178,6 @@ func TestASiteResolvedInAnotherTenantDoesNotCountHere(t *testing.T) {
 }
 
 func TestAnEmptySiteNameIsNotAResolvedOne(t *testing.T) {
-	// A present-but-empty entry used to count as resolved, which turned the
-	// raw id into a loose haystack.
 	r := Of(api.Element{ID: "e1", Name: "s1405-rtr-01", SiteID: "1695401228372008796"},
 		"111", "Tractor Supply", SiteMap{"111/1695401228372008796": ""})
 	if r.SiteKnown {
@@ -207,8 +189,6 @@ func TestAnEmptySiteNameIsNotAResolvedOne(t *testing.T) {
 }
 
 func TestTheStoreQueryThatHadToWork(t *testing.T) {
-	// A store number, a model split over two words, and nothing matching out
-	// of order.
 	sites := SiteMap{"111/s50": "Store 5024"}
 	var records []Record
 	for _, el := range []api.Element{
@@ -244,8 +224,6 @@ func TestSiteLabelNeverLeavesTheColumnBlank(t *testing.T) {
 }
 
 func TestAnEmptyFieldIsNotAWildcard(t *testing.T) {
-	// strings.Contains("", term) is false, but an empty haystack with an empty
-	// term is not: guard it, or an element missing a model matches anything.
 	r := Of(api.Element{ID: "e1", Name: "s0100-rtr-01"}, "111", "Tractor Supply", nil)
 	if Parse("ion1200").Match(r) {
 		t.Error("an element with no model matched a model term")

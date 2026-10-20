@@ -11,7 +11,6 @@ func resetModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := pickModel(t)
 	m.width, m.height = 100, 30
-	// pickModel keeps its config in memory; the reset is about what is on disk.
 	if err := m.store.SaveConfig(m.cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +31,6 @@ func TestFactoryResetAsksTwice(t *testing.T) {
 		t.Errorf("the armed section does not say what y will do:\n%s", got)
 	}
 
-	// Still saved: arming is not the reset.
 	if cfg, err := m.store.Config(); err != nil || len(cfg.Tenants) == 0 {
 		t.Errorf("arming already deleted the config (%+v, %v)", cfg, err)
 	}
@@ -80,8 +78,6 @@ func TestArmingDoesNotSurviveLeavingTheSection(t *testing.T) {
 	m := resetModel(t)
 	armed, _ := m.onSettingsKey("enter")
 
-	// Walking away and back must ask again, or a y typed at the General
-	// section's spinner row would land on a disarmed-looking reset.
 	away, _ := armed.(tuiModel).onSettingsKey("shift+tab")
 	back, _ := away.(tuiModel).onSettingsKey("tab")
 	if back.(tuiModel).resetArmed {
@@ -102,8 +98,6 @@ func TestArmingDoesNotSurviveLeavingTheSection(t *testing.T) {
 }
 
 func TestResetSectionIsLast(t *testing.T) {
-	// It is the one thing on this page that cannot be undone, so it does not
-	// sit next to the rows someone is cycling through.
 	if setSections[len(setSections)-1] != "Reset" {
 		t.Errorf("sections end with %q, want Reset at the bottom", setSections[len(setSections)-1])
 	}

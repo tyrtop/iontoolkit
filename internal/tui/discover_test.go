@@ -97,7 +97,6 @@ func TestDiscoveryLandsOnTheWorkingSetPicker(t *testing.T) {
 	if len(got.discovered) != 3 {
 		t.Errorf("discovered %d tenants, want 3 offered", len(got.discovered))
 	}
-	// Nothing is in the working set until it is ticked.
 	if len(got.cfg.Tenants) != 0 {
 		t.Errorf("%d tenants were saved before anything was picked", len(got.cfg.Tenants))
 	}
@@ -123,8 +122,6 @@ func TestTenantChoicesMergeDiscoveredAndSaved(t *testing.T) {
 		config.KnownTenant{TSGID: "1643707006", Name: "CIS root"},
 		config.KnownTenant{TSGID: "1984021017", Name: "Tractor Supply Co."},
 	)
-	// A service account tenant the browser account cannot see, plus a saved
-	// record for one it can.
 	m.cfg = &config.Config{Tenants: []config.Tenant{
 		{Name: "Legacy Co", TSGID: "999", Auth: config.AuthServiceAccount, ClientID: "svc"},
 		{Name: "Tractor Supply Co.", TSGID: "1984021017", Auth: config.AuthBrowser},
@@ -148,7 +145,6 @@ func TestTenantChoicesMergeDiscoveredAndSaved(t *testing.T) {
 	if c := byTSG["999"]; c.known || !c.saved {
 		t.Errorf("Legacy Co = %+v, want saved only", c)
 	}
-	// Sorted by name.
 	if got[0].name != "CIS root" {
 		t.Errorf("first choice = %q, want the list sorted by name", got[0].name)
 	}
@@ -182,7 +178,6 @@ func TestUsingADiscoveredTenantCreatesItsRecordLazily(t *testing.T) {
 	if got.cfg.LastTenant != saved.Name {
 		t.Errorf("LastTenant = %q, want %q", got.cfg.LastTenant, saved.Name)
 	}
-	// A fresh tenant has no elements yet, so a fetch is owed.
 	if got.cacheState != cacheUpdating {
 		t.Errorf("cacheState = %v, want a fetch owed for a tenant never used", got.cacheState)
 	}
@@ -302,12 +297,12 @@ func TestMenuNamesTheTwoCredentialPaths(t *testing.T) {
 	}
 	joined := strings.Join(labels, " | ")
 
-	for _, gone := range []string{"Add Account", "Add Tenant", "switch tenant", "service accounts", "start ION shell"} {
+	for _, gone := range []string{"Add Account", "Add Tenant", "switch tenant", "Service Accounts", "start ION shell"} {
 		if strings.Contains(joined, gone) {
 			t.Errorf("the menu still offers %q: %s", gone, joined)
 		}
 	}
-	for _, want := range []string{"elements", "sign in with browser"} {
+	for _, want := range []string{"Elements", "Sign In with Browser"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the menu is missing %q: %s", want, joined)
 		}
@@ -386,8 +381,6 @@ func TestRenderDiscoverWait(t *testing.T) {
 }
 
 func TestTenantChoicesSurviveANilStore(t *testing.T) {
-	// menuEntries calls this during rendering, so it must not panic before a
-	// store exists.
 	m := tuiModel{cfg: &config.Config{}}
 	if got := m.tenantChoices(); len(got) != 0 {
 		t.Errorf("tenantChoices() = %+v, want none", got)
@@ -403,8 +396,6 @@ func TestTenantChoicesSurviveANilStore(t *testing.T) {
 }
 
 func TestTenantsWithoutAnIDDoNotCollapse(t *testing.T) {
-	// A tenant ID is the real identity, but records predating one must stay
-	// distinct rather than merging into a single row.
 	m := discoverModel(t)
 	m.cfg = &config.Config{Tenants: []config.Tenant{
 		{Name: "Acme Co"},
@@ -448,8 +439,6 @@ func TestSwitchingActuallyFetchesForTheNewTenant(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := discoverModel(t)
 			seedKnown(t, m, config.KnownTenant{TSGID: "111", Name: "Acme Co"})
-			// Browser tenants validate with only a tenant ID, so a fetch is
-			// genuinely startable here.
 			if tt.cached {
 				if err := m.store.SaveCache(&config.ElementCache{
 					TSGID: "111", FetchedAt: time.Now().Add(-tt.cacheAge),
@@ -481,7 +470,6 @@ func TestSwitchingActuallyFetchesForTheNewTenant(t *testing.T) {
 
 func TestSwitchingToATenantWithNoUsableCredentialSaysSo(t *testing.T) {
 	m := discoverModel(t)
-	// A service account record with no secret stored cannot authenticate.
 	m.cfg = &config.Config{Tenants: []config.Tenant{
 		{Name: "Legacy Co", TSGID: "999", Auth: config.AuthServiceAccount},
 	}}
@@ -497,8 +485,6 @@ func TestSwitchingToATenantWithNoUsableCredentialSaysSo(t *testing.T) {
 	}
 }
 
-// setTestElements loads plain elements as if they all came from one tenant,
-// which is what the single-tenant tests mean.
 func setTestElements(m *tuiModel, els []api.Element) {
 	rows := make([]elementRow, 0, len(els))
 	for _, el := range els {
@@ -507,9 +493,6 @@ func setTestElements(m *tuiModel, els []api.Element) {
 	m.setElements(rows)
 }
 
-// setTestClient makes a client reachable the way production does: in the pool,
-// keyed by tenant. Tests that only set m.client would find no client to dial
-// with.
 func setTestClient(m *tuiModel, c *api.Client) {
 	m.client = c
 	if m.pool == nil {
@@ -526,7 +509,6 @@ func TestServiceAccountModeOnlyOffersWhatItCanReach(t *testing.T) {
 		{Name: "Saved Browser", TSGID: "222", Auth: config.AuthBrowser},
 	}}
 	m.tenant, m.hasTenant = m.cfg.Tenants[0], true
-	// A browser sign-in listed a third tenant that has no saved credential.
 	if err := m.store.SaveTenantCache(&config.TenantCache{
 		Account: "someone@example.com",
 		Tenants: []config.KnownTenant{{TSGID: "333", Name: "Discovered"}},
@@ -539,8 +521,6 @@ func TestServiceAccountModeOnlyOffersWhatItCanReach(t *testing.T) {
 		t.Errorf("browser mode offers %d tenants, want all 3", got)
 	}
 
-	// A service account credential cannot reach a discovered tenant or a
-	// browser-backed one, and offering them is a page of tenants that all fail.
 	m.authMode = authTenant
 	got := m.switchChoices()
 	if len(got) != 1 || got[0].name != "Saved SA" {
@@ -551,7 +531,6 @@ func TestServiceAccountModeOnlyOffersWhatItCanReach(t *testing.T) {
 	if !strings.Contains(view, "1 service account\n") {
 		t.Errorf("the page does not count service accounts:\n%s", view)
 	}
-	// The browser account that listed those tenants is irrelevant here.
 	if strings.Contains(view, "someone@example.com") {
 		t.Errorf("the page claims browser provenance in service account mode:\n%s", view)
 	}
@@ -575,5 +554,144 @@ func TestReListIsRefusedInServiceAccountMode(t *testing.T) {
 	}
 	if !strings.Contains(got.status, "settings") {
 		t.Errorf("status = %q, want it to say where service accounts come from", got.status)
+	}
+}
+
+func serviceModel(t *testing.T) tuiModel {
+	t.Helper()
+	m := multiModel(t)
+	m.phase, m.authMode = phaseSwitch, authTenant
+	m.width, m.height = 100, 30
+	m.cfg.Tenants = []config.Tenant{
+		{Name: "Acme Co", TSGID: "111", Auth: config.AuthServiceAccount,
+			ClientID: "svc@1234.iam.panserviceaccount.com", Added: true},
+	}
+	m.tenant, m.hasTenant = m.cfg.Tenants[0], true
+	return m
+}
+
+func TestTheServiceAccountPageAddsAndForgets(t *testing.T) {
+	m := serviceModel(t)
+
+	out := plain(m.viewSwitch())
+	if !strings.Contains(out, "+ New") {
+		t.Errorf("the page offers no way to add an account:\n%s", out)
+	}
+	for _, want := range []string{"x forget", "u undo"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the hint does not offer %q:\n%s", want, out)
+		}
+	}
+
+	if _, ok := m.switchAt(0); ok {
+		t.Error("row 0 answered an account, want the action row")
+	}
+	c, ok := m.switchAt(1)
+	if !ok || c.name != "Acme Co" {
+		t.Fatalf("switchAt(1) = %+v, %v", c, ok)
+	}
+
+	next, _ := m.onSwitchKey("enter")
+	if got := next.(tuiModel).formKind; got != formTenant {
+		t.Errorf("enter on the action row opened %v, want the tenant form", got)
+	}
+
+	m.switchCursor = 1
+	next, _ = m.onSwitchKey("x")
+	m = next.(tuiModel)
+	if _, still := m.cfg.Tenant("Acme Co"); !still {
+		t.Fatal("one x forgot the account")
+	}
+	if !strings.Contains(m.status, "x again") {
+		t.Errorf("status = %q, want it to ask for the second press", m.status)
+	}
+	next, _ = m.onSwitchKey("x")
+	m = next.(tuiModel)
+	if _, still := m.cfg.Tenant("Acme Co"); still {
+		t.Errorf("the second x left it in place: %s", m.status)
+	}
+
+	next, _ = m.onSwitchKey("u")
+	m = next.(tuiModel)
+	if _, back := m.cfg.Tenant("Acme Co"); !back {
+		t.Errorf("u did not put the record back: %s", m.status)
+	}
+	if !strings.Contains(m.status, "secret") {
+		t.Errorf("status = %q, want it to say the secret has to be typed again", m.status)
+	}
+	next, _ = m.onSwitchKey("u")
+	if got := next.(tuiModel).status; !strings.Contains(got, "nothing to undo") {
+		t.Errorf("status = %q with nothing left to undo", got)
+	}
+}
+
+func TestTheAccountInUseIsListedEvenWithNoSavedRecord(t *testing.T) {
+	m := serviceModel(t)
+	m.cfg.Tenants = nil
+	m.tenant, m.hasTenant = config.Tenant{Name: "env", TSGID: "999"}, true
+
+	choices := m.switchChoices()
+	if len(choices) != 1 || choices[0].tsg != "999" {
+		t.Fatalf("switchChoices() = %+v, want the account in use", choices)
+	}
+
+	out := plain(m.viewSwitch())
+	if strings.Contains(out, "0 service account") {
+		t.Errorf("the page says there are none while one is in use:\n%s", out)
+	}
+	if !strings.Contains(out, "from the environment") {
+		t.Errorf("nothing says the account has no saved record:\n%s", out)
+	}
+
+	m.switchCursor = 1
+	next, _ := m.onSwitchKey("x")
+	if got := next.(tuiModel).status; !strings.Contains(got, "no saved record") {
+		t.Errorf("status = %q, want it to say there is nothing to forget", got)
+	}
+}
+
+func TestTheBrowserTenantPageHasNoAddRow(t *testing.T) {
+	m := serviceModel(t)
+	m.authMode = authBrowser
+
+	if out := plain(m.viewSwitch()); strings.Contains(out, "+ New") {
+		t.Errorf("the browser page offers to type one in:\n%s", out)
+	}
+	if _, ok := m.switchAt(0); !ok {
+		t.Error("row 0 is not a tenant on the browser page")
+	}
+	m.switchCursor = 0
+	next, _ := m.onSwitchKey("x")
+	if got := next.(tuiModel).status; strings.Contains(got, "x again") {
+		t.Error("the browser page armed a forget")
+	}
+}
+
+func TestRenderTheServiceAccountPage(t *testing.T) {
+	m := serviceModel(t)
+	t.Log("\n" + m.viewSwitch())
+}
+
+func TestABrowserTenantIsNeverListedAsAServiceAccount(t *testing.T) {
+	m := serviceModel(t)
+	m.cfg.Tenants = []config.Tenant{
+		{Name: "Tractor Supply", TSGID: "111", Auth: config.AuthBrowser, Added: true},
+	}
+	m.tenant, m.hasTenant = m.cfg.Tenants[0], true
+
+	for _, c := range m.switchChoices() {
+		if c.name == "Tractor Supply" {
+			t.Errorf("a browser tenant is on the service account page: %+v", c)
+		}
+	}
+	out := plain(m.viewSwitch())
+	if strings.Contains(out, "Tractor Supply") {
+		t.Errorf("the page lists it:\n%s", out)
+	}
+	if got := m.switchRows(); got != 1 {
+		t.Errorf("switchRows() = %d, want just the action row", got)
+	}
+	if _, ok := m.switchAt(1); ok {
+		t.Error("there is a selectable row below the action row")
 	}
 }

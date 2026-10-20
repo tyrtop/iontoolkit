@@ -108,7 +108,6 @@ func TestJSONSinkKeepsElementOrder(t *testing.T) {
 	var buf bytes.Buffer
 	sink := NewSink(&buf, FormatJSON)
 
-	// Added out of order, the way elements actually finish.
 	if err := sink.Add(2, sampleResult("c", "s0003")); err != nil {
 		t.Fatalf("Add() error = %v", err)
 	}
@@ -151,7 +150,6 @@ func TestJSONSinkIndents(t *testing.T) {
 	}
 
 	got := buf.String()
-	// Without an indent the whole array is one line, which is what this guards.
 	if !strings.Contains(got, "[\n  {\n    \"element_id\"") {
 		t.Errorf("json array is not indented two spaces:\n%s", got)
 	}
