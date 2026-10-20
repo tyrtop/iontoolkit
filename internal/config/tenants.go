@@ -10,16 +10,11 @@ import (
 	"time"
 )
 
-// KnownTenant is a tenant the signed-in account can reach. These are discovered
-// rather than configured: the portal decides what the account can see, so there
-// is nothing for the user to add.
 type KnownTenant struct {
 	TSGID string `json:"tsg_id"`
 	Name  string `json:"name"`
 }
 
-// TenantCache remembers the last discovered tenant list so the switcher works
-// without a round trip, and so a restart does not need the browser.
 type TenantCache struct {
 	FetchedAt time.Time     `json:"fetched_at"`
 	Account   string        `json:"account,omitempty"`
@@ -28,8 +23,6 @@ type TenantCache struct {
 
 func (s *Store) tenantsPath() string { return filepath.Join(s.Root, "tenants.json") }
 
-// TenantCache reads the last discovered list. A nil store has none, which keeps
-// rendering safe before a store exists.
 func (s *Store) TenantCache() (*TenantCache, error) {
 	if s == nil {
 		return nil, nil

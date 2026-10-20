@@ -45,10 +45,8 @@ func TestTokenGood(t *testing.T) {
 		{"plenty of life left", "t", 15 * time.Minute, false, 90 * time.Second, true},
 		{"inside the pre-flight window", "t", 30 * time.Second, false, 90 * time.Second, false},
 		{"already expired", "t", -time.Second, false, 90 * time.Second, false},
-		// A static SCM_TOKEN has no lifetime; refusing to try is worse.
 		{"unknown lifetime", "t", 0, false, 90 * time.Second, true},
 		{"no token at all", "", 0, false, 90 * time.Second, false},
-		// The last token there will be, whatever its clock says.
 		{"refreshing stopped", "t", 15 * time.Minute, true, 90 * time.Second, false},
 	}
 	for _, tt := range tests {

@@ -17,7 +17,7 @@ require (
 
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect
-	github.com/charmbracelet/colorprofile v0.4.3 // indirect
+	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/harmonica v0.2.0 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
 	github.com/charmbracelet/x/ansi v0.11.9

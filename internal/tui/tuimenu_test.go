@@ -16,13 +16,10 @@ import (
 
 var testANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
-// plain strips styling so assertions compare text rather than escape codes.
 func plain(s string) string { return testANSI.ReplaceAllString(s, "") }
 
 func TestMenuEntries(t *testing.T) {
-	// The menu is now the same four entries whatever is configured: the element
-	// list, the way in to a browser account, settings, quit.
-	want := []string{"elements", "sign in with browser", "Settings", "Quit"}
+	want := []string{"Elements", "Sign In with Browser", "Macros", "Settings", "Quit"}
 
 	cases := map[string]struct {
 		cfg       *config.Config
@@ -59,16 +56,14 @@ func TestMenuEntries(t *testing.T) {
 
 func TestMenuLabelDoesNotCarryTheMode(t *testing.T) {
 	root := t.TempDir()
-	// The mode belongs to the element list, so the menu reads the same whichever
-	// mode is set; a menu that renamed itself was the phase 7 state explosion.
 	for _, mode := range []pickMode{modeShell, modeBatch} {
 		m := tuiModel{
 			cfg:   &config.Config{},
 			store: config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json")),
 			mode:  mode,
 		}
-		if got := m.menuEntries()[0].label; got != "elements" {
-			t.Errorf("first entry in %v mode = %q, want %q", mode, got, "elements")
+		if got := m.menuEntries()[0].label; got != "Elements" {
+			t.Errorf("first entry in %v mode = %q, want %q", mode, got, "Elements")
 		}
 	}
 }
@@ -93,7 +88,6 @@ func TestCacheLine(t *testing.T) {
 		"loaded from a fresh cache": {
 			tuiModel{hasTenant: true, cacheState: cacheCached, cacheCount: 5613, cacheAt: time.Now().Add(-9 * time.Minute)},
 			"5613 elements cached  9m ago"},
-		// A session left open long enough must stop claiming to be current.
 		"an updated cache that went stale stops saying so": {
 			tuiModel{hasTenant: true, cacheState: cacheUpdated, cacheCount: 5613, cacheAt: time.Now().Add(-38*time.Minute - 39*time.Second)},
 			"5613 elements cached  38m ago"},
@@ -186,7 +180,6 @@ func TestFilterMatchesSubstringAndSite(t *testing.T) {
 }
 
 func TestSiteNameFallsBackToID(t *testing.T) {
-	// Sites are keyed by tenant, since two tenants can reuse a site identifier.
 	m := tuiModel{sites: map[string]string{"1/s1": "Nashville Hub", "2/s1": "Dallas Hub"}}
 	row := func(tsg, site string) elementRow {
 		return elementRow{Element: api.Element{SiteID: site}, TSG: tsg}
@@ -328,10 +321,9 @@ func TestRenderSettings(t *testing.T) {
 				{Name: "Lab", TSGID: "9876543210"},
 			},
 		},
-		spinnerName: ui.DefaultSpinner,
-		spinner:     ui.NewSpinner(ui.DefaultSpinner),
-		width:       80,
-		height:      24,
+		spinner: ui.NewSpinner(ui.DefaultSpinner),
+		width:   80,
+		height:  24,
 	}
 	t.Log("\n" + m.viewSettings())
 }
@@ -472,8 +464,6 @@ func TestArrowsMoveTableWhileFiltering(t *testing.T) {
 }
 
 func TestFilteringAndSelectingAreSeparateModes(t *testing.T) {
-	// A query is several terms, so every space while typing belongs to it.
-	// Selection resumes once the filter is applied.
 	m := pickModel(t)
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
 	m = mm.(tuiModel)
@@ -488,7 +478,6 @@ func TestFilteringAndSelectingAreSeparateModes(t *testing.T) {
 		t.Errorf("selected = %v, want no selection while filtering", m.selected)
 	}
 
-	// Enter applies the query and leaves filter mode, keeping what was typed.
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = mm.(tuiModel)
 	if m.filterOn {
@@ -501,7 +490,6 @@ func TestFilteringAndSelectingAreSeparateModes(t *testing.T) {
 		t.Errorf("phase = %v, want to stay on the list rather than act on it", m.phase)
 	}
 
-	// Now space selects again.
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
 	m = mm.(tuiModel)
 	if len(m.selected) != 1 {

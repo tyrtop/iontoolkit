@@ -7,23 +7,15 @@ import (
 	"time"
 )
 
-// Identity is who a sign-in turned out to be, read from the tokens for display
-// and for confirming the tenant scope.
 type Identity struct {
-	Name    string
-	Email   string
-	Subject string
-	Scope   string
-	TSG     string
-	// SessionExpires is when the refresh token stops working, which is how long
-	// this machine can mint tokens before a browser is needed again. It is read
-	// from the token rather than assumed, and is zero when the token does not
-	// say.
+	Name           string
+	Email          string
+	Subject        string
+	Scope          string
+	TSG            string
 	SessionExpires time.Time
 }
 
-// SessionLeft is how long until a browser is needed again, and whether the
-// token said at all.
 func (i Identity) SessionLeft() (time.Duration, bool) {
 	if i.SessionExpires.IsZero() {
 		return 0, false
@@ -45,10 +37,6 @@ func (i Identity) Display() string {
 	return "unknown"
 }
 
-// ScopedTo reports whether the token really carries the tenant that was asked
-// for. The authorization server can hand back a narrower scope than requested,
-// and a token scoped to the wrong tenant fails later in a way that is hard to
-// read, so it is worth checking at sign-in.
 func (i Identity) ScopedTo(tsg string) bool {
 	if tsg == "" {
 		return true
@@ -67,8 +55,6 @@ func (i Identity) ScopedTo(tsg string) bool {
 	return false
 }
 
-// SessionExpiry reads when a stored refresh token stops working, so a session's
-// remaining life can be shown before any token has been minted this run.
 func SessionExpiry(refreshToken string) (time.Time, bool) {
 	c := jwtClaims(refreshToken)
 	if c == nil {
@@ -78,10 +64,8 @@ func SessionExpiry(refreshToken string) (time.Time, bool) {
 	return exp, !exp.IsZero()
 }
 
-// jwtClaims reads a JWT payload without verifying its signature. These tokens
-// arrive over TLS from the issuer and are only used to label the session and to
-// check the tenant scope, never to make an access decision, so there is nothing
-// here for a signature to protect.
+// unverified on purpose: these label the session and check the tenant scope,
+// never an access decision, so there is nothing here for a signature to protect
 func jwtClaims(token string) map[string]any {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -105,7 +89,6 @@ func claimString(claims map[string]any, key string) string {
 	return ""
 }
 
-// claimTime reads a numeric date claim, which json decodes as a float64.
 func claimTime(claims map[string]any, key string) time.Time {
 	switch v := claims[key].(type) {
 	case float64:

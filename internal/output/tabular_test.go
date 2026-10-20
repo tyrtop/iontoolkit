@@ -10,8 +10,6 @@ import (
 	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
-// Two elements running the same two commands, plus one that never connected:
-// the only shape where the two orientations differ observably.
 func fleet() []sase.Result {
 	el := func(id, name string, outs ...string) sase.Result {
 		return sase.Result{
@@ -29,7 +27,6 @@ func fleet() []sase.Result {
 	}
 }
 
-// fill adds the fleet out of order, the way elements actually finish.
 func fill(sink Sink, t *testing.T) {
 	t.Helper()
 	rs := fleet()
@@ -65,8 +62,6 @@ func TestTabularOrientationOrdersRows(t *testing.T) {
 		orient string
 		want   []string
 	}{
-		// ION-first groups an element's commands; command-first puts one
-		// command across the fleet together, which is the comparison.
 		{OrientION, []string{
 			"s0001/dump device status", "s0001/dump interface status",
 			"s0002/dump device status", "s0002/dump interface status",
@@ -105,8 +100,6 @@ func TestTabularHeaderIsTheSameBothWays(t *testing.T) {
 	}
 }
 
-// The columns the code indexes by number have to stay where it thinks they
-// are; inserting one above them would silently shift every row.
 func TestTabularColumnIndexesMatchHeader(t *testing.T) {
 	for col, want := range map[int]string{colCommand: "command", colOutput: "output", colError: "error"} {
 		if got := tabularHeader[col]; got != want {
@@ -127,8 +120,6 @@ func TestCSVKeepsMultilineAndCommaOutputIntact(t *testing.T) {
 	if got := recs[2][colOutput]; got != "eth0 up, eth1 down" {
 		t.Errorf("output cell = %q, want the comma to stay inside one field", got)
 	}
-	// Quoted newlines make the file longer than its record count. Escaping
-	// them to \n instead would parse and still be the wrong format.
 	if lines := strings.Count(strings.TrimRight(buf.String(), "\n"), "\n") + 1; lines <= len(recs) {
 		t.Errorf("csv has %d lines for %d records, want the quoted output to span lines", lines, len(recs))
 	}
@@ -170,7 +161,6 @@ func TestEmptyRunWritesAHeaderAndNothingElse(t *testing.T) {
 	}
 }
 
-// Padding over an element that never reported must not become a blank row.
 func TestTabularSkipsUnreportedElements(t *testing.T) {
 	var buf bytes.Buffer
 	sink := NewSink(&buf, FormatCSV)
@@ -190,7 +180,6 @@ func TestTableFlattensOutputToOneLinePerCommand(t *testing.T) {
 	fill(NewSink(&buf, FormatTable, WithOrientation(OrientION)), t)
 
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
-	// header, rule, two commands each for two elements, one failure
 	if len(lines) != 7 {
 		t.Fatalf("table has %d lines, want 7:\n%s", len(lines), buf.String())
 	}
@@ -211,7 +200,6 @@ func TestTableFitsTheGivenWidth(t *testing.T) {
 	}
 }
 
-// A file holds the only copy of what it is given, so nothing is capped there.
 func TestTableWithoutAWidthKeepsWholeCells(t *testing.T) {
 	long := strings.Repeat("x", 200)
 	var buf bytes.Buffer
@@ -282,7 +270,6 @@ func TestNextOrientationCyclesThroughEveryOrientation(t *testing.T) {
 	}
 }
 
-// An unknown orientation reaching a sink must not silently sort by nothing.
 func TestNewSinkFallsBackToIONFirst(t *testing.T) {
 	var buf bytes.Buffer
 	fill(NewSink(&buf, FormatCSV, WithOrientation("sideways")), t)
@@ -324,14 +311,12 @@ func TestTableDropsAnEmptyColumnToFitAWidth(t *testing.T) {
 		t.Errorf("the error column survived a width with nothing in it:\n%s", fitted.String())
 	}
 
-	// The header is worth more than the space when there is no width to fit.
 	var whole bytes.Buffer
 	add(NewSink(&whole, FormatTable))
 	if !strings.Contains(whole.String(), "error") {
 		t.Errorf("the error column was dropped from a file:\n%s", whole.String())
 	}
 
-	// And it stays as soon as one row needs it.
 	var failed bytes.Buffer
 	fill(NewSink(&failed, FormatTable, WithWidth(110)), t)
 	if !strings.Contains(failed.String(), "error") {

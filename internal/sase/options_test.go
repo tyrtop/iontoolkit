@@ -45,8 +45,6 @@ func TestOptionsValidate(t *testing.T) {
 }
 
 func TestValidateForAcceptsATargetsOwnLogin(t *testing.T) {
-	// A cross-tenant run has no single login in the Options: each target
-	// carries the one its own tenant saved.
 	base := Options{
 		Commands:       []string{"dump device status"},
 		Concurrency:    10,
@@ -93,8 +91,6 @@ func TestValidateForAcceptsATargetsOwnLogin(t *testing.T) {
 			if err == nil {
 				t.Fatalf("ValidateFor() = nil, want an error naming %q", tc.wantErr)
 			}
-			// With several tenants in play, "no device login" does not say
-			// which element is the problem.
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("ValidateFor() = %v, want it to name %q", err, tc.wantErr)
 			}

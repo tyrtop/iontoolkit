@@ -8,14 +8,6 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-// The portal side of a fixture element: back-channel status and interfaces.
-// None of it is in the YAML. An element's ports are derived from its model the
-// way its ID is derived from its name, so the detail page has something
-// shaped like an appliance to draw without every fixture file listing five
-// ports.
-
-// ports is how many an element of this model has. Unknown models get the
-// 1200's five.
 func (e Element) ports() int {
 	switch e.Model {
 	case "ion 1000", "ion 2000":
@@ -27,7 +19,6 @@ func (e Element) ports() int {
 	}
 }
 
-// interfaceID keeps a port's ID stable across runs, as element IDs are.
 func (e Element) interfaceID(port int) string {
 	return syntheticID(fmt.Sprintf("interface/%s/%d", e.ID, port), 19)
 }
@@ -43,9 +34,6 @@ func (e Element) apiInterfaces() []api.Interface {
 			MTU:     1500,
 			Scope:   "local",
 		}
-		// Port 1 is the controller port on an ION, 2 the second circuit, 3 the
-		// LAN, and the rest unused. The values are the ones a real element
-		// answers with: "lan", not "private".
 		switch p {
 		case 1, 2:
 			in.UsedFor = "public"
@@ -59,14 +47,40 @@ func (e Element) apiInterfaces() []api.Interface {
 		}
 		out = append(out, in)
 	}
+
+	out = append(out, api.Interface{
+		ID:      e.vlanInterfaceID(),
+		Name:    "vlan1",
+		Type:    "vlan",
+		UsedFor: "lan",
+		AdminUp: true,
+		MTU:     1500,
+		Scope:   "local",
+	})
 	return out
 }
 
-// apiInterfaceStatus mirrors a real one: the status record has an ID of its
-// own rather than the interface's, negotiated_mtu is 0 even on a port that is
-// up, and extended_state is empty on an ordinary port -- only a service link
-// explains itself there.
+func (e Element) vlanInterfaceID() string {
+	return syntheticID("interface/"+e.ID+"/vlan1", 19)
+}
+
 func (e Element) apiInterfaceStatus(iid string) *api.InterfaceStatus {
+	if iid == e.vlanInterfaceID() {
+		st := api.InterfaceStatus{
+			ID:               syntheticID("interface-status/"+iid, 19),
+			ElementID:        e.ID,
+			Name:             "vlan1",
+			Device:           "vlan1",
+			OperationalState: "down",
+			VRF:              &api.VRF{ContextID: syntheticID("vrf/"+e.tsg, 19), Name: "Global"},
+			LastStateChange:  bootedAt.Add(time.Minute).UnixMilli(),
+		}
+		if e.Connected {
+			st.OperationalState = "up"
+			st.IPv4Addresses = []string{"10.99.1.1/24"}
+		}
+		return &st
+	}
 	for p := 1; p <= e.ports(); p++ {
 		if e.interfaceID(p) != iid {
 			continue
@@ -82,8 +96,6 @@ func (e Element) apiInterfaceStatus(iid string) *api.InterfaceStatus {
 			VRF:              &api.VRF{ContextID: syntheticID("vrf/"+e.tsg, 19), Name: "Global"},
 			LastStateChange:  bootedAt.Add(time.Minute).UnixMilli(),
 		}
-		// A disconnected element's ports are all down: the portal cannot see
-		// past an element that is not talking to it.
 		if e.Connected && p <= 3 {
 			st.OperationalState = "up"
 			st.IPv4Addresses = []string{fmt.Sprintf("10.%d.%d.1/24", p, p*7%256)}
@@ -95,10 +107,6 @@ func (e Element) apiInterfaceStatus(iid string) *api.InterfaceStatus {
 	return nil
 }
 
-// Circuits are the site's, two per site, with the first carrying the
-// controller session the way a real site's usually does. Field names are the
-// portal's own model: name, type, network_id, label_id, link_bw_down/up,
-// use_for_controller_connections.
 func (e Element) circuitID(n int) string {
 	return syntheticID(fmt.Sprintf("waninterface/%s/%s/%d", e.tsg, e.Site, n), 19)
 }
@@ -126,10 +134,6 @@ func (e Element) apiCircuits() []map[string]any {
 	return out
 }
 
-// apiCircuitStatus is the circuit as the site sees it; apiCircuitState is the
-// same circuit as this element sees it, which is the pair that makes a
-// one-sided failure visible. Both shapes are unverified against hardware --
-// the resource map gave the paths, not the bodies.
 func (e Element) apiCircuitStatus(cid string) map[string]any {
 	for n := 1; n <= fixtureCircuits; n++ {
 		if e.circuitID(n) != cid {
@@ -186,16 +190,10 @@ func fixtureNetworks() []map[string]any {
 	return out
 }
 
-// clusterID is the site's HA cluster, shared by every HA element on it, so a
-// pair reports the same cluster the way a real one does.
 func (e Element) clusterID() string {
 	return syntheticID("spokecluster/"+e.tsg+"/"+e.Site, 19)
 }
 
-// apiClusterStatus answers the spoke cluster status endpoint, in the shape a
-// real cluster answered in: a member is "active" or "unknown" -- there is no
-// "standby" -- and a switchover carries the adjustments that moved the
-// effective priority off the configured one.
 func (s *Set) apiClusterStatus(tsg, cid string) map[string]any {
 	t := s.tenant(tsg)
 	if t == nil {
@@ -208,8 +206,6 @@ func (s *Set) apiClusterStatus(tsg, cid string) map[string]any {
 		if !el.HA || el.clusterID() != cid {
 			continue
 		}
-		// A member the controller cannot see reads as "unknown", which is what
-		// a dead peer looks like.
 		status := "unknown"
 		if el.Connected {
 			status = "active"
@@ -238,9 +234,6 @@ func (s *Set) apiClusterStatus(tsg, cid string) map[string]any {
 	return map[string]any{"cluster_members": members, "switch_over_events": events}
 }
 
-// apiStatus is the flat shape the element status endpoint answers with: one
-// group of fields per back-channel. A disconnected element has every channel
-// down, which is what makes the portal call it disconnected.
 func (e Element) apiStatus() map[string]any {
 	out := map[string]any{
 		"element_id": e.ID,
@@ -249,8 +242,6 @@ func (e Element) apiStatus() map[string]any {
 	}
 	out["device_mode"] = "l3-mode"
 	out["last_rebooted_info"] = "Requested by API"
-	// Seconds, where the channels below are not: a real response carries all
-	// three scales at once, and a fixture that used one would hide it.
 	out["last_rebooted_time"] = bootedAt.Unix()
 	if e.Connected {
 		out["controller_connection_intf"] = e.interfaceID(1)
@@ -265,8 +256,6 @@ func (e Element) apiStatus() map[string]any {
 		out[ch+"_from"] = ""
 		out[ch+"_connected_on_utc"] = 0
 		out[ch+"_disconnected_on_utc"] = 0
-		// config_and_events counts in 100ns ticks and the rest in
-		// milliseconds, which is what a real element status does.
 		stamp := on.UnixMilli()
 		if ch == "config_and_events" {
 			stamp = utcTicks(on)
@@ -282,11 +271,8 @@ func (e Element) apiStatus() map[string]any {
 	return out
 }
 
-// bootedAt fixes the fixture's clock so a run is reproducible: the day the
-// first ION in the demo file was imagined to have come up.
 var bootedAt = time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 
-// utcTicks is one of the API's timestamp units, 100ns since the epoch.
 func utcTicks(t time.Time) int64 {
 	return t.UnixNano() / 100
 }
@@ -294,4 +280,78 @@ func utcTicks(t time.Time) int64 {
 func fakeMAC(seed string) string {
 	d := syntheticID("mac/"+seed, 12)
 	return fmt.Sprintf("02:%s:%s:%s:%s:%s", d[0:2], d[2:4], d[4:6], d[6:8], d[8:10])
+}
+
+func (s *Set) apiClusterStatuses(tsg string) []map[string]any {
+	ten := s.tenant(tsg)
+	if ten == nil {
+		return nil
+	}
+	var out []map[string]any
+	for i := range ten.Elements {
+		el := &ten.Elements[i]
+		if !el.HA {
+			continue
+		}
+		status, priority := "backup", 100
+		if s.activeMember(tsg, el.clusterID()) == el.ID {
+			status, priority = "active", 150
+		}
+		out = append(out, map[string]any{
+			"id":                    syntheticID("clusterstatus/"+el.ID, 17),
+			"site_id":               el.siteID(),
+			"spoke_cluster_id":      el.clusterID(),
+			"element_id":            el.ID,
+			"status":                status,
+			"priority":              priority,
+			"last_status_update_ts": bootedAt.UnixMilli(),
+		})
+	}
+	return out
+}
+
+func (s *Set) activeMember(tsg, cid string) string {
+	ten := s.tenant(tsg)
+	if ten == nil {
+		return ""
+	}
+	for i := range ten.Elements {
+		el := &ten.Elements[i]
+		if el.HA && el.clusterID() == cid && el.Connected {
+			return el.ID
+		}
+	}
+	return ""
+}
+
+func fixtureZones() []map[string]any {
+	return []map[string]any{
+		{"id": syntheticID("zone/trusted", 18), "name": "Store - LAN",
+			"description": "LAN side", "tcp_allow_non_syn": false, "is_l2": false},
+		{"id": syntheticID("zone/guest", 18), "name": "Store - Guest",
+			"description": "guest wifi", "tcp_allow_non_syn": false, "is_l2": false},
+		{"id": syntheticID("zone/internet", 18), "name": "internet",
+			"description": "circuits", "tcp_allow_non_syn": false, "is_l2": false},
+	}
+}
+
+func (e Element) apiZoneBindings() []map[string]any {
+	return []map[string]any{
+		{
+			"id":               syntheticID("elzone/lan/"+e.ID, 18),
+			"zone_id":          syntheticID("zone/trusted", 18),
+			"interface_ids":    []string{e.vlanInterfaceID()},
+			"lannetwork_ids":   nil,
+			"waninterface_ids": nil,
+			"wanoverlay_ids":   nil,
+		},
+		{
+			"id":               syntheticID("elzone/guest/"+e.ID, 18),
+			"zone_id":          syntheticID("zone/guest", 18),
+			"interface_ids":    nil,
+			"lannetwork_ids":   nil,
+			"waninterface_ids": nil,
+			"wanoverlay_ids":   nil,
+		},
+	}
 }

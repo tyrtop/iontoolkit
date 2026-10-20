@@ -31,8 +31,6 @@ type Token struct {
 	ExpiresIn    time.Duration
 }
 
-// pkce carries one authorization attempt's secrets. The verifier never leaves
-// the process; only its SHA-256 challenge goes to the authorization server.
 type pkce struct {
 	verifier  string
 	challenge string
@@ -71,9 +69,6 @@ func scopeFor(tsg string) string {
 	return "openid profile email tsg_id:" + tsg
 }
 
-// authorizeURL builds the consent URL. silent adds prompt=none, which makes the
-// authorization server answer from an existing session or fail outright rather
-// than render a login page.
 func (p pkce) authorizeURL(base, tsg string, silent bool) string {
 	q := url.Values{
 		"client_id":             {ClientID},
@@ -90,9 +85,6 @@ func (p pkce) authorizeURL(base, tsg string, silent bool) string {
 	return base + "?" + q.Encode()
 }
 
-// CodeFromCallback extracts the authorization code from a callback URL, which is
-// what the browser lands on after consent. want is the state to match; an empty
-// want skips the check, for the paste-the-URL fallback where no state is held.
 func CodeFromCallback(raw, want string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -162,8 +154,6 @@ func exchange(ctx context.Context, client *http.Client, tokenURL string, form ur
 	}, nil
 }
 
-// ExchangeCode trades an authorization code for tokens. verifier must be the one
-// whose challenge was sent to the authorize endpoint.
 func ExchangeCode(ctx context.Context, client *http.Client, tokenURL, code, verifier string) (*Token, error) {
 	return exchange(ctx, client, tokenURL, url.Values{
 		"grant_type":    {"authorization_code"},
@@ -173,9 +163,6 @@ func ExchangeCode(ctx context.Context, client *http.Client, tokenURL, code, veri
 	})
 }
 
-// Refresh mints a new access token from a stored refresh token, with no browser.
-// The authorization server may or may not return a replacement refresh token; when
-// it does not, the caller should keep using the one it already has.
 func Refresh(ctx context.Context, client *http.Client, tokenURL, refreshToken, tsg string) (*Token, error) {
 	tok, err := exchange(ctx, client, tokenURL, url.Values{
 		"grant_type":    {"refresh_token"},

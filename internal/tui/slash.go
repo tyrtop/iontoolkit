@@ -18,18 +18,19 @@ const (
 	slashOff slashMode = iota
 	slashMenu
 	slashCommands
+	slashFreq
 	slashHelp
 	slashDebug
 )
 
 const slashRows = 6
 
-var slashVerbs = []string{"login", "commands", "help", "debug"}
+var slashVerbs = []string{"login", "commands", "fc", "help", "debug"}
 
 func newSlashInput() textinput.Model {
 	in := textinput.New()
 	in.Prompt = "/"
-	in.Placeholder = "commands du interf · login · help · debug"
+	in.Placeholder = "commands du interf · fc · login · help · debug"
 	in.SetWidth(40)
 	return in
 }
@@ -68,11 +69,24 @@ func resolveVerb(word string) (string, bool) {
 			return v, true
 		}
 	}
+	if hits := prefixVerbs(word); len(hits) == 1 {
+		return hits[0], true
+	}
 	hits := ioncmd.Fuzzy(slashVerbs, word)
 	if len(hits) == 1 {
 		return hits[0], true
 	}
 	return "", false
+}
+
+func prefixVerbs(word string) []string {
+	var out []string
+	for _, v := range slashVerbs {
+		if strings.HasPrefix(v, word) {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func (m tuiModel) refilterSlash() tuiModel {
@@ -91,6 +105,8 @@ func (m tuiModel) refilterSlash() tuiModel {
 		m.slashItems = ioncmd.Fuzzy(slashVerbs, q)
 	case slashCommands:
 		m.slashItems = ioncmd.Fuzzy(m.catalog(), q)
+	case slashFreq:
+		m = m.setFreq(q)
 	default:
 		m.slashItems = nil
 	}
@@ -112,6 +128,16 @@ func (m tuiModel) enterVerb(name, query string) tuiModel {
 		_ = m.slashInput.Focus()
 		m.slashCursor = 0
 		m.slashItems = ioncmd.Fuzzy(m.catalog(), query)
+	case "fc":
+		m.slash = slashFreq
+		m.slashInput = newSlashInput()
+		m.slashInput.Prompt = "/fc "
+		m.slashInput.Placeholder = "most used first"
+		m.slashInput.SetValue(query)
+		m.slashInput.SetCursor(len(query))
+		_ = m.slashInput.Focus()
+		m.slashCursor = 0
+		m = m.setFreq(query)
 	case "help":
 		m.slash = slashHelp
 		m.slashItems = nil
@@ -137,9 +163,9 @@ func (m tuiModel) activateSlash() (tea.Model, tea.Cmd) {
 		}
 
 		switch pick {
-		case "commands", "help", "debug":
+		case "commands", "fc", "help", "debug":
 			m = m.enterVerb(pick, "")
-			if m.slash == slashCommands {
+			if m.slash == slashCommands || m.slash == slashFreq {
 				return m, m.slashInput.Focus()
 			}
 			m.slashInput.Blur()
@@ -161,6 +187,13 @@ func (m tuiModel) activateSlash() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case slashFreq:
+		use, ok := m.freqAt(m.slashCursor)
+		if !ok {
+			return m.closeSlash(), nil
+		}
+		return m.insertCommand(use.Command)
+
 	case slashCommands:
 		text := strings.TrimSpace(m.slashInput.Value())
 		if m.slashCursor < len(m.slashItems) {
@@ -169,14 +202,18 @@ func (m tuiModel) activateSlash() (tea.Model, tea.Cmd) {
 		if text == "" {
 			return m.closeSlash(), nil
 		}
-		if !app.Defaults.AllowWrites && !m.cfg.AllowWrites && !ioncli.IsReadOnly(text) {
-			m.status = "not read-only: " + text
-			return m.closeSlash(), nil
-		}
-		if s := m.sessions.Active(); s != nil && s.Err() == nil {
-			s.Insert(text + " ")
-		}
+		return m.insertCommand(text)
+	}
+	return m.closeSlash(), nil
+}
+
+func (m tuiModel) insertCommand(text string) (tea.Model, tea.Cmd) {
+	if !app.Defaults.AllowWrites && !m.cfg.AllowWrites && !ioncli.IsReadOnly(text) {
+		m.status = "not read-only: " + text
 		return m.closeSlash(), nil
+	}
+	if s := m.sessions.Active(); s != nil && s.Err() == nil {
+		s.Insert(text + " ")
 	}
 	return m.closeSlash(), nil
 }
@@ -208,6 +245,12 @@ func (m tuiModel) onSlashKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cm
 		}
 		return m, nil
 
+	case "ctrl+d":
+		if m.slash == slashFreq {
+			return m.forgetFreq()
+		}
+		return m, nil
+
 	case "up", "ctrl+p":
 		m.slashCursor = max(0, m.slashCursor-1)
 		return m, nil
@@ -231,7 +274,7 @@ func (m tuiModel) slashWanted() int {
 	case slashOff:
 		return 0
 	case slashHelp:
-		return 11
+		return 12
 	case slashDebug:
 		return 8
 	default:
@@ -256,6 +299,7 @@ func (m tuiModel) viewSlash() string {
 		b.WriteString(ui.StyleCmd.Render("/help") + "\n\n")
 		b.WriteString("  " + ui.StyleElement.Render("/login") + ui.StyleDim.Render("     fill the stored ION user and password") + "\n")
 		b.WriteString("  " + ui.StyleElement.Render("/commands") + ui.StyleDim.Render("  browse the ION command reference, enter inserts") + "\n")
+		b.WriteString("  " + ui.StyleElement.Render("/fc") + ui.StyleDim.Render("        commands you run most on this model, ctrl+d forgets one") + "\n")
 		b.WriteString("  " + ui.StyleElement.Render("/debug") + ui.StyleDim.Render("     buffer and pane geometry") + "\n")
 		b.WriteString("  " + ui.StyleElement.Render("/help") + ui.StyleDim.Render("      this list") + "\n\n")
 		b.WriteString(ui.StyleDim.Render("  tab completes the selection · enter inserts without sending") + "\n")
@@ -272,11 +316,11 @@ func (m tuiModel) viewSlash() string {
 		} else {
 			bc, br := s.Size()
 			cx, cy := s.Cursor()
-			b.WriteString("  " + ui.Label("buffer") + fmt.Sprintf("%d x %d\n", bc, br))
-			b.WriteString("  " + ui.Label("pane") + fmt.Sprintf("%d x %d\n", cols, rows))
-			b.WriteString("  " + ui.Label("cursor") + fmt.Sprintf("%d, %d\n", cx, cy))
-			b.WriteString("  " + ui.Label("terminal") + fmt.Sprintf("%d x %d\n", m.width, m.height))
-			b.WriteString("  " + ui.Label("line") + fmt.Sprintf("%q\n", s.Line()))
+			b.WriteString("  " + ui.Label("Buffer") + fmt.Sprintf("%d x %d\n", bc, br))
+			b.WriteString("  " + ui.Label("Pane") + fmt.Sprintf("%d x %d\n", cols, rows))
+			b.WriteString("  " + ui.Label("Cursor") + fmt.Sprintf("%d, %d\n", cx, cy))
+			b.WriteString("  " + ui.Label("Terminal") + fmt.Sprintf("%d x %d\n", m.width, m.height))
+			b.WriteString("  " + ui.Label("Line") + fmt.Sprintf("%q\n", s.Line()))
 		}
 		b.WriteString(ui.StyleDim.Render("esc back"))
 		return b.String()
@@ -307,6 +351,10 @@ func (m tuiModel) viewSlash() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(ui.StyleDim.Render("↑↓ select · tab complete · enter use · esc close"))
+	hint := "↑↓ select · tab complete · enter use · esc close"
+	if m.slash == slashFreq {
+		hint = "↑↓ select · enter use · ctrl+d forget · esc close"
+	}
+	b.WriteString(ui.StyleDim.Render(hint))
 	return b.String()
 }

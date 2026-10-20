@@ -1,4 +1,3 @@
-// Package api is a client for the Prisma SD-WAN endpoints of the SASE API.
 package api
 
 import (
@@ -21,13 +20,11 @@ type Client struct {
 	limiter  *rate.Limiter
 	verbose  bool
 
-	tokenMu sync.RWMutex
-	token   string
-	// Zero means the source never said, not expired.
+	tokenMu        sync.RWMutex
+	token          string
 	expires        time.Time
 	refreshStopped bool
 
-	// Tests only.
 	profileBase string
 
 	dialMu sync.RWMutex
@@ -38,12 +35,9 @@ type Client struct {
 
 	src       TokenSource
 	tokenErrs chan error
-	// Keeps a caller's mint from racing refreshLoop's.
-	mintMu sync.Mutex
+	mintMu    sync.Mutex
 }
 
-// An unknown expiry counts as good: a static SCM_TOKEN has no lifetime to
-// check, and refusing to try would be worse.
 func (s *Client) TokenGood(need time.Duration) bool {
 	s.tokenMu.RLock()
 	defer s.tokenMu.RUnlock()
@@ -59,7 +53,6 @@ func (s *Client) TokenGood(need time.Duration) bool {
 	return time.Until(s.expires) >= need
 }
 
-// RefreshStopped means every request from here fails until a human signs in.
 func (s *Client) RefreshStopped() bool {
 	s.tokenMu.RLock()
 	defer s.tokenMu.RUnlock()
@@ -85,8 +78,6 @@ func NewClient(client, wsClient *http.Client, token string, verbose bool, rps fl
 	}
 }
 
-// ElementRecord is LookupElement keeping the body, for callers that want to
-// show what the server actually sent.
 func (s *Client) ElementRecord(ctx context.Context, eid string) ([]byte, Element, error) {
 	body, err := s.get(ctx, "element "+eid, ElementURL(eid))
 	if err != nil {
@@ -126,8 +117,6 @@ func (s *Client) setExpiry(ttl time.Duration) {
 	s.tokenMu.Unlock()
 }
 
-// SetExpiryForTest exists because the fields are unexported and other
-// packages' tests need a near-dead token.
 func (s *Client) SetExpiryForTest(ttl time.Duration) { s.setExpiry(ttl) }
 
 func (s *Client) stopRefreshing() {
@@ -156,8 +145,6 @@ func NewServiceAccountClient(ctx context.Context, client, wsClient *http.Client,
 	return s, nil
 }
 
-// NewTokenSourceClient builds a client around any TokenSource, priming a token
-// before it returns and keeping it fresh afterwards.
 func NewTokenSourceClient(ctx context.Context, client, wsClient *http.Client, src TokenSource, margin time.Duration, verbose bool, rps float64, burst int) (*Client, error) {
 	s := &Client{
 		client:    client,

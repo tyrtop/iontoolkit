@@ -24,8 +24,6 @@ func pressKey(t *testing.T, m tuiModel, key tea.Key) (tuiModel, tea.Cmd) {
 var keyQ = tea.Key{Code: 'q', Text: "q"}
 var keyEsc = tea.Key{Code: tea.KeyEsc}
 
-// q used to quit on the element list, mid-run and on the results page, so the
-// key that leaves every other page killed the app on those three.
 func TestQClosesThePageLikeEsc(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -43,6 +41,10 @@ func TestQClosesThePageLikeEsc(t *testing.T) {
 			m.phase = phaseRunning
 			return m
 		}, phaseResults},
+		{"macros", func(t *testing.T) tuiModel {
+			next, _ := pickModel(t).openMacros()
+			return next.(tuiModel)
+		}, phaseMenu},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -62,7 +64,6 @@ func TestQClosesThePageLikeEsc(t *testing.T) {
 	}
 }
 
-// The menu is the page with nothing behind it.
 func TestQQuitsFromTheMainMenu(t *testing.T) {
 	m := pickModel(t)
 	m.phase = phaseMenu
@@ -88,7 +89,6 @@ func TestQClosesWhatIsOpenBeforeLeavingTheResults(t *testing.T) {
 			closed.resOpen, closed.phase)
 	}
 
-	// An applied filter is the next thing q gives back before the page itself.
 	filtered := m
 	filtered.resFilter.SetValue("0100")
 	filtered.applyResultFilter()

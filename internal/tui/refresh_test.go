@@ -93,16 +93,18 @@ func TestInitStartsARefreshOnlyWhenOneIsOwed(t *testing.T) {
 			}
 			m.spinner = ui.NewSpinner("")
 
-			// tea.Batch returns nil when it is given only the spinner tick, so the
-			// shape of the returned command distinguishes the two cases.
+			const always = 2
 			got := m.Init()
 			if got == nil {
 				t.Fatal("Init() = nil, want at least the spinner tick")
 			}
-			msg := got()
-			_, batched := msg.(tea.BatchMsg)
-			if batched != tt.wantCmds {
-				t.Errorf("Init() produced a batch = %v, want %v", batched, tt.wantCmds)
+			batch, ok := got().(tea.BatchMsg)
+			if !ok {
+				t.Fatalf("Init() = %T, want a batch of at least %d", got(), always)
+			}
+			if refreshing := len(batch) > always; refreshing != tt.wantCmds {
+				t.Errorf("Init() returned %d commands, so refreshing = %v, want %v",
+					len(batch), refreshing, tt.wantCmds)
 			}
 		})
 	}
@@ -231,8 +233,6 @@ func TestFreshCacheSkipsTheRefetchOnceAuthenticated(t *testing.T) {
 	}
 	m.spinner = ui.NewSpinner("")
 
-	// This client has no refresh loop, so watchToken contributes nothing and a
-	// non-nil command means a fetch was started.
 	mm, cmd := m.Update(clientReadyMsg{client: liveClient()})
 	got := mm.(tuiModel)
 	if cmd != nil {
@@ -242,7 +242,6 @@ func TestFreshCacheSkipsTheRefetchOnceAuthenticated(t *testing.T) {
 		t.Errorf("phase = %v, want phasePicking once the client is ready", got.phase)
 	}
 
-	// A stale cache must still fetch, which needs a tenant with credentials.
 	if err := st.Secrets.Set(config.ClientSecretKey("1"), "s"); err != nil {
 		t.Fatalf("seed secret: %v", err)
 	}
@@ -286,9 +285,6 @@ func TestLaunchRefreshDoesNotHijackTheMenuWithABrowser(t *testing.T) {
 }
 
 func TestWatchTokenDoesNotBlockWithoutARefreshLoop(t *testing.T) {
-	// api.NewClient takes a fixed token and starts no refresh loop, so it has no
-	// error channel. Receiving from a nil channel blocks forever, which would
-	// strand a goroutine for the whole session.
 	if got := watchToken(nil); got != nil {
 		t.Error("watchToken(nil) returned a command, which would block on receive")
 	}
@@ -310,7 +306,6 @@ func TestWatchTokenDoesNotBlockWithoutARefreshLoop(t *testing.T) {
 		t.Error("stopped = true for a plain error")
 	}
 
-	// A closed channel means refreshing gave up for good.
 	closed := make(chan error)
 	close(closed)
 	msg, ok = watchToken(closed)().(tokenErrMsg)

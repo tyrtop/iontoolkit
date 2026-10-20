@@ -11,15 +11,12 @@ import (
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
 	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// DrainLive draws batch progress on stderr. stdinTaken says the element list
-// was read from stdin, which the progress UI must then leave alone.
 func DrainLive(ctx context.Context, events <-chan sase.Event, commands []string, total int, sink output.Sink, stdinTaken bool) (int, int, error) {
 	opts := []tea.ProgramOption{
 		tea.WithContext(ctx),
@@ -74,7 +71,7 @@ type streamClosedMsg struct{}
 
 func newBatchModel(events <-chan sase.Event, commands []string, total int, sink output.Sink) batchModel {
 	s := spinner.New()
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	s.Style = ui.StyleSpinner
 	return batchModel{
 		events:   events,
 		commands: commands,
@@ -107,7 +104,6 @@ func waitForEvent(ch <-chan sase.Event) tea.Cmd {
 
 func (m batchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil

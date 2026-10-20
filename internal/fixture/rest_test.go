@@ -8,8 +8,6 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-// fixtureClient is the production client pointed at the fixture transport,
-// which is how a run in fixture mode reaches the REST endpoints.
 func fixtureClient(s *Set, tsg string) *api.Client {
 	c := &http.Client{Transport: s.Transport(tsg)}
 	return api.NewClient(c, c, "fixture", false, 100, 100)
@@ -38,8 +36,6 @@ func TestTheRealClientListsFixtureElements(t *testing.T) {
 		t.Errorf("got %d sites, want 2: %+v", len(sites), sites)
 	}
 
-	// The call that proves a token is accepted; without it every tenant looks
-	// unreachable.
 	if _, err := c.Profile(t.Context()); err != nil {
 		t.Errorf("Profile() error = %v", err)
 	}
@@ -54,9 +50,6 @@ func TestLookupAcrossTenantsIsA404(t *testing.T) {
 		t.Fatalf("LookupElement() on its own tenant error = %v", err)
 	}
 
-	// A token scoped to one tenant cannot see another's elements, and a fixture
-	// that pretended otherwise would hide the case where a site id is mistaken
-	// for an element id.
 	_, err := c.LookupElement(t.Context(), lab.Elements[0].ID)
 	if err == nil {
 		t.Fatal("an element from another tenant resolved")

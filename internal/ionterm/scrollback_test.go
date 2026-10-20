@@ -15,8 +15,6 @@ func feedLines(t *testing.T, c *fakeConn, from, to int) {
 	}
 }
 
-// A session whose output has outrun a six-row screen, which is the only state
-// where scrolling back shows anything.
 func scrolledSession(t *testing.T, lines int) (*Session, *fakeConn) {
 	t.Helper()
 	d := &fakeDialer{conn: newFakeConn(nil)}
@@ -52,7 +50,6 @@ func TestScrolledViewReachesLinesThatLeftTheScreen(t *testing.T) {
 		t.Fatalf("the first line is still on screen, so nothing scrolled off:\n%s", plain(live.Content))
 	}
 
-	// Far enough back to reach the first line ever written.
 	back := s.ScrolledView(40, 6, live.Total)
 	if want := live.Total - 6; back.Offset != want {
 		t.Errorf("Offset = %d, want it clamped to %d", back.Offset, want)
@@ -121,5 +118,25 @@ func TestScrolledViewDoesNotRaceDeviceOutput(t *testing.T) {
 		if v := s.ScrolledView(40, 6, 3); v.Total == 0 {
 			t.Fatal("Total = 0 while the device was writing")
 		}
+	}
+}
+
+func TestBufferHoldsTheScrollbackAndTheScreen(t *testing.T) {
+	s, _ := scrolledSession(t, 30)
+
+	got := s.Buffer()
+	for _, want := range []string{"L001", "L015", "L030"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Buffer() is missing %s:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("Buffer() carries escape codes, which a clipboard should not:\n%q", got)
+	}
+	if lines := strings.Split(got, "\n"); len(lines) < 30 {
+		t.Errorf("Buffer() has %d lines, want every line written", len(lines))
+	}
+	if strings.HasSuffix(got, "\n") {
+		t.Error("Buffer() ends with the blank prompt rows the screen pads with")
 	}
 }

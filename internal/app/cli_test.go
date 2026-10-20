@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/ui"
 )
 
-// Tests have to ignore whatever the developer has exported. Six variables feed
-// the resolution and any of them changes the answer.
 func clearCredEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
@@ -34,8 +34,6 @@ func serviceTenant(name, tsg string) config.Tenant {
 	return config.Tenant{Name: name, TSGID: tsg, ClientID: "client-" + tsg, Auth: config.AuthServiceAccount}
 }
 
-// The order is the point. A run that picks a different tenant than the user
-// meant shows up as elements that won't answer.
 func TestResolveCredentialsOrder(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -129,8 +127,6 @@ func TestResolveCredentialsReadsTheKeyring(t *testing.T) {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
-	// The CLI used to read the environment only, so a signed-in tenant
-	// couldn't run a single command headless.
 	got, err := ResolveCredentials(st, "")
 	if err != nil {
 		t.Fatalf("ResolveCredentials() error = %v", err)
@@ -166,8 +162,6 @@ func TestResolveCredentialsPrefersTheEnvironmentDeviceLogin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveCredentials() error = %v", err)
 	}
-	// ION_USER naming a different login than the tenant's default must not end
-	// up paired with the default's password.
 	if got.Flags.IONUsername != "bob" {
 		t.Errorf("IONUsername = %q, want ION_USER to win over the tenant default", got.Flags.IONUsername)
 	}
@@ -188,8 +182,6 @@ func TestResolveCredentialsDropsAnEnvironmentTokenForAnExplicitTenant(t *testing
 	if err != nil {
 		t.Fatalf("ResolveCredentials() error = %v", err)
 	}
-	// Keeping the token would sign in as whatever tenant issued it while the
-	// run reports Acme.
 	if got.Flags.Token != "" {
 		t.Errorf("Token = %q, want --tenant to override SCM_TOKEN", got.Flags.Token)
 	}
@@ -263,8 +255,6 @@ func TestResolveCredentialsWithoutAStore(t *testing.T) {
 	}
 }
 
-// A keyring needs no warning. The fallback file does, and only the TUI used to
-// print it.
 func TestCredentialLinesNameThePlaintextStore(t *testing.T) {
 	clearCredEnv(t)
 	cfg := &config.Config{Tenants: []config.Tenant{serviceTenant("Acme", "1")}}
@@ -283,7 +273,6 @@ func TestCredentialLinesNameThePlaintextStore(t *testing.T) {
 			t.Errorf("Lines() = %q, want it to mention %q", lines, want)
 		}
 	}
-	// Naming the store must not print what's in it.
 	if strings.Contains(lines, "s3cr3t") {
 		t.Errorf("Lines() = %q, want no secret in it", lines)
 	}
@@ -302,7 +291,6 @@ func TestCredentialLinesNameThePlaintextStore(t *testing.T) {
 	}
 }
 
-// An OS keyring may not exist on the machine running the tests.
 type fakeKeyring struct{}
 
 func (fakeKeyring) Backend() string            { return "keyring" }
@@ -310,8 +298,6 @@ func (fakeKeyring) Get(string) (string, error) { return "kept", nil }
 func (fakeKeyring) Set(string, string) error   { return nil }
 func (fakeKeyring) Delete(string) error        { return nil }
 
-// Both halves of the paging fix reach a headless run through Defaults. Lose
-// either one and long output hangs until the session times out.
 func TestHeadlessFlagsCarryThePagerHandling(t *testing.T) {
 	clearCredEnv(t)
 	f := BaseFlags()
@@ -321,5 +307,52 @@ func TestHeadlessFlagsCarryThePagerHandling(t *testing.T) {
 	}
 	if len(f.PagerPrompts) == 0 {
 		t.Error("PagerPrompts is empty, want the scraper armed for firmware that ignores --pager-off")
+	}
+}
+
+func TestApplyDisplaySettingsReadsTheStore(t *testing.T) {
+	clearCredEnv(t)
+	t.Cleanup(func() {
+		_ = clock.Use(clock.UTC)
+		ui.Apply(ui.Default())
+	})
+
+	st := seedStore(t, &config.Config{
+		LastTenant: "Acme",
+		Tenants:    []config.Tenant{serviceTenant("Acme", "1")},
+		Zone:       "America/Chicago",
+		Theme:      "mono",
+	})
+	if err := st.Secrets.Set(config.ClientSecretKey("1"), "shh"); err != nil {
+		t.Fatal(err)
+	}
+	ApplyDisplaySettings(st, nil)
+
+	if got := clock.Name(); got != "America/Chicago" {
+		t.Errorf("clock.Name() = %q, want the saved zone", got)
+	}
+	if got := ui.CurrentTheme().Name; got != "mono" {
+		t.Errorf("CurrentTheme() = %q, want the saved theme", got)
+	}
+}
+
+func TestABadZoneDoesNotStopACommand(t *testing.T) {
+	clearCredEnv(t)
+	t.Cleanup(func() { _ = clock.Use(clock.UTC) })
+
+	st := seedStore(t, &config.Config{
+		LastTenant: "Acme",
+		Tenants:    []config.Tenant{serviceTenant("Acme", "1")},
+		Zone:       "Mars/Olympus_Mons",
+	})
+	if err := st.Secrets.Set(config.ClientSecretKey("1"), "shh"); err != nil {
+		t.Fatal(err)
+	}
+	ApplyDisplaySettings(st, nil)
+	if got := clock.Name(); got != clock.UTC {
+		t.Errorf("clock.Name() = %q, want the UTC fallback", got)
+	}
+	if clock.Problem() == "" {
+		t.Error("nothing recorded why the zone was not used")
 	}
 }

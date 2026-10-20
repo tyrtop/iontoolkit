@@ -4,9 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
-// savedStore is a store with something in every place a reset has to reach.
 func savedStore(t *testing.T) (*Store, *Config) {
 	t.Helper()
 	root := t.TempDir()
@@ -35,6 +35,14 @@ func savedStore(t *testing.T) (*Store, *Config) {
 	if err := st.SaveCache(&ElementCache{TSGID: "111"}); err != nil {
 		t.Fatal(err)
 	}
+	cmds := &CommandStore{}
+	cmds.Record("dump device status", "ion 1200", time.Now())
+	if err := cmds.SetFavourite(1, "dump interface status all", "ion 1200"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveCommands(cmds); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.SaveTenantCache(&TenantCache{Account: "someone"}); err != nil {
 		t.Fatal(err)
 	}
@@ -54,8 +62,6 @@ func TestResetLeavesNothingBehind(t *testing.T) {
 		t.Fatalf("Reset() error = %v", err)
 	}
 
-	// Every key the tenant list named. These can only be found through
-	// config.json, which is why it is deleted last.
 	for _, t2 := range cfg.Tenants {
 		for _, u := range t2.Users {
 			if v, err := st.Secrets.Get(IONPassKey(t2.TSGID, u.Name)); err == nil {
@@ -77,8 +83,7 @@ func TestResetLeavesNothingBehind(t *testing.T) {
 		st.configPath(),
 		st.tenantsPath(),
 		st.cacheDir(),
-		// Keeping this would leave the identity provider's session cookie, so
-		// the reset would not have signed anyone out.
+		st.commandsPath(),
 		st.BrowserDir(),
 		filepath.Join(st.Root, "secrets.json"),
 	} {
@@ -107,8 +112,6 @@ func TestResetOnAFreshStoreIsNotAnError(t *testing.T) {
 func TestResetDeletesSecretsBeforeTheConfigThatNamesThem(t *testing.T) {
 	st, _ := savedStore(t)
 
-	// The order is the whole correctness argument: a reset that removed
-	// config.json first could never name the keyring entries again.
 	st.Secrets = &orderSpy{Secrets: st.Secrets, configPath: st.configPath()}
 	if err := st.Reset(); err != nil {
 		t.Fatalf("Reset() error = %v", err)

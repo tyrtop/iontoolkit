@@ -30,9 +30,6 @@ func runElement(ctx context.Context, client Client, o Options, target Target) (R
 
 	prompt := el.Name + "#"
 
-	// Re-running a session that connected would repeat commands that may
-	// already have taken effect. The retry that matters is the dial, which the
-	// client does for itself.
 	outs, err := attemptSession(ctx, client, o, target, eid, prompt)
 	if err != nil {
 		return Result{}, fmt.Errorf("element %s: run: %w", eid, err)

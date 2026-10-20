@@ -72,7 +72,6 @@ func TestReapKeepsTheActiveTabInRange(t *testing.T) {
 
 	liveSession(t, m, "a", "a")
 	endedSession(t, m, "b", "b")
-	// The ended session is the active one, being the most recently opened.
 	if got := m.ActiveIndex(); got != 1 {
 		t.Fatalf("ActiveIndex() = %d, want the newest tab active", got)
 	}

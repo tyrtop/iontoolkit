@@ -72,8 +72,6 @@ func TestWatchCredentialStopsTheRunWhenTheCredentialIsSpent(t *testing.T) {
 	}
 }
 
-// The CLI and the TUI read the same settings, so a flag has to be the only
-// thing that moves one of them off what the other would have done.
 func TestBatchOutputPrefersFlagsOverSettings(t *testing.T) {
 	app.Debug = true
 	t.Cleanup(func() {
@@ -109,8 +107,6 @@ func TestBatchOutputPrefersFlagsOverSettings(t *testing.T) {
 		t.Errorf("batchOutput() = %q/%q, want the flags to win", format, orient)
 	}
 
-	// A typo is an error before the run starts, not a silent fall back to the
-	// default -- a fleet written out the wrong way round is a re-run.
 	flagOrient = "sideways"
 	if _, _, _, err := batchOutput(); err == nil {
 		t.Error("batchOutput() error = nil, want an unknown orientation to fail")

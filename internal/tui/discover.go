@@ -24,8 +24,6 @@ func discoverTenants(ctx context.Context, timeout time.Duration, st *config.Stor
 	}
 }
 
-// startDiscover signs in and finds out which tenants the account can reach.
-// Nothing is typed and nothing is added: the portal decides the list.
 func (m tuiModel) startDiscover() (tea.Model, tea.Cmd) {
 	m.status = ""
 	m.phase = phaseDiscover
@@ -42,24 +40,14 @@ func (m tuiModel) viewDiscover() string {
 	return b.String()
 }
 
-// tenantChoice is one row of the tenant list, which merges what the signed-in
-// account can reach with whatever has a saved record of its own. A service
-// account only ever appears through the saved side, since it carries exactly
-// one tenant and cannot be discovered.
 type tenantChoice struct {
-	name  string
-	tsg   string
-	known bool // the browser account can reach it
-	saved bool // has a config record, so it may hold ION users or a secret
-	// serviceAccount means its saved record carries a service account rather
-	// than a browser credential, which is the only thing reachable without a
-	// browser sign-in.
+	name           string
+	tsg            string
+	known          bool
+	saved          bool
 	serviceAccount bool
 }
 
-// mergeKey identifies a tenant across the two sources. The tenant ID is the
-// real identity, but a record saved without one must not collapse into every
-// other such record, so its name stands in.
 func mergeKey(tsg, name string) string {
 	if tsg != "" {
 		return "tsg:" + tsg
@@ -81,8 +69,6 @@ func (m tuiModel) tenantChoices() []tenantChoice {
 			cur := merged[k]
 			cur.tsg = t.TSGID
 			cur.saved = true
-			// A saved record names the tenant, since that name is what the user
-			// sees elsewhere and what the config is keyed by.
 			cur.name = t.Name
 			cur.serviceAccount = !t.UsesBrowser()
 			merged[k] = cur
@@ -99,9 +85,6 @@ func (m tuiModel) tenantChoices() []tenantChoice {
 	return out
 }
 
-// switchChoices is what the switch page offers. In service account mode the
-// browser-discovered tenants are left out: a service account credential cannot
-// reach them, and listing them gives a page of tenants that all fail to connect.
 func (m tuiModel) switchChoices() []tenantChoice {
 	all := m.tenantChoices()
 	if m.authMode != authTenant {
@@ -113,18 +96,48 @@ func (m tuiModel) switchChoices() []tenantChoice {
 			out = append(out, c)
 		}
 	}
+
+	if m.hasTenant && !m.tenant.UsesBrowser() {
+		found := false
+		for _, c := range out {
+			if c.tsg == m.tenant.TSGID && c.name == m.tenant.Name {
+				found = true
+			}
+		}
+		if !found {
+			out = append(out, tenantChoice{
+				name: m.tenant.Name, tsg: m.tenant.TSGID,
+				serviceAccount: true,
+			})
+		}
+	}
 	return out
 }
 
-// useTenant makes a tenant active, creating its record the first time it is
-// used. Discovered tenants are browser-backed by definition.
+func (m tuiModel) switchAt(cursor int) (tenantChoice, bool) {
+	choices := m.switchChoices()
+	if m.authMode == authTenant {
+		cursor--
+	}
+	if cursor < 0 || cursor >= len(choices) {
+		return tenantChoice{}, false
+	}
+	return choices[cursor], true
+}
+
+func (m tuiModel) switchRows() int {
+	n := len(m.switchChoices())
+	if m.authMode == authTenant {
+		n++
+	}
+	return n
+}
+
 func (m tuiModel) useTenant(c tenantChoice) (tuiModel, error) {
 	t, ok := m.cfg.Tenant(c.name)
 	if !ok || t.TSGID != c.tsg {
 		t = config.Tenant{Name: c.name, TSGID: c.tsg, Auth: config.AuthBrowser}
 	}
-	// Working in a tenant puts it in the set, so the element list and its
-	// search cover it from then on.
 	t.Added = true
 	m.cfg.Upsert(t)
 	m.cfg.LastTenant = t.Name
@@ -152,9 +165,6 @@ func (m tuiModel) useTenant(c tenantChoice) (tuiModel, error) {
 	return m, nil
 }
 
-// browserTenants are the tenants reachable through the signed-in account, plus
-// any that already have a browser-backed record. This is the list "sign in with
-// browser" leads to.
 func (m tuiModel) browserTenants() []tenantChoice {
 	var out []tenantChoice
 	for _, c := range m.tenantChoices() {
@@ -165,9 +175,6 @@ func (m tuiModel) browserTenants() []tenantChoice {
 	return out
 }
 
-// serviceTenants are the tenants that exist only because a service account was
-// configured for them. They cannot be discovered, so they are managed under
-// settings rather than appearing in the browser account's list.
 func (m tuiModel) serviceTenants() []tenantChoice {
 	var out []tenantChoice
 	for _, c := range m.tenantChoices() {
@@ -190,12 +197,9 @@ func (m tuiModel) tenantAuth(c tenantChoice) string {
 	return ""
 }
 
-// pickedSet is which discovered tenants are ticked in the picker.
 func (m tuiModel) startTenantPick() (tuiModel, tea.Cmd) {
 	m.picked = map[string]bool{}
 	for _, t := range m.discovered {
-		// Anything already in the working set starts ticked, so re-listing is
-		// not a way to lose it.
 		if m.cfg.IsAdded(t.ID) {
 			m.picked[t.ID] = true
 		}
@@ -243,8 +247,6 @@ func (m tuiModel) onTenantPickKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// saveTenantPick turns the ticks into the working set. Records are created for
-// newly added tenants, since that is where their ION users will live.
 func (m tuiModel) saveTenantPick() (tea.Model, tea.Cmd) {
 	if len(m.picked) == 0 {
 		m.status = "pick at least one tenant"
@@ -265,7 +267,6 @@ func (m tuiModel) saveTenantPick() (tea.Model, tea.Cmd) {
 		}
 		rec.Added = m.picked[d.ID]
 		if !rec.Added && !has {
-			// Never added and never configured: nothing worth recording.
 			continue
 		}
 		m.cfg.Upsert(rec)
@@ -312,8 +313,6 @@ func (m tuiModel) viewTenantPick() string {
 		if m.picked[t.ID] {
 			box = "[x] "
 		}
-		// Pad the plain text before styling, or the escape codes count towards
-		// the width and the id shifts between rows.
 		row := box + fmt.Sprintf("%-32s %s", ui.Truncate(t.Name, 32), t.ID)
 		if i == m.pickCursor {
 			cursor = ui.StyleCmd.Render("> ")

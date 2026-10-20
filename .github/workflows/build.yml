@@ -48,9 +48,18 @@ jobs:
           path: docs/flags.md
 
       - name: Test
-        # Discover's first sign-in opens a real window, which chromedp will not
-        # do without a display. Xvfb comes with the runner image.
-        run: xvfb-run -a go test -race -cover -timeout 5m ./...
+        # Xvfb where the image has it, since Discover's first sign-in opens a
+        # real window and chromedp will not without a display. Not required:
+        # the browser test skips itself when there is no DISPLAY.
+        #
+        # -p 1 because two packages reach config.DebugRoot(), one fixed path
+        # shared by every test binary.
+        run: |
+          if command -v xvfb-run >/dev/null 2>&1; then
+            xvfb-run -a go test -race -cover -p 1 -timeout 5m ./...
+          else
+            go test -race -cover -p 1 -timeout 5m ./...
+          fi
 
       - name: Build Linux
         run: |

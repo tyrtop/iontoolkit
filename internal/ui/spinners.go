@@ -1,9 +1,6 @@
 package ui
 
-import (
-	"charm.land/bubbles/v2/spinner"
-	"charm.land/lipgloss/v2"
-)
+import "charm.land/bubbles/v2/spinner"
 
 type spinnerChoice struct {
 	name string
@@ -40,13 +37,36 @@ func SpinnerName(name string) string {
 	return spinnerChoices[spinnerIndex(name)].name
 }
 
-func NextSpinnerName(name string) string {
-	return spinnerChoices[(spinnerIndex(name)+1)%len(spinnerChoices)].name
+func KnownSpinner(name string) bool {
+	for _, c := range spinnerChoices {
+		if c.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func SpinnerNames() []string {
+	out := make([]string, 0, len(spinnerChoices))
+	for _, c := range spinnerChoices {
+		out = append(out, c.name)
+	}
+	return out
 }
 
 func NewSpinner(name string) spinner.Model {
 	s := spinner.New()
 	s.Spinner = spinnerChoices[spinnerIndex(name)].spin
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	s.Style = StyleSpinner
 	return s
+}
+
+func SpinnerFrame(name string) string { return SpinnerFrameAt(name, 0) }
+
+func SpinnerFrameAt(name string, at int) string {
+	frames := spinnerChoices[spinnerIndex(name)].spin.Frames
+	if len(frames) == 0 {
+		return ""
+	}
+	return frames[((at%len(frames))+len(frames))%len(frames)]
 }

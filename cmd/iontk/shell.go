@@ -44,8 +44,6 @@ func runShell(ctx context.Context, eid string) error {
 		return err
 	}
 
-	// The handshake is the only authentication, so an open shell outlives its
-	// token; only the next dial breaks.
 	go func() {
 		for err := range client.TokenErrors() {
 			fmt.Fprintln(os.Stderr, err)

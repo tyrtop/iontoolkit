@@ -55,7 +55,6 @@ func TestElementsFromSeveralTenantsAreOneList(t *testing.T) {
 		t.Error("the tenant column did not show with two tenants loaded")
 	}
 
-	// Re-fetching one tenant replaces only its own rows.
 	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
 		{ID: "a", Name: "s0100-rtr-01"},
 	})
@@ -73,8 +72,6 @@ func TestElementsFromSeveralTenantsAreOneList(t *testing.T) {
 
 func TestSameElementIDInTwoTenantsStaysDistinct(t *testing.T) {
 	m := multiModel(t)
-	// Element IDs are opaque; nothing guarantees they never repeat, and the
-	// selection map would silently merge them if the tenant were left out.
 	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "same", Name: "a"}})
 	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{{ID: "same", Name: "b"}})
 
@@ -120,8 +117,6 @@ func TestEachElementDialsWithItsOwnTenantsClient(t *testing.T) {
 	if got[1].Client != second {
 		t.Error("the second element did not get its own tenant's client")
 	}
-	// A tenant that was never loaded has no client; the run reports that per
-	// element rather than refusing the whole batch.
 	if got[2].Client != nil {
 		t.Error("an unloaded tenant handed out a client")
 	}
@@ -185,7 +180,6 @@ func TestLoadFromCacheAggregatesActiveTenantsOnly(t *testing.T) {
 			t.Error("an inactive tenant's elements were loaded")
 		}
 	}
-	// The age shown is the oldest of the tenants, since that is what is stale.
 	if m.cacheState != cacheCached {
 		t.Errorf("cacheState = %v, want cacheCached", m.cacheState)
 	}
@@ -195,8 +189,6 @@ func TestLoadFromCacheAggregatesActiveTenantsOnly(t *testing.T) {
 }
 
 func TestLoadFromCacheKeepsSiteNames(t *testing.T) {
-	// Site names were fetched and then dropped, so every site showed a raw id
-	// until the first refresh landed. The cache has to carry them.
 	m := multiModel(t)
 	if err := m.store.SaveCache(&config.ElementCache{
 		TSGID: "111", FetchedAt: time.Now().Add(-time.Minute),
@@ -213,7 +205,6 @@ func TestLoadFromCacheKeepsSiteNames(t *testing.T) {
 	if got := m.siteName(m.all[0]); got != "Store 0100" {
 		t.Errorf("siteName() = %q, want the cached name rather than the raw id", got)
 	}
-	// And it is searchable, which a raw id deliberately is not.
 	m.filter.SetValue("store 0100")
 	m.applyFilter()
 	if len(m.matches) != 1 {
@@ -229,7 +220,6 @@ func TestLoadFromCacheMarksAStaleAggregateAsOwed(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveCache() error = %v", err)
 	}
-	// One fresh tenant and one stale one means the aggregate is stale.
 	if err := m.store.SaveCache(&config.ElementCache{
 		TSGID: "222", FetchedAt: time.Now().Add(-40 * time.Minute),
 		Elements: []api.Element{{ID: "c"}},
@@ -245,8 +235,6 @@ func TestLoadFromCacheMarksAStaleAggregateAsOwed(t *testing.T) {
 
 func TestRefreshSkipsTenantsWithNoCredentialRatherThanFailing(t *testing.T) {
 	m := multiModel(t)
-	// Only the first tenant can authenticate; browser tenants need a tenant ID,
-	// so blank one out to make it unusable.
 	m.cfg.Tenants[1].TSGID = ""
 	m.spinner = ui.NewSpinner("")
 
@@ -296,7 +284,6 @@ func TestAggregateFinishesOnlyWhenEveryTenantHasAnswered(t *testing.T) {
 	if m.cacheState != cacheUpdating {
 		t.Errorf("cacheState = %v, want still updating with one tenant outstanding", m.cacheState)
 	}
-	// The list is usable before the slowest tenant answers.
 	if len(m.all) != 1 {
 		t.Errorf("got %d elements, want the first tenant's already shown", len(m.all))
 	}
@@ -342,9 +329,6 @@ func TestOneTenantFailingDoesNotLoseTheOthers(t *testing.T) {
 }
 
 func TestATenantTheAccountCannotReachIsNotCalledASignInProblem(t *testing.T) {
-	// A tenant without rights fails exactly as a dead session does, so the
-	// wording must not insist a sign-in is the answer, and one bad tenant must
-	// not mark the whole credential dead.
 	m := multiModel(t)
 	m.spinner = ui.NewSpinner("")
 	m.pendingTenants = 2
@@ -376,7 +360,6 @@ func TestATenantTheAccountCannotReachIsNotCalledASignInProblem(t *testing.T) {
 		t.Error("the problem tenant was not recorded for settings to flag")
 	}
 
-	// It clears once that tenant answers.
 	mm, _ = got.Update(tenantElementsMsg{tsg: "222", tenant: "CIS_LAB", elements: nil})
 	if cleared := mm.(tuiModel); cleared.tenantIssues["222"] != "" {
 		t.Error("the issue survived a successful fetch")
@@ -507,8 +490,6 @@ func TestParseMode(t *testing.T) {
 	}
 }
 
-// The menu has one mode now, the credential one, and both keys reach it. Shell
-// versus batch belongs to the element list, where it is visible.
 func TestTheMenuOnlySwitchesTheCredentialMode(t *testing.T) {
 	for _, key := range []string{"alt+m", "alt+a"} {
 		t.Run(key, func(t *testing.T) {
@@ -549,7 +530,7 @@ func TestDefaultModeSettingPersistsAndApplies(t *testing.T) {
 	m.phase = phaseSettings
 	m.setSection = secGeneral
 	m.setFocus = focusContent
-	m.setCursor = 2
+	m.setCursor = modeRow
 	m.spinner = ui.NewSpinner("")
 
 	if got := m.defaultMode(); got != modeShell {
@@ -580,7 +561,7 @@ func TestSettingsChecklistControlsTheAggregate(t *testing.T) {
 	m.phase = phaseSettings
 	m.setSection = secTenants
 	m.setFocus = focusContent
-	m.setCursor = 1 // Niagara Bottling
+	m.setCursor = 1
 
 	mm, _ := m.onTenantsKey("space")
 	got := mm.(tuiModel)
@@ -588,8 +569,6 @@ func TestSettingsChecklistControlsTheAggregate(t *testing.T) {
 	if got.cfg.Tenants[1].Added {
 		t.Error("space did not exclude the tenant")
 	}
-	// Excluding a tenant has to drop its elements, or the list keeps showing
-	// devices the user just said they did not want.
 	if len(got.all) != 1 {
 		t.Errorf("got %d elements, want the excluded tenant's dropped", len(got.all))
 	}
@@ -648,8 +627,6 @@ func TestUsingATenantIncludesItInTheAggregate(t *testing.T) {
 }
 
 func TestClientPoolIsSharedAcrossModelCopies(t *testing.T) {
-	// The model is copied by value constantly; a pool that was not shared would
-	// silently lose clients between updates.
 	m := multiModel(t)
 	c := liveClient()
 	m.pool.set("111", c)
@@ -680,8 +657,6 @@ func TestClientPoolIsSharedAcrossModelCopies(t *testing.T) {
 }
 
 func TestTheTenantColumnCanAppearAndDisappear(t *testing.T) {
-	// The column count changes with the number of tenants loaded, and the table
-	// panics if its rows and columns ever disagree.
 	m := multiModel(t)
 	m.width, m.height = 110, 30
 
@@ -691,13 +666,11 @@ func TestTheTenantColumnCanAppearAndDisappear(t *testing.T) {
 		t.Fatal("two tenants did not produce a tenant column")
 	}
 
-	// Back down to one tenant, which removes the column.
 	m.mergeTenantElements("222", "Niagara Bottling", nil)
 	if m.showTenantColumn() {
 		t.Error("the tenant column stayed after the second tenant emptied")
 	}
 
-	// And up again.
 	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{{ID: "c", Name: "two"}})
 	if !m.showTenantColumn() {
 		t.Error("the tenant column did not come back")
@@ -710,14 +683,11 @@ func TestMenuSecondEntryFollowsTheCredentialMode(t *testing.T) {
 		want   string
 		absent string
 	}{
-		{authBrowser, "sign in with browser", "service accounts"},
-		// Named for what it lists: one tenant per account, not every tenant.
-		{authTenant, "service accounts", "browser"},
+		{authBrowser, "Sign In with Browser", "Service Accounts"},
+		{authTenant, "Service Accounts", "browser"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.mode.String(), func(t *testing.T) {
-			// Both element list modes must give the same answer: the two axes
-			// are independent.
 			for _, listMode := range pickModes {
 				m := multiModel(t)
 				m.authMode = tt.mode
@@ -801,7 +771,6 @@ func TestPickingTheWorkingSet(t *testing.T) {
 	next, _ := m.startTenantPick()
 	m = next
 
-	// Tick the first and third.
 	mm, _ := m.onTenantPickKey("space")
 	m = mm.(tuiModel)
 	m.pickCursor = 2
@@ -825,7 +794,6 @@ func TestPickingTheWorkingSet(t *testing.T) {
 	if !ids["1643707006"] || !ids["1984021017"] {
 		t.Errorf("working set = %+v, want the two ticked tenants", added)
 	}
-	// The untouched tenant is not recorded at all.
 	if got.cfg.IsAdded("1538107912") {
 		t.Error("an unticked tenant ended up in the set")
 	}
@@ -877,8 +845,6 @@ func TestPickerSelectAllToggles(t *testing.T) {
 }
 
 func TestSearchSpansTheWholeWorkingSet(t *testing.T) {
-	// The point of the working set: one filter reaches every tenant in it,
-	// rather than only the tenant that happens to be current.
 	m := multiModel(t)
 	m.authMode = authBrowser
 	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
@@ -914,7 +880,6 @@ func TestAggregateSpansTheWorkingSetNotJustTheCurrentTenant(t *testing.T) {
 		t.Errorf("aggregate has %d tenants, want the whole working set: %+v", len(got), got)
 	}
 
-	// Tenant mode is a single service account, so it spans one.
 	m.authMode = authTenant
 	if got := m.aggregateTenants(); len(got) != 1 {
 		t.Errorf("tenant mode aggregate has %d tenants, want 1", len(got))
@@ -926,15 +891,37 @@ func TestRefreshNoteGivesFeedback(t *testing.T) {
 	m.spinner = ui.NewSpinner("")
 
 	m.cacheState = cacheUpdated
-	if got := m.refreshNote(); got != "" {
-		t.Errorf("refreshNote() = %q, want nothing when idle", got)
+	if got := plain(m.refreshNote()); !strings.Contains(got, "Elements refreshed!") {
+		t.Errorf("refreshNote() = %q, want it to say the elements are fresh", got)
+	}
+	if got := plain(m.refreshNote()); !strings.Contains(got, "last updated") {
+		t.Errorf("refreshNote() = %q, want it to say how long ago", got)
+	}
+
+	if n := strings.Count(m.refreshNote(), "\n"); n != 1 {
+		t.Errorf("refreshNote() has %d newlines, want the two notes stacked", n)
 	}
 
 	m.cacheState = cacheUpdating
 	note := plain(m.refreshNote())
-	if !strings.Contains(note, "refreshing") {
-		t.Errorf("refreshNote() = %q, want it to say refreshing", note)
+	if !strings.Contains(note, "refreshing elements") {
+		t.Errorf("refreshNote() = %q, want it to name the element refresh", note)
 	}
+	m.haInFlight = map[string]bool{"1": true}
+	m.haTotal, m.haDone = 312, 48
+	if got := plain(m.refreshNote()); !strings.Contains(got, "refreshing HA 48/312 clusters") {
+		t.Errorf("refreshNote() = %q, want the HA sweep named and counted", got)
+	}
+	m.haInFlight = nil
+	m.haAt = time.Now()
+	if got := plain(m.refreshNote()); strings.Contains(got, "refreshing HA") {
+		t.Errorf("refreshNote() = %q, want the sweep's note gone", got)
+	}
+	if got := plain(m.refreshNote()); !strings.Contains(got, "HA refreshed!") {
+		t.Errorf("refreshNote() = %q, want it to say the sweep finished", got)
+	}
+	m.haTotal, m.haDone, m.haAt = 0, 0, time.Time{}
+	m.cacheState = cacheUpdating
 
 	m.pendingTenants = 3
 	if got := plain(m.refreshNote()); !strings.Contains(got, "3 tenants") {
@@ -948,8 +935,6 @@ func TestRefreshNoteGivesFeedback(t *testing.T) {
 }
 
 func TestTenantRowsDoNotShiftWithSelection(t *testing.T) {
-	// Padding a styled string counts its escape codes towards the width, which
-	// made the tenant id jump between rows.
 	m := discoverModel(t)
 	seedKnown(t, m,
 		config.KnownTenant{TSGID: "1643707006", Name: "CIS root"},
@@ -976,7 +961,6 @@ func TestTenantRowsDoNotShiftWithSelection(t *testing.T) {
 		t.Errorf("ids start at columns %d and %d, want them aligned:\n%s", a1, b1, first)
 	}
 
-	// Moving the cursor must not move anything.
 	m.switchCursor = 1
 	second := plain(m.viewSwitch())
 	if a2, b2 := columnOf(second, "1643707006"), columnOf(second, "1538107912"); a2 != a1 || b2 != b1 {
@@ -1030,7 +1014,6 @@ func credsModel(t *testing.T) tuiModel {
 func TestRunAsIsChosenPerTenant(t *testing.T) {
 	m := credsModel(t)
 
-	// Defaults to begin with.
 	if got := m.runAsFor("111"); got != "tsc-ops" {
 		t.Errorf("runAsFor(111) = %q, want the default", got)
 	}
@@ -1038,7 +1021,6 @@ func TestRunAsIsChosenPerTenant(t *testing.T) {
 		t.Errorf("runAsFor(222) = %q, want the default", got)
 	}
 
-	// Choosing a non-default user in one tenant must not touch the other.
 	m.setRunAs("111", "tsc-ro")
 	if got := m.runAsFor("111"); got != "tsc-ro" {
 		t.Errorf("runAsFor(111) = %q, want the chosen user", got)
@@ -1056,7 +1038,6 @@ func TestRunAsIsChosenPerTenant(t *testing.T) {
 		t.Errorf("credsFor(222) = %+v, want its own pair", b)
 	}
 
-	// Clearing falls back to the default rather than to nothing.
 	m.setRunAs("111", "")
 	if got := m.runAsFor("111"); got != "tsc-ops" {
 		t.Errorf("runAsFor(111) = %q, want the default back", got)
@@ -1066,9 +1047,8 @@ func TestRunAsIsChosenPerTenant(t *testing.T) {
 func TestUsersPanelOpensOnTheHighlightedElementsTenant(t *testing.T) {
 	m := credsModel(t)
 	m.phase = phasePicking
-	m.tenant = m.cfg.Tenants[0] // browsing Tractor Supply
+	m.tenant = m.cfg.Tenants[0]
 
-	// Put the cursor on the Niagara element.
 	for i, idx := range m.matches {
 		if m.all[idx].TSG == "222" {
 			m.table.SetCursor(i)
@@ -1111,11 +1091,10 @@ func TestUsersPanelCyclesTenants(t *testing.T) {
 func TestUsersPanelActsOnItsOwnTenant(t *testing.T) {
 	m := credsModel(t)
 	m.phase = phaseUsers
-	m.usersTSG = "222" // Niagara, while browsing Tractor Supply
+	m.usersTSG = "222"
 	m.tenant = m.cfg.Tenants[0]
 	m.ionUser = "tsc-ops"
 
-	// enter runs as that tenant's user without touching the browsed tenant.
 	mm, _ := m.onUsersKey("enter")
 	got := mm.(tuiModel)
 	if got.runAsFor("222") != "nb-ops" {
@@ -1128,7 +1107,6 @@ func TestUsersPanelActsOnItsOwnTenant(t *testing.T) {
 		t.Errorf("status = %q, want the tenant named", got.status)
 	}
 
-	// p edits that tenant's password, not the browsed tenant's.
 	mm, _ = m.onUsersKey("p")
 	pw := mm.(tuiModel)
 	if pw.formTenantName != "Niagara Bottling" {
@@ -1146,8 +1124,6 @@ func TestPasswordPromptAsksForEveryTenantInTheSelection(t *testing.T) {
 	setTestClient(&m, liveClient())
 	m.pool.set("222", liveClient())
 
-	// Niagara has no stored password, and it is the second tenant in the
-	// selection: checking only the first would sail straight past it.
 	if err := m.store.Secrets.Delete(config.IONPassKey("222", "nb-ops")); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
@@ -1173,10 +1149,10 @@ func TestPasswordPromptAsksForEveryTenantInTheSelection(t *testing.T) {
 
 func TestPasswordIsSavedAgainstTheTenantThatWasAsked(t *testing.T) {
 	m := credsModel(t)
-	m.tenant = m.cfg.Tenants[0] // browsing Tractor Supply
+	m.tenant = m.cfg.Tenants[0]
 	m.ionUser = "tsc-ops"
 
-	target := m.cfg.Tenants[1] // Niagara
+	target := m.cfg.Tenants[1]
 	mm, _ := m.openPasswordForm(target, "nb-ops")
 	m = mm.(tuiModel)
 	m.form[0].input.SetValue("brand-new")
@@ -1184,11 +1160,9 @@ func TestPasswordIsSavedAgainstTheTenantThatWasAsked(t *testing.T) {
 	mm, _ = m.submitForm()
 	got := mm.(tuiModel)
 
-	// The password belongs to the tenant that was asked about.
 	if v, err := got.store.Secrets.Get(config.IONPassKey("222", "nb-ops")); err != nil || v != "brand-new" {
 		t.Errorf("password for 222 = %q (err %v), want it saved there", v, err)
 	}
-	// And must not have landed under the browsed tenant.
 	if v, _ := got.store.Secrets.Get(config.IONPassKey("111", "nb-ops")); v != "" {
 		t.Errorf("password leaked into the browsed tenant: %q", v)
 	}
@@ -1258,8 +1232,6 @@ func TestAltWClosesWhatYouAreIn(t *testing.T) {
 
 		mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'w', Mod: tea.ModAlt}), "alt+w")
 		got := mm.(tuiModel)
-		// Nothing was open here, but the point is that leaving the list is not
-		// a teardown: alt+t must still be able to bring a session back.
 		if got.sessions == nil {
 			t.Error("the session manager was discarded")
 		}
@@ -1295,11 +1267,8 @@ func TestAltWClosesWhatYouAreIn(t *testing.T) {
 }
 
 func TestAddingAUserToATenantWithNoRecordYet(t *testing.T) {
-	// A discovered tenant has no config record until it is worked in. Pressing
-	// a in the users panel used to open the form and then fail on save with
-	// "tenant ... is gone", which blocked ever giving it a login.
 	m := multiModel(t)
-	m.cfg = &config.Config{} // nothing recorded at all
+	m.cfg = &config.Config{}
 	m.mergeTenantElements("333", "Synovus", []api.Element{{ID: "s1", Name: "syn-rtr-01"}})
 	m.phase = phaseUsers
 	m.usersTSG = "333"
@@ -1350,8 +1319,6 @@ func TestAddingAUserToATenantWithNoRecordYet(t *testing.T) {
 }
 
 func TestCrossTenantBatchPairsEachElementWithItsTenantsLogin(t *testing.T) {
-	// The pairing is the part that matters here; that RunStream then dials with
-	// it is proven in internal/sase against a stub client.
 	m := credsModel(t)
 	m.mode = modeBatch
 	setTestClient(&m, liveClient())
@@ -1393,7 +1360,6 @@ func TestCrossTenantBatchRefusesWhenATenantHasNoLogin(t *testing.T) {
 	m.pool.set("222", liveClient())
 	m.cmdInput = newField("", "", false).input
 
-	// Niagara loses its password, so the run must stop and say which tenant.
 	if err := m.store.Secrets.Delete(config.IONPassKey("222", "nb-ops")); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
@@ -1412,8 +1378,6 @@ func TestCrossTenantBatchRefusesWhenATenantHasNoLogin(t *testing.T) {
 }
 
 func TestBatchAcrossTenantsAfterSuppliedPasswords(t *testing.T) {
-	// The reported sequence: pick routers in two tenants, get prompted for the
-	// missing login, supply it, and the run should then go ahead.
 	m := credsModel(t)
 	m.mode = modeBatch
 	m.phase = phasePicking
@@ -1440,7 +1404,6 @@ func TestBatchAcrossTenantsAfterSuppliedPasswords(t *testing.T) {
 	mm, _ = prompt.submitForm()
 	after := mm.(tuiModel)
 
-	// With every tenant now covered, batch mode moves on to the command entry.
 	if after.phase != phaseCommand {
 		t.Fatalf("phase = %v, want the command prompt once all logins are in", after.phase)
 	}
@@ -1453,11 +1416,8 @@ func TestBatchAcrossTenantsAfterSuppliedPasswords(t *testing.T) {
 }
 
 func TestSelectingFromACachedListConnectsItsTenant(t *testing.T) {
-	// A launch that finds a fresh cache never fetches, so no tenant has a
-	// client. Selecting an element then looked like a disconnected tenant; it
-	// has to authenticate on demand instead.
 	m := credsModel(t)
-	m.pool = newClientPool() // nothing connected, as after a cached launch
+	m.pool = newClientPool()
 	m.phase = phasePicking
 	m.mode = modeShell
 	m.spinner = ui.NewSpinner("")
@@ -1609,7 +1569,6 @@ func TestEnsureClientsSkipsWhatIsAlreadyConnected(t *testing.T) {
 func TestEnsureClientsSkipsTenantsWithNoCredential(t *testing.T) {
 	m := credsModel(t)
 	m.pool = newClientPool()
-	// A browser tenant needs a tenant ID to validate; blank it out.
 	m.cfg.Tenants[1].TSGID = ""
 	m.cfg.Tenants[1].Name = "Broken"
 
@@ -1620,8 +1579,6 @@ func TestEnsureClientsSkipsTenantsWithNoCredential(t *testing.T) {
 }
 
 func TestAFailedTenantIsNotRetriedForever(t *testing.T) {
-	// The replay path would otherwise connect, fail, replay and connect again
-	// without end.
 	m := credsModel(t)
 	m.pool = newClientPool()
 	m.spinner = ui.NewSpinner("")
@@ -1631,7 +1588,6 @@ func TestAFailedTenantIsNotRetriedForever(t *testing.T) {
 	if cmds := m.ensureClients([]string{"222"}); len(cmds) != 0 {
 		t.Errorf("got %d connect commands, want none for a tenant that just failed", len(cmds))
 	}
-	// The healthy tenant is untouched by its neighbour's failure.
 	if cmds := m.ensureClients([]string{"111"}); len(cmds) != 1 {
 		t.Errorf("got %d connect commands for a healthy tenant, want 1", len(cmds))
 	}
@@ -1668,8 +1624,6 @@ func liveClient() *api.Client {
 	return api.NewClient(nil, nil, "test-token", false, 1, 1)
 }
 
-// spentClient sits inside the pre-flight window, where a spent token used to
-// go unnoticed until a dial came back 401.
 func spentClient(t *testing.T) *api.Client {
 	t.Helper()
 	c := api.NewClient(nil, nil, "about-to-expire", false, 1, 1)

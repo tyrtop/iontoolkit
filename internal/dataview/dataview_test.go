@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// fake answers by exact path and records what was asked, which is how the
-// per-row fetching is checked without a tenant.
 type fake struct {
 	bodies map[string]string
 	asked  []string
@@ -28,12 +26,8 @@ type errNotFound string
 
 func (e errNotFound) Error() string { return "status 404 Not Found: " + string(e) }
 
-// builtinNames is what ships, so adding a view does not mean editing every
-// count in this file.
 var builtinNames = []string{"Overview", "Interfaces", "Circuits", "HA"}
 
-// The built-in views are shipped data, so a typo in them is a bug that only
-// shows up in the mode being empty.
 func TestBuiltinViewsLoad(t *testing.T) {
 	set, err := Builtin()
 	if err != nil {
@@ -105,9 +99,6 @@ func TestLoadRejectsWhatAViewMayNotCall(t *testing.T) {
 	}
 }
 
-// A user file adds its views and replaces a built-in of the same name, so
-// somebody who dislikes the shipped Overview can have their own without
-// losing the rest.
 func TestLoadMergesAUserFileOverTheBuiltins(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/views.yaml"
@@ -147,7 +138,6 @@ views:
 		t.Errorf("Overview = %+v, want the user's", v.Sections)
 	}
 
-	// A missing file is the ordinary case, not an error.
 	plain, err := Load(dir + "/nothing.yaml")
 	if err != nil {
 		t.Fatalf("Load() on a missing file error = %v", err)
@@ -157,8 +147,6 @@ views:
 	}
 }
 
-// A broken user file still leaves the built-ins usable: one bad view should
-// not take the mode down.
 func TestLoadKeepsTheBuiltinsWhenTheUserFileIsBroken(t *testing.T) {
 	path := t.TempDir() + "/views.yaml"
 	if err := writeFile(path, "views: [{name: X, fetch: {a: \"/iam/v1/tokens\"}, sections: [{title: T, rows: [{label: L, value: V}]}]}]"); err != nil {
@@ -199,12 +187,9 @@ func TestATableFetchesOncePerRowAndUnwrapsAnEnvelope(t *testing.T) {
 			{"id":"18","name":"45"},
 			{"id":"19","name":"3"}]}`,
 		"/sdwan/v3.9/api/sites/16/elements/15/interfaces/17/status": `{"operational_state":"up","ipv4_addresses":["192.0.2.1/24"]}`,
-		// A bypass pair answers with the envelope, which unwrap takes the
-		// first record out of.
 		"/sdwan/v3.9/api/sites/16/elements/15/interfaces/18/status": `{"count":2,"items":[
 			{"operational_state":"up","ipv4_addresses":null},
 			{"operational_state":"up"}]}`,
-		// 19 is missing, standing in for a status endpoint that refuses.
 	}}
 
 	set, err := Parse([]byte(ifaceView))
@@ -217,7 +202,6 @@ func TestATableFetchesOncePerRowAndUnwrapsAnEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fetch() error = %v", err)
 	}
-	// One list plus one status per row.
 	if len(f.asked) != 4 {
 		t.Errorf("asked %d endpoints, want 4: %v", len(f.asked), f.asked)
 	}
@@ -236,7 +220,6 @@ func TestATableFetchesOncePerRowAndUnwrapsAnEnvelope(t *testing.T) {
 	if got := sec.Table[1].Cells; got[1] != "up" || got[2] != "-" {
 		t.Errorf("row 1 = %q, want the envelope unwrapped", got)
 	}
-	// The row whose status refused still draws, and says why it is thin.
 	last := sec.Table[2]
 	if last.Cells[0] != "3" || last.Cells[1] != "" {
 		t.Errorf("row 2 = %q", last.Cells)
@@ -277,8 +260,6 @@ func TestMaxItemsBoundsTheRequestsATableMakes(t *testing.T) {
 	}
 }
 
-// An id a view needs but the element has not got would otherwise fetch
-// /sites//elements/15/interfaces, which is a different element's business.
 func TestAnEmptyIdIsNotFetched(t *testing.T) {
 	f := &fake{bodies: map[string]string{}}
 	set, err := Parse([]byte(ifaceView))
@@ -298,8 +279,6 @@ func TestAnEmptyIdIsNotFetched(t *testing.T) {
 	}
 }
 
-// A section for something an element has not got stays out of the way, and
-// one whose fetch failed says so rather than drawing blank rows.
 func TestSectionsAreGatedAndErrorsSurface(t *testing.T) {
 	const view = `
 views:
@@ -343,9 +322,6 @@ views:
 	}
 }
 
-// The join both built-in views rely on: a port names the circuit it carries,
-// and a circuit names the port carrying it. One side holds the id in a list,
-// the other holds it plain, and lookup has to match either way round.
 func TestLookupJoinsBothWaysRound(t *testing.T) {
 	ctx := map[string]any{
 		"wans": map[string]any{"items": []any{
@@ -402,24 +378,22 @@ func TestTemplateHelpers(t *testing.T) {
 		want string
 	}{
 		{
-			// Three scales live in one real response, so this is the helper
-			// that stops a view dividing by hand.
 			name: "utc reads 100ns ticks",
 			tmpl: "{{ utc .n }}",
 			ctx:  map[string]any{"n": float64(17923299413050015)},
-			want: "2026-10-18 13:25",
+			want: "2026-10-18 13:25 UTC",
 		},
 		{
 			name: "utc reads milliseconds",
 			tmpl: "{{ utc .n }}",
 			ctx:  map[string]any{"n": float64(1792307867657)},
-			want: "2026-10-18 07:17",
+			want: "2026-10-18 07:17 UTC",
 		},
 		{
 			name: "utc reads seconds",
 			tmpl: "{{ utc .n }}",
 			ctx:  map[string]any{"n": float64(1784373284)},
-			want: "2026-07-18 11:14",
+			want: "2026-07-18 11:14 UTC",
 		},
 		{
 			name: "a field that was never set is blank, not a date",

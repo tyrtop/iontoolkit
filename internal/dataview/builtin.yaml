@@ -11,10 +11,18 @@
 #           runs once per row with {{ .item }} in scope, so a table costs one
 #           request per row -- max_items bounds it.
 # when:     the section is dropped when this renders empty or false.
+# compare:  the GUI-vs-CLI check, which "c" runs on an open page. It is the
+#           only part of a view that logs in to the appliance, so nothing here
+#           happens until that keypress. Its own fetch: reads the portal again
+#           at the same moment, commands: are read-only CLI commands (checked
+#           at load), and each row renders both answers and is marked by
+#           whether they agree. One session serves the whole page.
 #
 # Values are Go templates. Helpers: utc and ago for the API's timestamp
 # integers (never divide those by hand -- the unit varies by field), unwrap to
 # take one record out of an items envelope, first, join, count, yesno, dash.
+# For CLI text: kv reads a "Key : value" line, grep keeps the lines holding a
+# string, lines splits them all, field takes the nth column.
 
 views:
   - name: Overview
@@ -67,12 +75,41 @@ views:
           - label: Tracking
             value: "{{ count .el.spoke_ha_config.track.interfaces }} interface(s)"
 
+    # What the portal holds about this appliance against what the appliance
+    # says about itself. The portal side is confirmed; the CLI key names are
+    # not -- `dump device status` has not been captured, and a key that is
+    # spelled differently reads as "·", nothing to compare, rather than a
+    # disagreement. Open a shell tab, run the command, and fix the names here.
+    compare:
+      fetch:
+        el: /sdwan/v3.2/api/elements/{{ .element_id }}
+      commands:
+        dev: dump device status
+      rows:
+        - label: Serial
+          portal: "{{ .el.serial_number }}"
+          device: "{{ kv .cli.dev \"Serial\" }}"
+        - label: Model
+          portal: "{{ .el.model_name }}"
+          device: "{{ kv .cli.dev \"Model\" }}"
+        - label: Software
+          portal: "{{ .el.software_version }}"
+          device: "{{ kv .cli.dev \"Version\" }}"
+
   - name: Interfaces
     fetch:
       ifs: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces
       # The site's circuits, so a port can name the one it carries rather
       # than printing the id out of site_wan_interface_ids.
       wans: /sdwan/v2.10/api/sites/{{ .site_id }}/waninterfaces
+      # Security zones in two parts, the same way circuits work: the tenant's
+      # zone list has the names, and the element's own bindings say which
+      # interfaces are in which zone. UNVERIFIED against hardware -- no
+      # capture of either body exists, so the field names below are read from
+      # the resource map and the CloudGenix SDK. A name that is wrong prints a
+      # blank cell, not an error, so run it and look at the ZONE column.
+      zones: /sdwan/v2.2/api/securityzones
+      elzones: /sdwan/v2.1/api/sites/{{ .site_id }}/elements/{{ .element_id }}/securityzones
     sections:
       - title: Interfaces
         for_each: ifs.items
@@ -85,13 +122,20 @@ views:
             width: 24
           - header: TYPE
             value: "{{ .item.type }}"
-            width: 13
+            width: 12
           - header: USED FOR
             value: "{{ .item.used_for }}"
             width: 8
           - header: STATE
             value: "{{ (unwrap .st).operational_state }}{{ with (unwrap .st).extended_state }} ({{ . }}){{ end }}"
-            width: 22
+            width: 18
+          # From the status, not the record: the interface record has a
+          # mac_address field and it is null on every interface a real element
+          # answered with. A subinterface reports its parent's, and each half
+          # of a bypass pair reports its own.
+          - header: MAC
+            value: "{{ dash (unwrap .st).mac_address }}"
+            width: 17
           - header: ADDRESS
             value: "{{ dash (first (unwrap .st).ipv4_addresses) }}"
             width: 18
@@ -102,7 +146,14 @@ views:
           # site_wan_interface_ids back to the site's circuit list.
           - header: CIRCUIT
             value: "{{ range .item.site_wan_interface_ids }}{{ with lookup $.wans.items \"id\" . }}{{ .name }} {{ end }}{{ end }}"
-            width: 26
+            width: 20
+          # The binding holds a list of interface ids, which is what lookup
+          # matches either way round; its zone_id then names the zone.
+          - header: ZONE
+            value: "{{ with lookup $.elzones.items \"interface_ids\" .item.id }}{{ with lookup $.zones.items \"id\" .zone_id }}{{ .name }}{{ end }}{{ end }}"
+            # Real zone names are sentences: "TSC Store - Network Management"
+            # is 30 characters, and a name cut in half names nothing.
+            width: 32
 
   # Circuits are the site's, not the element's, so a hub pair shares them.
   # This is the other direction of the same join: each circuit says which of
@@ -199,3 +250,22 @@ views:
             width: 14
           - header: WHY
             value: "{{ range .item.adjustments }}-{{ .adjustment }} {{ .kind }} {{ .name }} {{ end }}"
+
+    # HA is the comparison worth having: the controller's view of which member
+    # is active is the thing most likely to be out of date, and the appliance
+    # is the authority on its own state. Gated on the element being clustered,
+    # so an ordinary spoke is never dialled for this. Unverified like the one
+    # above: `dump spoke-ha status` has not been captured either.
+    compare:
+      when: "{{ .cluster_id }}"
+      fetch:
+        cl: /sdwan/v2.0/api/sites/{{ .site_id }}/spokeclusters/{{ .cluster_id }}/status
+      commands:
+        ha: dump spoke-ha status
+      rows:
+        - label: Active
+          portal: "{{ with lookup .cl.cluster_members \"element_id\" .element_id }}{{ .status }}{{ end }}"
+          device: "{{ kv .cli.ha \"State\" }}"
+        - label: Priority
+          portal: "{{ with lookup .cl.switch_over_events \"element_id\" .element_id }}{{ .effective_priority }}{{ end }}"
+          device: "{{ kv .cli.ha \"Priority\" }}"

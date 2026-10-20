@@ -2,20 +2,29 @@ package ui
 
 import "testing"
 
-func TestSpinnerCycle(t *testing.T) {
+func TestSpinnerNamesAreCheckable(t *testing.T) {
 	if got := SpinnerName("nonsense"); got != DefaultSpinner {
 		t.Errorf("unknown name = %q, want %q", got, DefaultSpinner)
 	}
-	seen := map[string]bool{}
-	name := DefaultSpinner
-	for range spinnerChoices {
-		if seen[name] {
-			t.Fatalf("cycle repeated %q early", name)
-		}
-		seen[name] = true
-		name = NextSpinnerName(name)
+	if KnownSpinner("nonsense") {
+		t.Error("KnownSpinner() accepted a shape that does not exist")
 	}
-	if name != DefaultSpinner {
-		t.Errorf("cycle ended on %q, want to wrap to %q", name, DefaultSpinner)
+	if !KnownSpinner(DefaultSpinner) {
+		t.Errorf("KnownSpinner(%q) = false", DefaultSpinner)
+	}
+
+	names := SpinnerNames()
+	if len(names) != len(spinnerChoices) {
+		t.Fatalf("SpinnerNames() = %d, want one per shape", len(names))
+	}
+	seen := map[string]bool{}
+	for _, n := range names {
+		if seen[n] {
+			t.Errorf("two shapes are called %q", n)
+		}
+		seen[n] = true
+		if !KnownSpinner(n) {
+			t.Errorf("SpinnerNames() offered %q, which KnownSpinner rejects", n)
+		}
 	}
 }

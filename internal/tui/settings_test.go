@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"tyrtop.com/iontk/internal/app"
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/config"
@@ -35,8 +36,6 @@ func settingsModel(t *testing.T) tuiModel {
 	return m
 }
 
-// navTo walks the nav pane down to section want, so these tests do not depend
-// on which sections happen to sit next to each other.
 func navTo(t *testing.T, m tuiModel, want int) tuiModel {
 	t.Helper()
 	for i := 0; i < len(setSections); i++ {
@@ -88,10 +87,10 @@ func TestSettingsNavAndContentFocus(t *testing.T) {
 func TestSettingsEverySectionRenders(t *testing.T) {
 	m := settingsModel(t)
 	wants := map[int]string{
-		secGeneral: "spinner",
+		secGeneral: "Commands",
 		secTenants: "Acme Co",
 		secUsers:   "readonly",
-		secSession: "buffer cols",
+		secSession: "Buffer Cols",
 	}
 	for sec, want := range wants {
 		m.setSection = sec
@@ -111,7 +110,7 @@ func TestSettingsGeneralTogglesWriteGuard(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection = secGeneral
 	m.setFocus = focusContent
-	m.setCursor = 1
+	m.setCursor = guardRow
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = mm.(tuiModel)
@@ -272,19 +271,19 @@ func TestRenderSettingsPanes(t *testing.T) {
 }
 
 func TestLabelsPadVisibleWidthNotEscapeBytes(t *testing.T) {
-	for _, s := range []string{"spinner", "commands", "a"} {
-		if got := len(plain(ui.Label(s))); got != 13 {
-			t.Errorf("ui.Label(%q) visible width = %d, want 13", s, got)
+	for _, s := range []string{"momentum", "Commands", "a"} {
+		if got := len(plain(ui.Label(s))); got != ui.LabelWidth {
+			t.Errorf("ui.Label(%q) visible width = %d, want %d", s, got, ui.LabelWidth)
 		}
 	}
 
 	m := settingsModel(t)
 	m.setSection = secGeneral
 	got := plain(m.viewSettings())
-	if strings.Contains(got, "commandsread-only") {
+	if strings.Contains(got, "Commandsread-only") {
 		t.Error("label ran into its value; padding is counting escape bytes")
 	}
-	if !strings.Contains(got, "commands     read-only") {
+	if !strings.Contains(got, "Commands      read-only") {
 		t.Errorf("label not padded:\n%s", got)
 	}
 }
@@ -436,7 +435,7 @@ func TestEnterInContentStillActs(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection = secGeneral
 	m.setFocus = focusContent
-	m.setCursor = 1
+	m.setCursor = guardRow
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if !mm.(tuiModel).cfg.AllowWrites {
@@ -472,7 +471,7 @@ func TestDebugSectionIsReadOnly(t *testing.T) {
 	}
 
 	got := plain(m.viewSettings())
-	for _, want := range []string{"config", "secrets", "version", "catalog", "terminal", "sessions"} {
+	for _, want := range []string{"Config", "Secrets", "Version", "Catalog", "Terminal", "Sessions"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Debug missing %q:\n%s", want, got)
 		}
@@ -616,5 +615,77 @@ func TestGeometryFormTypesAValue(t *testing.T) {
 	mm, _ = bad.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if got := mm.(tuiModel).status; !strings.Contains(got, "number") {
 		t.Errorf("status = %q, want a complaint about the value", got)
+	}
+}
+
+func TestGeneralRowsMatchTheirLabels(t *testing.T) {
+	m := settingsModel(t)
+	m.setSection = secGeneral
+	m.spinner = ui.NewSpinner("")
+
+	rows := m.sectionContent()
+	if len(rows) < generalRows {
+		t.Fatalf("%d content lines, want at least one per row (%d)", len(rows), generalRows)
+	}
+	for row := range generalRows {
+		want, ok := generalRowLabels[row]
+		if !ok {
+			t.Fatalf("row %d has no label in generalRowLabels", row)
+		}
+		if got := plain(rows[row]); !strings.HasPrefix(strings.TrimSpace(got), want) {
+			t.Errorf("row %d is %q, want it to start with %q", row, got, want)
+		}
+	}
+	if got := m.sectionRows(); got != generalRows {
+		t.Errorf("sectionRows() = %d, want %d", got, generalRows)
+	}
+}
+
+func TestTheResetSectionsTwoRowsArmSeparately(t *testing.T) {
+	pinTheme(t)
+	t.Cleanup(func() { app.ThemesFile = ""; ui.HideThemes(nil) })
+
+	m := settingsModel(t)
+	m.width, m.height = 110, 44
+	m.setSection, m.setFocus = secReset, focusContent
+
+	if got := m.sectionRows(); got != 2 {
+		t.Fatalf("sectionRows() = %d, want the reset and the theme restore", got)
+	}
+	out := plain(m.viewSettings())
+	for _, want := range []string{"Factory Reset", "Restore Themes"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the Reset section does not offer %q:\n%s", want, out)
+		}
+	}
+
+	m.setCursor = themeRestoreRow
+	next, _ := m.onSettingsKey("enter")
+	m = next.(tuiModel)
+	if !m.resetArmed {
+		t.Fatal("enter did not arm the row")
+	}
+	if hint := m.sectionHint(); !strings.Contains(hint, "restore") {
+		t.Errorf("hint = %q, want it to name what y will do", hint)
+	}
+	next, _ = m.onSettingsKey("y")
+	m = next.(tuiModel)
+	if !strings.Contains(m.status, "shipped schemes are back") {
+		t.Errorf("status = %q, want the restore to have run", m.status)
+	}
+	if len(m.cfg.Tenants) == 0 {
+		t.Error("restoring the themes took the tenants with it")
+	}
+
+	m.setCursor = factoryResetRow
+	next, _ = m.onSettingsKey("enter")
+	m = next.(tuiModel)
+	next, _ = m.onSettingsKey("n")
+	m = next.(tuiModel)
+	if !strings.Contains(m.status, "cancel") {
+		t.Errorf("status = %q, want the reset cancelled", m.status)
+	}
+	if len(m.cfg.Tenants) == 0 {
+		t.Error("a cancelled reset still wiped the tenants")
 	}
 }

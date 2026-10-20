@@ -2,38 +2,54 @@ package saseauth
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-// findChrome locates a browser for the integration tests, which are skipped
-// when the machine has none. The tests run it without its sandbox: they drive
-// a throwaway profile against a fake server, and CI images forbid the user
-// namespaces Chrome would need.
+// packaged builds first, chromium-browser last: on Ubuntu 24.04 that name is a
+// snap shim, and a snap Chromium on a CI runner is how the v0.5.0 release died
+// -- chromedp waited out its whole budget and said only "context deadline
+// exceeded". CI images also forbid the user namespaces its sandbox would need.
 func findChrome(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping browser test in short mode")
 	}
-	for _, name := range []string{"chromium-browser", "chromium", "google-chrome", "google-chrome-stable", "chrome"} {
-		if path, err := exec.LookPath(name); err == nil {
-			return path
+	for _, name := range []string{"google-chrome", "google-chrome-stable", "chrome", "chromium", "chromium-browser"} {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			continue
 		}
+		if err := startable(path); err != nil {
+			t.Logf("skipping %s: %v", path, err)
+			continue
+		}
+		return path
 	}
-	t.Skip("no chrome or chromium on PATH")
+	t.Skip("no browser on PATH that will start")
 	return ""
 }
 
-// needsDisplay skips a test that opens a real browser window. Only the first
-// sign-in of a Discover opens one; chromedp refuses to without a display, and
-// CI gives it one with xvfb.
+func startable(path string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s --version: %w: %s", filepath.Base(path), err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 func needsDisplay(t *testing.T) {
 	t.Helper()
 	if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
@@ -41,9 +57,6 @@ func needsDisplay(t *testing.T) {
 	}
 }
 
-// fakeAuthServer stands in for the authorization server. Its authorize endpoint
-// redirects to RedirectURI, the real address, which the browser cannot load.
-// That is the point: the code has to be captured from the redirect itself.
 func fakeAuthServer(t *testing.T, redirect func(state string) string) (*httptest.Server, *url.Values) {
 	t.Helper()
 	var form url.Values
@@ -148,11 +161,6 @@ func TestLoginSurfacesAuthorizationServerError(t *testing.T) {
 	}
 }
 
-// TestSignInSurvivesRestart is the property that matters in use: sign in once,
-// quit, come back, and get a working token with no browser. The second Source
-// stands in for a fresh process, and its authorization server has no authorize
-// endpoint at all, so any attempt to open a browser fails the test rather than
-// quietly succeeding.
 func TestSignInSurvivesRestart(t *testing.T) {
 	chrome := findChrome(t)
 
@@ -184,7 +192,6 @@ func TestSignInSurvivesRestart(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	// Stand-in for the keyring: whatever the first run saves, the second reads.
 	var saved string
 	profile := t.TempDir()
 
@@ -208,8 +215,6 @@ func TestSignInSurvivesRestart(t *testing.T) {
 		t.Fatalf("persisted refresh token = %q, want %q", saved, "stored-rt")
 	}
 
-	// A fresh process: same stored token, but no authorize endpoint and no
-	// browser binary, so only the refresh grant can possibly work.
 	noBrowser := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/token" {
 			t.Errorf("the restarted session reached %s, want only the token endpoint", r.URL.Path)
@@ -244,10 +249,6 @@ func TestSignInSurvivesRestart(t *testing.T) {
 	}
 }
 
-// TestDiscoverThenSwitchTenantsSilently is the whole point of signing in with a
-// browser: one window, then every tenant scoped without another. The second and
-// third tokens are obtained headlessly with prompt=none, which only works
-// because the first sign-in left a session in the browser profile.
 func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 	chrome := findChrome(t)
 	needsDisplay(t)
@@ -296,7 +297,6 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 		t.Fatalf("Discover() found %d tenants, want 4", len(d.Tenants))
 	}
 
-	// Scoping to two different tenants, each without a window.
 	for _, tsg := range []string{"1984021017", "1538107912"} {
 		src := NewSource(tsg, "", opt, nil)
 		tok, _, err := src.Token(ctx)
@@ -313,7 +313,6 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 	if len(prompts) != 3 {
 		t.Fatalf("authorize was called %d times, want 3 (discovery plus two tenants)", len(prompts))
 	}
-	// Discovery is interactive; both tenant scopings must be silent.
 	if prompts[0] != "" {
 		t.Errorf("discovery used prompt=%q, want an interactive sign-in", prompts[0])
 	}
@@ -334,9 +333,6 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 }
 
 func TestCleanUpDoesNotWaitForABrowserThatWillNeverExit(t *testing.T) {
-	// chromedp's cancel functions end by waiting for the browser process on a
-	// channel that stays open when the browser never started. Without a bound,
-	// a failed launch wedges the sign-in until the caller is killed.
 	defer func(d time.Duration) { cleanUpGrace = d }(cleanUpGrace)
 	cleanUpGrace = 50 * time.Millisecond
 

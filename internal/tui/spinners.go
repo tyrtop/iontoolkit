@@ -5,8 +5,7 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-func (m tuiModel) withSpinner(name string) (tuiModel, tea.Cmd) {
-	m.spinnerName = ui.SpinnerName(name)
-	m.spinner = ui.NewSpinner(m.spinnerName)
+func (m tuiModel) withSpinner() (tuiModel, tea.Cmd) {
+	m.spinner = ui.NewSpinner(ui.CurrentTheme().Spinner)
 	return m, m.spinner.Tick
 }

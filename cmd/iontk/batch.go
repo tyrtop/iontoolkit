@@ -16,22 +16,15 @@ import (
 	"tyrtop.com/iontk/internal/tui"
 )
 
-// selection is what a batch run acts on. A --search resolves its own targets,
-// each carrying the client and device login of the tenant it came from,
-// because one search spans the whole working set; everything else hands over
-// element IDs and lets one client serve them all.
 type selection struct {
 	elements []string
 	targets  []sase.Target
 	clients  []*api.Client
-	// stdin says the IDs arrived down a pipe, which changes what the progress
-	// display may do with the terminal.
-	stdin bool
+	stdin    bool
 }
 
 func (s selection) crossTenant() bool { return len(s.targets) > 0 }
 
-// flagSelection is the ordinary --element / -f target list.
 func flagSelection() (selection, error) {
 	els, err := gatherElements(flagElement, flagElementsPath)
 	if err != nil {
@@ -48,8 +41,6 @@ func runBatch(ctx context.Context, sel selection) error {
 	var f app.Flags
 	var err error
 	if sel.crossTenant() {
-		// Nothing left to resolve: every target already holds the credential
-		// it will sign in with.
 		f = app.BaseFlags()
 	} else if f, err = resolveFlags(os.Stderr); err != nil {
 		return err
@@ -91,20 +82,13 @@ func runBatch(ctx context.Context, sel selection) error {
 		return err
 	}
 
-	// So a run that outlives its credential can stop, rather than spend an
-	// element timeout each on everything left.
 	ctx, stopRun := context.WithCancel(ctx)
 	defer stopRun()
 
-	// The api package no longer prints refresh failures itself, so a batch run
-	// has to say them out loud or a token dying mid-run looks like the devices
-	// going quiet.
 	for _, c := range clients {
 		go watchCredential(c.TokenErrors(), c.RefreshStopped, stopRun, os.Stderr)
 	}
 
-	// The file is only created once the run is ready to produce something, so a
-	// failure before this point leaves no empty report behind.
 	out, where, err := output.Open(flagOut, dest, format, time.Now())
 	if err != nil {
 		return err
@@ -114,8 +98,6 @@ func runBatch(ctx context.Context, sel selection) error {
 		fmt.Fprintln(os.Stderr, "writing", format, "results to", where)
 	}
 	sinkOpts := []output.Option{output.WithOrientation(orient)}
-	// A table only has to fit when it is being read on the way past. A file
-	// holds the only copy of what it is given, so nothing is trimmed into one.
 	if where == "stdout" {
 		if cols, _, serr := term.GetSize(int(os.Stdout.Fd())); serr == nil && cols > 0 {
 			sinkOpts = append(sinkOpts, output.WithWidth(cols))
@@ -123,9 +105,6 @@ func runBatch(ctx context.Context, sel selection) error {
 	}
 	sink := output.NewSink(out, format, sinkOpts...)
 
-	// Fixture mode swaps the client only here: the lookup and the session come
-	// from the playback device, and everything either side of them is the real
-	// run, including ioncli's autologin and pager handling.
 	if app.Fixture != nil {
 		playback := app.Fixture.SessionClient(f.PagerOff, f.PagerPrompts)
 		for i := range targets {
@@ -159,8 +138,6 @@ func runBatch(ctx context.Context, sel selection) error {
 	return nil
 }
 
-// batchOutput resolves the format, row orientation and destination folder,
-// with flags winning over the saved settings.
 func batchOutput() (format, orient, dir string, err error) {
 	format, orient, dir = output.FormatJSON, output.OrientION, ""
 	if st := app.OpenStore(); st != nil {
@@ -200,8 +177,6 @@ func drainPlain(events <-chan sase.Event, total int, sink output.Sink) (int, int
 	return total, failed, nil
 }
 
-// dead separates a spent credential from a run that merely finished; both
-// close the channel.
 func watchCredential(ch <-chan error, dead func() bool, stop func(), w io.Writer) {
 	for err := range ch {
 		fmt.Fprintln(w, err)

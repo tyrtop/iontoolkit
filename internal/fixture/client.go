@@ -8,14 +8,8 @@ import (
 	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
-// SessionClient is what a batch run uses in fixture mode. It satisfies
-// sase.Client, and its ToolkitSession goes through the real ioncli code against
-// a playback device, so autologin and the pager scraper are exercised rather
-// than skipped.
 type SessionClient struct {
-	set *Set
-	// Where paging settings come from, since the client is built before the
-	// flags reach a session.
+	set      *Set
 	pagerOff string
 	pagers   []string
 }

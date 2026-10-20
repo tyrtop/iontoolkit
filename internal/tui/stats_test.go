@@ -11,8 +11,6 @@ import (
 func lineCount(s string) int { return len(strings.Split(strings.TrimRight(s, "\n"), "\n")) }
 
 func TestStatsOverlayKeepsTheFrameHeight(t *testing.T) {
-	// A pane that does not give up the rows the overlay takes pushes the footer
-	// off the bottom, or leaves a gap where it used to be.
 	cases := map[string]func(t *testing.T) (tuiModel, func(tuiModel) string){
 		"element list": func(t *testing.T) (tuiModel, func(tuiModel) string) {
 			m := pickModel(t)
@@ -21,10 +19,10 @@ func TestStatsOverlayKeepsTheFrameHeight(t *testing.T) {
 			return m, func(m tuiModel) string { return m.viewPicking() }
 		},
 		"results": func(t *testing.T) (tuiModel, func(tuiModel) string) {
-			return wheelResultsModel(t), func(m tuiModel) string { return m.viewResults() }
+			return resultsModel(t), func(m tuiModel) string { return m.viewResults() }
 		},
 		"open result": func(t *testing.T) (tuiModel, func(tuiModel) string) {
-			m := wheelResultsModel(t)
+			m := resultsModel(t)
 			m.resOpen = true
 			return m, func(m tuiModel) string { return m.viewResults() }
 		},
@@ -70,8 +68,6 @@ func TestStatsOverlayReportsWhatIsMoving(t *testing.T) {
 }
 
 func TestAltITogglesStatsEverywhere(t *testing.T) {
-	// Including in a session, where an unhandled alt+i would be typed at the
-	// device instead.
 	for _, phase := range []tuiPhase{phasePicking, phaseResults, phaseSession, phaseMenu} {
 		m := pickModel(t)
 		m.phase = phase
@@ -95,8 +91,6 @@ func TestStatsRepaintStopsWithTheOverlay(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("turning the overlay on started no repaint, so the numbers would freeze")
 	}
-	// Toggling again while the tick is still in flight must not start a second
-	// chain: the pane would then repaint twice a second for nothing.
 	again, cmd := on.(tuiModel).toggleStats()
 	if cmd != nil {
 		t.Error("toggling off scheduled another repaint")
@@ -106,7 +100,6 @@ func TestStatsRepaintStopsWithTheOverlay(t *testing.T) {
 		t.Error("toggling back on started a second repaint while the first was still running")
 	}
 
-	// The in-flight tick is what clears the flag once the overlay is off.
 	off, _ := third.(tuiModel).toggleStats()
 	done, cmd := off.(tuiModel).Update(statsTickMsg(time.Time{}))
 	if cmd != nil {

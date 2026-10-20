@@ -12,9 +12,6 @@ import (
 	"github.com/coder/websocket"
 )
 
-// scriptServer plays a device: it writes the first chunk unprompted, then one
-// more each time the client says something, recording everything it is sent.
-// Run takes a concrete *websocket.Conn, which is why it had no tests.
 type scriptServer struct {
 	srv *httptest.Server
 
@@ -63,8 +60,6 @@ func dialTestConn(t *testing.T, chunks []string) (*scriptServer, *websocket.Conn
 				return
 			}
 		}
-		// Anything said after the script is still recorded, so a test can see
-		// a command it did not expect.
 		for {
 			_, data, err := c.Read(ctx)
 			if err != nil {
@@ -127,11 +122,9 @@ func TestRunSendsThePagerOffCommandBeforeAnythingElse(t *testing.T) {
 	if i < 0 {
 		t.Fatalf("the pager-off command was not sent: %q", sent)
 	}
-	// After the first command it would be too late: that one pages.
 	if j >= 0 && i > j {
 		t.Errorf("pager-off was sent after the first command: %q", sent)
 	}
-	// It is setup, not a result.
 	if len(outs) != 1 || outs[0].Command != "uptime" {
 		t.Errorf("outputs = %+v, want only the uptime result", outs)
 	}
@@ -154,8 +147,6 @@ func TestRunSendsNothingWhenNoPagerCommandIsSet(t *testing.T) {
 }
 
 func TestATimedOutReadNamesWhatTheDeviceSent(t *testing.T) {
-	// Otherwise a paging device and a prompt we don't match give the same
-	// error, and telling them apart needs a live session.
 	srv, conn := dialTestConn(t, []string{
 		"login: ", "Password: ", "ion#", "ion# help\r\nlots of text\r\n--More--",
 	})
@@ -176,8 +167,6 @@ func TestATimedOutReadNamesWhatTheDeviceSent(t *testing.T) {
 }
 
 func TestATimedOutReadKeepsThePasswordOutOfTheError(t *testing.T) {
-	// Some firmware echoes the login exchange back, and batch errors get
-	// written to a report file.
 	srv, conn := dialTestConn(t, []string{
 		"login: ", "Password: ", "sw0rdf1sh\r\nnot a prompt",
 	})
@@ -230,9 +219,6 @@ func TestTailOfAReadIsBoundedAndReadable(t *testing.T) {
 }
 
 func TestRunAnswersThePagerAndStitchesTheOutput(t *testing.T) {
-	// What the scraper is for. The ION pages `help` and waits; if nothing
-	// answers, the read waits out the session timeout. Firmware that ignores
-	// `set paging off` ends up here.
 	srv, conn := dialTestConn(t, []string{
 		"login: ", "Password: ", "ion#",
 		"ion# help\r\nfirst page\r\n--More--(4%)[Press space to continue, 'q' to quit.]",
@@ -255,20 +241,15 @@ func TestRunAnswersThePagerAndStitchesTheOutput(t *testing.T) {
 			t.Errorf("output = %q, want it to contain %q", got, want)
 		}
 	}
-	// The pager prompt is the device talking to the user, not output.
 	if strings.Contains(strings.ToLower(got), "press space") {
 		t.Errorf("output = %q, want the pager line stripped", got)
 	}
-	// A bare space: a carriage return would be read as an empty command.
 	if sent := srv.sent(); !strings.Contains(sent, "help\r ") {
 		t.Errorf("sent = %q, want a bare space after the command", sent)
 	}
 }
 
 func TestRunAnswersEachPageExactlyOnce(t *testing.T) {
-	// The device doesn't erase its prompt right away. Match the whole buffer,
-	// or forget which one was answered, and the extra space ends up in the
-	// next command.
 	srv, conn := dialTestConn(t, []string{
 		"login: ", "Password: ", "ion#",
 		"ion# help\r\npage one\r\n--More--(4%)[Press space to continue, 'q' to quit.]",
@@ -294,8 +275,6 @@ func TestRunAnswersEachPageExactlyOnce(t *testing.T) {
 }
 
 func TestRunStopsWhenThePagerIsNotRecognised(t *testing.T) {
-	// Firmware with a different prompt still hangs. The error has to name what
-	// it stopped on, or the next one needs hardware to diagnose again.
 	srv, conn := dialTestConn(t, []string{
 		"login: ", "Password: ", "ion#", "ion# help\r\nlots of text\r\n<<<hit a key>>>",
 	})

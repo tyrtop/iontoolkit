@@ -20,9 +20,6 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// elementRow is an element together with the tenant it belongs to. A browser
-// account can reach many tenants at once, so an element is only identified by
-// the pair: nothing else says which token to dial it with.
 type elementRow struct {
 	api.Element
 	TSG    string
@@ -38,17 +35,12 @@ func (e elementRow) label() string {
 	return e.ID
 }
 
-// sessionTarget is an element to open, carrying its tenant so the right client
-// and the right device credentials are used.
 type sessionTarget struct {
 	eid  string
 	name string
 	tsg  string
 }
 
-// clientPool holds one authenticated client per tenant, built on demand. The
-// model is copied by value all over the place, so this is deliberately a
-// pointer: every copy shares the same clients.
 type clientPool struct {
 	mu      sync.Mutex
 	clients map[string]*api.Client
@@ -94,21 +86,15 @@ func (p *clientPool) count() int {
 	return len(p.clients)
 }
 
-// tenantElementsMsg is one tenant's share of the aggregated element list.
 type tenantElementsMsg struct {
 	tsg      string
 	tenant   string
 	elements []api.Element
 	sites    map[string]string
-	// siteErr is reported separately: elements are still usable without their
-	// site names.
-	siteErr error
-	err     error
+	siteErr  error
+	err      error
 }
 
-// loadTenant authenticates a tenant if needed and fetches its elements. One of
-// these runs per active tenant, so the list fills in as each answers rather
-// than waiting for the slowest.
 func loadTenant(ctx context.Context, f app.Flags, t config.Tenant, pool *clientPool, st *config.Store) tea.Cmd {
 	return func() tea.Msg {
 		fail := func(err error) tea.Msg {
@@ -130,8 +116,6 @@ func loadTenant(ctx context.Context, f app.Flags, t config.Tenant, pool *clientP
 			return fail(err)
 		}
 
-		// A failed site lookup is not fatal, but it must not be silent either:
-		// swallowing it is why every site showed as a raw id for so long.
 		sites := map[string]string{}
 		ss, siteErr := c.ListSites(ctx)
 		for _, s := range ss {
@@ -153,8 +137,6 @@ func loadTenant(ctx context.Context, f app.Flags, t config.Tenant, pool *clientP
 	}
 }
 
-// mergeTenantElements replaces one tenant's share of the list, leaving the
-// other tenants' rows alone.
 func (m *tuiModel) mergeTenantElements(tsg, tenant string, els []api.Element) {
 	kept := make([]elementRow, 0, len(m.all)+len(els))
 	for _, r := range m.all {
@@ -168,8 +150,6 @@ func (m *tuiModel) mergeTenantElements(tsg, tenant string, els []api.Element) {
 	m.setElements(kept)
 }
 
-// loadFromCache fills the list from disk so the element page is usable before
-// any network call returns.
 func (m *tuiModel) loadFromCache() {
 	var rows []elementRow
 	oldest := time.Duration(0)
@@ -187,6 +167,12 @@ func (m *tuiModel) loadFromCache() {
 			}
 			m.sites[k] = v
 		}
+		for eid, w := range c.HA {
+			if m.haCached == nil {
+				m.haCached = map[string]string{}
+			}
+			m.haCached[t.TSGID+"/"+eid] = w
+		}
 		if a := c.Age(); a > oldest {
 			oldest = a
 		}
@@ -203,11 +189,7 @@ func (m *tuiModel) loadFromCache() {
 	}
 }
 
-// refreshActive fetches every active tenant. Tenants with no usable credential
-// are reported rather than silently skipped.
 func (m tuiModel) refreshActive() (tea.Model, tea.Cmd) {
-	// Start from a clean slate: a message left from an earlier action must not
-	// have this run's failures appended to it.
 	m.status = ""
 	active := m.aggregateTenants()
 	if len(active) == 0 {
@@ -244,8 +226,6 @@ func (m tuiModel) refreshActive() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// credsFor returns the device login for a tenant. ION users are stored per
-// tenant, so a session in one tenant must not be opened with another's login.
 func (m tuiModel) credsFor(tsg string) ionterm.Credentials {
 	for _, t := range m.cfg.Tenants {
 		if t.TSGID != tsg {
@@ -257,16 +237,11 @@ func (m tuiModel) credsFor(tsg string) ionterm.Credentials {
 	return ionterm.Credentials{}
 }
 
-// targetsFor pairs selected elements with their own tenant's client, which is
-// what lets one batch run span tenants.
 func (m tuiModel) targetsFor(rows []elementRow) []sase.Target {
 	out := make([]sase.Target, 0, len(rows))
 	for _, r := range rows {
 		creds := m.credsFor(r.TSG)
 		t := sase.Target{ElementID: r.ID, User: creds.User, Pass: creds.Pass}
-		// Assigning a nil *api.Client to the interface would produce a non-nil
-		// interface holding a nil pointer, which defeats every nil check
-		// downstream and panics on first use. Leave the field zero instead.
 		if c := m.pool.get(r.TSG); c != nil {
 			t.Client = c
 		}
@@ -275,8 +250,6 @@ func (m tuiModel) targetsFor(rows []elementRow) []sase.Target {
 	return out
 }
 
-// tenantClient hands back a tenant's client, building nothing: an element can
-// only be dialled once its tenant has been loaded.
 func (m tuiModel) tenantClient(tsg string) *api.Client {
 	return m.pool.get(tsg)
 }
@@ -285,9 +258,6 @@ func httpClientFor(f app.Flags) *http.Client {
 	return &http.Client{Timeout: f.HTTPTimeout}
 }
 
-// tenantErr records a per-tenant failure without losing the other tenants'
-// results. A credential problem routes to the browser the same way a single
-// tenant's would.
 func (m *tuiModel) tenantErr(tsg, tenant string, err error) {
 	reason := shortTenantErr(err)
 	if m.tenantIssues == nil {
@@ -306,20 +276,10 @@ func (m *tuiModel) tenantErr(tsg, tenant string, err error) {
 	}
 }
 
-// shortTenantErr trims the layers a failed sign-in accumulates. The full chain
-// reads "interactive sign-in required: no existing browser session:
-// authorization failed: interaction_required: ..." which buries the one fact
-// that matters.
-//
-// A tenant the account cannot act in fails the same way a dead session does:
-// the authorization server answers interaction_required either way. A dead
-// session would fail every tenant at once, so the likely cause of one tenant
-// failing is access, and the wording says so without claiming to be sure.
 func shortTenantErr(err error) string {
 	return ui.Truncate(app.ShortAuthError(err), 90)
 }
 
-// tenantOf finds the configured record for a tenant ID.
 func (m tuiModel) tenantOf(tsg string) (config.Tenant, bool) {
 	for _, t := range m.cfg.Tenants {
 		if t.TSGID == tsg {
@@ -329,16 +289,10 @@ func (m tuiModel) tenantOf(tsg string) (config.Tenant, bool) {
 	return config.Tenant{}, false
 }
 
-// ionUserFor is the device login to use in a tenant.
 func (m tuiModel) ionUserFor(t config.Tenant) string {
 	return m.runAsFor(t.TSGID)
 }
 
-// tsgForElement finds which tenant an element belongs to. Sessions and the
-// reattach list only carry an element ID, so the tenant has to be recovered
-// from the loaded list; the active tenant is the fallback.
-// elementByKey is the loaded row for a tenant's element, which is where a
-// data tab gets the site and cluster ids its views are written against.
 func (m tuiModel) elementByKey(key string) (elementRow, bool) {
 	for _, r := range m.all {
 		if r.key() == key {
@@ -357,8 +311,6 @@ func (m tuiModel) tsgForElement(eid string) string {
 	return m.tenant.TSGID
 }
 
-// activeSessionCreds are the device credentials for whichever session is in
-// front, which may belong to a different tenant than the one being browsed.
 func (m tuiModel) activeSessionCreds() ionterm.Credentials {
 	s := m.sessions.Active()
 	if s == nil {
@@ -367,11 +319,6 @@ func (m tuiModel) activeSessionCreds() ionterm.Credentials {
 	return m.credsFor(m.tsgForElement(s.ElementID))
 }
 
-// scopeLabel names what the element list is showing. Naming a single tenant
-// would be a lie once several are loaded.
-// scopeLabel names what the element list is showing. It is computed when the
-// list changes rather than per render: walking every element on each keystroke
-// made holding a movement key lag badly once several tenants were loaded.
 func (m tuiModel) scopeLabel() string {
 	if m.scope != "" {
 		return m.scope
@@ -382,7 +329,6 @@ func (m tuiModel) scopeLabel() string {
 	return "no tenant"
 }
 
-// computeScope derives the label and the tenant count from the loaded elements.
 func (m *tuiModel) computeScope() {
 	seen := map[string]string{}
 	for _, r := range m.all {
@@ -401,12 +347,6 @@ func (m *tuiModel) computeScope() {
 	}
 }
 
-// aggregateTenants is the set of tenants whose elements make up the list.
-//
-// Browser mode spans the whole working set, which is what makes searching
-// across tenants possible: the set is chosen from the discovered tenants when
-// signing in, and changed in settings. Tenant mode is a single service
-// account, so it spans that alone.
 func (m tuiModel) aggregateTenants() []config.Tenant {
 	if m.authMode == authTenant {
 		if m.hasTenant {
@@ -419,34 +359,64 @@ func (m tuiModel) aggregateTenants() []config.Tenant {
 	if len(added) > 0 {
 		return added
 	}
-	// Nothing picked yet: the current tenant is the list, so a fresh setup
-	// still works before visiting the picker.
 	if m.hasTenant {
 		return []config.Tenant{m.tenant}
 	}
 	return nil
 }
 
-// refreshNote is the moving "refreshing" marker beside the element count. An
-// element refresh had no visible feedback at all before: the list simply sat
-// there until it changed.
 func (m tuiModel) refreshNote() string {
+	return m.elementsNote() + "\n" + m.haNote()
+}
+
+func (m tuiModel) elementsNote() string {
 	switch m.cacheState {
 	case cacheUpdating:
-		note := "  " + m.spinner.View() + " " + ui.StyleWarn.Render("refreshing")
+		note := m.spinner.View() + " " + ui.StyleWarn.Render("refreshing elements")
 		if m.pendingTenants > 1 {
 			note += ui.StyleDim.Render(fmt.Sprintf(" %d tenants", m.pendingTenants))
 		}
 		return note
 	case cacheFailed:
-		return "  " + ui.StyleErr.Render("refresh failed")
+		return ui.StyleErr.Render("element refresh failed")
+	case cacheNone:
+		return ui.StyleDim.Render("no cached elements")
 	}
-	return ""
+
+	d := m.cacheAgeNow()
+	if m.cacheState == cacheUpdated && d < cacheFresh {
+		return ui.StyleOK.Render("Elements refreshed!") + ago(d)
+	}
+	return ui.StyleDim.Render("Elements cached") + ago(d)
 }
 
-// runAsFor is the device login chosen for a tenant: an explicit choice made in
-// the users panel, otherwise that tenant's default. Each tenant keeps its own,
-// because one account can reach tenants with entirely different ION logins.
+func (m tuiModel) haNote() string {
+	if m.haWorking() {
+		note := m.spinner.View() + " " + ui.StyleWarn.Render("refreshing HA")
+		if m.haTotal > 0 {
+			note += ui.StyleDim.Render(fmt.Sprintf(" %d/%d clusters",
+				min(m.haDone, m.haTotal), m.haTotal))
+		}
+		return note
+	}
+	if m.haAt.IsZero() {
+		return ""
+	}
+
+	d := time.Since(m.haAt)
+	if d < cacheFresh {
+		return ui.StyleOK.Render("HA refreshed!") + ago(d)
+	}
+	return ui.StyleDim.Render("HA cached") + ago(d)
+}
+
+func ago(d time.Duration) string {
+	if d < time.Second {
+		return ui.StyleDim.Render(" last updated just now")
+	}
+	return ui.StyleDim.Render(" last updated " + ui.Age(d) + " ago")
+}
+
 func (m tuiModel) runAsFor(tsg string) string {
 	if u := m.runAs[tsg]; u != "" {
 		return u
@@ -468,13 +438,10 @@ func (m *tuiModel) setRunAs(tsg, user string) {
 	m.runAs[tsg] = user
 }
 
-// usersPanelTenant is the tenant whose logins the users panel is managing.
 func (m tuiModel) usersPanelTenant() config.Tenant {
 	if t, ok := m.tenantOf(m.usersTSG); ok {
 		return t
 	}
-	// A tenant in the list but not yet recorded still needs naming, so the
-	// panel can offer to add its first user.
 	for _, r := range m.all {
 		if r.TSG == m.usersTSG {
 			return config.Tenant{Name: r.Tenant, TSGID: r.TSG, Auth: config.AuthBrowser}
@@ -483,8 +450,6 @@ func (m tuiModel) usersPanelTenant() config.Tenant {
 	return m.tenant
 }
 
-// usersPanelTenants are the tenants the panel can cycle through: everything
-// loaded in the list, plus the current one.
 func (m tuiModel) usersPanelTenants() []config.Tenant {
 	var out []config.Tenant
 	seen := map[string]bool{}
@@ -511,7 +476,6 @@ func (m tuiModel) usersPanelTenants() []config.Tenant {
 	return out
 }
 
-// cycleUsersTenant moves the panel to the next or previous tenant.
 func (m tuiModel) cycleUsersTenant(delta int) tuiModel {
 	list := m.usersPanelTenants()
 	if len(list) < 2 {
@@ -530,9 +494,6 @@ func (m tuiModel) cycleUsersTenant(delta int) tuiModel {
 	return m
 }
 
-// countLabel says how many elements are in view. With a filter running it also
-// says how many there are in total, so a narrow search does not look like a
-// short list.
 func (m tuiModel) countLabel() string {
 	sel := fmt.Sprintf("%d selected", len(m.selected))
 	if len(m.matches) != len(m.all) {
@@ -541,16 +502,13 @@ func (m tuiModel) countLabel() string {
 	return fmt.Sprintf("%s / %d elements", sel, len(m.all))
 }
 
-// tenantConnectedMsg is a tenant that has just authenticated.
 type tenantConnectedMsg struct {
 	tsg    string
 	client *api.Client
-	// Two watchers on one channel would halve the failures each sees.
-	fresh bool
-	err   error
+	fresh  bool
+	err    error
 }
 
-// connectTenant authenticates one tenant without fetching anything.
 func connectTenant(ctx context.Context, st *config.Store, f app.Flags, tsg string) tea.Cmd {
 	return func() tea.Msg {
 		c, err := app.NewClient(ctx, st, f, io.Discard)
@@ -558,8 +516,6 @@ func connectTenant(ctx context.Context, st *config.Store, f app.Flags, tsg strin
 	}
 }
 
-// recheckToken reports as a connection so the waiting batch or session replays
-// unchanged.
 func recheckToken(ctx context.Context, c *api.Client, tsg string) tea.Cmd {
 	return func() tea.Msg {
 		if err := c.EnsureToken(ctx, preflightTTL); err != nil {
@@ -569,20 +525,8 @@ func recheckToken(ctx context.Context, c *api.Client, tsg string) tea.Cmd {
 	}
 }
 
-// preflightTTL sits above the refresh margin: inside it the background refresh
-// is due but may not have happened, or may be backing off.
 const preflightTTL = 90 * time.Second
 
-// ensureClients returns the commands needed to authenticate any of these
-// tenants that has no usable client yet.
-//
-// A tenant only had a client as a side effect of fetching its elements, so a
-// launch that found a fresh cache had none at all: every element then looked
-// like it belonged to a disconnected tenant. Connecting on demand is what makes
-// a cached list usable.
-//
-// A token that will not outlast the operation counts as missing. Both expensive
-// paths come through here, so one exchange now beats a 401 per element later.
 func (m tuiModel) ensureClients(tsgs []string) []tea.Cmd {
 	seen := map[string]bool{}
 	var cmds []tea.Cmd
@@ -594,14 +538,10 @@ func (m tuiModel) ensureClients(tsgs []string) []tea.Cmd {
 			if c.TokenGood(preflightTTL) {
 				continue
 			}
-			// Renewed in place: rebuilding would abandon this client's
-			// refresh loop and start another.
 			seen[tsg] = true
 			cmds = append(cmds, recheckToken(m.ctx, c, tsg))
 			continue
 		}
-		// A tenant that already failed this round is not tried again: the
-		// replay would otherwise connect, fail, replay, forever.
 		if m.tenantIssues[tsg] != "" {
 			continue
 		}
@@ -625,7 +565,6 @@ func (m tuiModel) ensureClients(tsgs []string) []tea.Cmd {
 	return cmds
 }
 
-// tsgsOf is the distinct tenants a set of targets touches.
 func tsgsOf(targets []sessionTarget) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -638,7 +577,6 @@ func tsgsOf(targets []sessionTarget) []string {
 	return out
 }
 
-// tsgsOfRows is the distinct tenants a set of elements touches.
 func tsgsOfRows(rows []elementRow) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -651,7 +589,6 @@ func tsgsOfRows(rows []elementRow) []string {
 	return out
 }
 
-// tenantName is a tenant's display name, falling back to its ID.
 func (m tuiModel) tenantName(tsg string) string {
 	if t, ok := m.tenantOf(tsg); ok {
 		return t.Name
@@ -664,7 +601,6 @@ func (m tuiModel) tenantName(tsg string) string {
 	return tsg
 }
 
-// toggleCurrent selects or deselects the highlighted element.
 func (m tuiModel) toggleCurrent() tuiModel {
 	el, ok := m.current()
 	if !ok {
@@ -679,8 +615,6 @@ func (m tuiModel) toggleCurrent() tuiModel {
 	return m
 }
 
-// selectedNote marks the list when it has been narrowed to the selection, so
-// that view is never mistaken for the whole list.
 func (m tuiModel) selectedNote() string {
 	if !m.showSelected {
 		return ""

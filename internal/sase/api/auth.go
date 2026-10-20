@@ -14,9 +14,6 @@ import (
 
 const authURL = "https://auth.apps.paloaltonetworks.com/oauth2/access_token"
 
-// TokenSource produces access tokens and says how long each one lasts, so that
-// refreshLoop can schedule the next one. Implementations may be anything from a
-// service account to a browser sign-in.
 type TokenSource interface {
 	Token(ctx context.Context) (string, time.Duration, error)
 }
@@ -89,14 +86,12 @@ func (s *Client) mintLocked(ctx context.Context) (time.Duration, error) {
 	return ttl, nil
 }
 
-// So an expensive operation fails here once rather than on every element.
 func (s *Client) EnsureToken(ctx context.Context, need time.Duration) error {
 	if s.src == nil || s.TokenGood(need) {
 		return nil
 	}
 	s.mintMu.Lock()
 	defer s.mintMu.Unlock()
-	// A batch spanning tenants arrives here at once; one renewal serves all.
 	if s.TokenGood(need) {
 		return nil
 	}
@@ -106,13 +101,8 @@ func (s *Client) EnsureToken(ctx context.Context, need time.Duration) error {
 	return nil
 }
 
-// retryAfterFailure is how long to wait before trying again after a refresh
-// that could plausibly succeed later. Waiting out the whole token lifetime
-// turns a momentary network problem into a quarter hour of 401s.
 const retryAfterFailure = 30 * time.Second
 
-// temporary is implemented by errors that know whether retrying could help. A
-// TokenSource uses it to say that nothing will change without a human.
 type temporary interface{ Temporary() bool }
 
 func retryable(err error) bool {
@@ -123,11 +113,6 @@ func retryable(err error) bool {
 	return true
 }
 
-// TokenErrors reports refresh failures so the caller can decide what to say
-// about them. The channel is buffered and sends are dropped rather than
-// blocked, so a caller that never reads it costs nothing. It closes when
-// refreshing stops for good, which is the signal that the credential needs
-// human attention.
 func (s *Client) TokenErrors() <-chan error { return s.tokenErrs }
 
 func (s *Client) reportTokenError(err error) {
@@ -155,9 +140,6 @@ func (s *Client) refreshLoop(ctx context.Context, ttl, margin time.Duration) {
 			next, err := s.mint(ctx)
 			if err != nil {
 				s.reportTokenError(fmt.Errorf("token refresh: %w", err))
-				// A credential that needs a human back at the keyboard will not
-				// start working on its own, so stop instead of spinning. Signing
-				// in again builds a new client with a new loop.
 				if !retryable(err) {
 					s.stopRefreshing()
 					return
@@ -179,7 +161,7 @@ func (s *Client) refreshLoop(ctx context.Context, ttl, margin time.Duration) {
 
 const profileURL = "https://api.sase.paloaltonetworks.com/sdwan/v2.1/api/profile"
 
-// Palo Alto requires an extra call to prime the token. Without this call, subsequent calls return 403 errors.
+// Palo Alto needs an extra call to prime the token, or everything after it 403s
 func (s *Client) activate(ctx context.Context) error {
 	url := profileURL
 	if s.profileBase != "" {

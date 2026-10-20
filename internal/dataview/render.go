@@ -7,27 +7,23 @@ import (
 	"text/template"
 	"time"
 
+	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-// Rendered is a view's text, laid out but not styled: the TUI paints it, and a
-// test can read it without a terminal.
 type Rendered struct {
 	View     string
 	Sections []RenderedSection
-	// Errs is the fetches that failed, so a pane can say why a section is
-	// thin rather than leaving it blank.
-	Errs []string
+	Errs     []string
 }
 
 type RenderedSection struct {
-	Title   string
-	Rows    []RenderedRow
-	Headers []string
-	Widths  []int
-	Table   []RenderedTableRow
-	Empty   string
-	// Truncated is how many rows max_items dropped.
+	Title     string
+	Rows      []RenderedRow
+	Headers   []string
+	Widths    []int
+	Table     []RenderedTableRow
+	Empty     string
 	Truncated int
 }
 
@@ -38,14 +34,9 @@ type RenderedRow struct {
 
 type RenderedTableRow struct {
 	Cells []string
-	// Err is a per-item fetch that failed, which is why the cells after the
-	// first may be empty.
-	Err string
+	Err   string
 }
 
-// Render turns one view's data into text. A template that fails renders as the
-// error in place of the value: a broken view should say so where the value
-// would have been, not take the pane down.
 func Render(v View, d *Data) Rendered {
 	out := Rendered{View: v.Name}
 	for _, name := range sortedKeys(d.Errs) {
@@ -88,12 +79,9 @@ func Render(v View, d *Data) Rendered {
 	return out
 }
 
-// eval renders one template. A field the element has not got comes out empty,
-// not "<no value>" and not an error: half of what a view asks for is optional
-// on a given appliance -- an element with no HA has no spoke_ha_config for
-// {{ .el.spoke_ha_config.cluster_id }} to walk into. A view's own mistakes, a
-// bad function or unparseable text, do show, prefixed with "!", because
-// nothing else would tell the person who wrote it.
+// a field the element has not got comes out empty, not "<no value>": half of
+// what a view asks for is optional on a given appliance. A view's own mistakes
+// do show, prefixed "!", because nothing else would tell whoever wrote it.
 func eval(text string, ctx map[string]any) string {
 	t, err := template.New("v").Funcs(funcs).Option("missingkey=zero").Parse(text)
 	if err != nil {
@@ -109,16 +97,12 @@ func eval(text string, ctx map[string]any) string {
 	return strings.TrimSpace(strings.ReplaceAll(b.String(), "<no value>", ""))
 }
 
-// missingField is text/template's way of saying the path ran out: walking
-// into a field of something absent, or of a type that has no such field.
 func missingField(err error) bool {
 	s := err.Error()
 	return strings.Contains(s, "nil pointer evaluating") ||
 		strings.Contains(s, "can't evaluate field")
 }
 
-// expand is eval for a path, where an empty result is a bug rather than a
-// blank: a path with an unresolved id in it would fetch the wrong thing.
 func expand(text string, ctx map[string]any) (string, error) {
 	got := eval(text, ctx)
 	if strings.HasPrefix(got, "!") {
@@ -142,15 +126,12 @@ func truthy(s string) bool {
 }
 
 var funcs = template.FuncMap{
-	// utc is the API's timestamp integers, whose unit varies by field. Always
-	// go through this: the scale is three orders of magnitude apart between
-	// two fields of the same object.
 	"utc": func(v any) string {
 		n := toInt64(v)
 		if n == 0 {
 			return ""
 		}
-		return api.UTCTime(n).Format("2006-01-02 15:04")
+		return clock.Stamp(api.UTCTime(n))
 	},
 	"ago": func(v any) string {
 		n := toInt64(v)
@@ -163,9 +144,6 @@ var funcs = template.FuncMap{
 		}
 		return ageString(time.Since(t))
 	},
-	// unwrap takes the single record out of an items envelope, which is how a
-	// bypass pair's status arrives where every other interface sends a bare
-	// object.
 	"unwrap": func(v any) any {
 		m, ok := v.(map[string]any)
 		if !ok {
@@ -212,14 +190,6 @@ var funcs = template.FuncMap{
 		}
 		return s
 	},
-	// lookup is the join the format would otherwise be missing: find the
-	// record in a list whose field matches a value. The field may hold the
-	// value or be a list containing it, so it works both ways round -- a
-	// circuit found by the id a port is bound to, and the port found by the
-	// circuit id in its site_wan_interface_ids.
-	//
-	// It returns the record, not one field, so a caller can use several:
-	// {{ with lookup $.wans.items "id" .item.circuit }}{{ .name }}{{ end }}
 	"lookup": func(list any, field string, want any) any {
 		items, ok := list.([]any)
 		if !ok || want == nil || want == "" {
@@ -245,8 +215,6 @@ var funcs = template.FuncMap{
 		}
 		return nil
 	},
-	// first is the first element of a list, for a view that wants one address
-	// out of ipv4_addresses.
 	"first": func(v any) any {
 		list, ok := v.([]any)
 		if !ok || len(list) == 0 {
@@ -254,11 +222,49 @@ var funcs = template.FuncMap{
 		}
 		return list[0]
 	},
+
+	"lines": func(v any) []any {
+		return textLines(v, "")
+	},
+	"grep": func(v any, pat string) []any {
+		return textLines(v, pat)
+	},
+	"kv": func(v any, key string) string {
+		k := strings.ToLower(strings.TrimSpace(key))
+		for _, line := range strings.Split(fmt.Sprint(v), "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(strings.ToLower(line), k) {
+				continue
+			}
+			return strings.TrimSpace(strings.TrimLeft(line[len(k):], " \t:="))
+		}
+		return ""
+	},
+	"field": func(v any, n int) string {
+		f := strings.Fields(fmt.Sprint(v))
+		if n < 1 || n > len(f) {
+			return ""
+		}
+		return f[n-1]
+	},
 }
 
-// sameValue compares what came out of two JSON documents. Ids are strings in
-// this API, but comparing them as text keeps a number on one side of a join
-// from silently never matching.
+func textLines(v any, want string) []any {
+	want = strings.ToLower(want)
+	var out []any
+	for _, line := range strings.Split(fmt.Sprint(v), "\n") {
+		line = strings.TrimRight(line, " \t\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if want != "" && !strings.Contains(strings.ToLower(line), want) {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 func sameValue(a, b any) bool {
 	if a == nil || b == nil {
 		return false
@@ -281,8 +287,6 @@ func toInt64(v any) int64 {
 	return 0
 }
 
-// ageString is coarse on purpose: a reboot three weeks ago does not need
-// minutes.
 func ageString(d time.Duration) string {
 	switch {
 	case d < 0:

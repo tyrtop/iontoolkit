@@ -65,7 +65,6 @@ func TestSourceTokenReportsInteractiveRequired(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			// No DataDir, so the silent browser attempt cannot run either.
 			src := NewSource("123", tt.refresh, Options{TokenURL: srv.URL, Client: srv.Client()}, nil)
 			_, _, err := src.Token(context.Background())
 			if !errors.Is(err, ErrInteractiveRequired) {
@@ -89,7 +88,6 @@ func TestSourceTokenSurfacesSaveFailure(t *testing.T) {
 	if !errors.Is(err, want) {
 		t.Errorf("Token() error = %v, want it to wrap %v", err, want)
 	}
-	// The token itself is still usable; only persistence failed.
 	if tok != "at" {
 		t.Errorf("token = %q, want %q returned despite the save failure", tok, "at")
 	}
@@ -118,8 +116,6 @@ func TestSourceTokenHonoursContextCancellation(t *testing.T) {
 }
 
 func TestSourceSatisfiesTokenSource(t *testing.T) {
-	// Compile-time shape check without importing api, which would be a cycle
-	// risk; the signature below is api.TokenSource.
 	var _ interface {
 		Token(ctx context.Context) (string, time.Duration, error)
 	} = (*Source)(nil)
@@ -152,7 +148,6 @@ func TestSourceFallsBackToTheSharedSeed(t *testing.T) {
 	if got := form.Get("scope"); got != "openid profile email tsg_id:123" {
 		t.Errorf("sent scope = %q, want it narrowed to this tenant", got)
 	}
-	// This tenant's own credential now, so the next run skips the seed.
 	if got, _ := saved.Load().(string); got != "tenant-rt" {
 		t.Errorf("saved refresh token = %q, want %q", got, "tenant-rt")
 	}
@@ -181,8 +176,6 @@ func TestSourcePrefersItsOwnTokenOverTheSeed(t *testing.T) {
 }
 
 func TestConcurrentTenantsEachGetTheirOwnTokenFromOneSeed(t *testing.T) {
-	// The real failure: tenants loading at once from one account token, a
-	// rotating server leaving all but the first with invalid_grant.
 	var mu sync.Mutex
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +202,6 @@ func TestConcurrentTenantsEachGetTheirOwnTokenFromOneSeed(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// No DataDir, so there is no silent browser to fall back on.
 			_, _, err := NewSource(tsg, "", opt, nil).Token(context.Background())
 			switch {
 			case err == nil:
@@ -223,7 +215,6 @@ func TestConcurrentTenantsEachGetTheirOwnTokenFromOneSeed(t *testing.T) {
 	}
 	wg.Wait()
 
-	// The rest must ask for a browser, not report a rejected grant.
 	if got := ok.Load(); got != 1 {
 		t.Errorf("%d tenants got a token from the seed, want 1 from a rotating server", got)
 	}
@@ -236,10 +227,6 @@ func TestConcurrentTenantsEachGetTheirOwnTokenFromOneSeed(t *testing.T) {
 }
 
 func TestARejectedTenantTokenFallsBackToTheSeed(t *testing.T) {
-	// A per-tenant refresh token that the server has aged out used to skip
-	// the account credential entirely and go straight to the browser, so a
-	// tenant that merely needed renewing reported "no existing browser
-	// session" and asked for an interactive sign-in it did not need.
 	var sent []string
 	var mu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -281,16 +268,12 @@ func TestARejectedTenantTokenFallsBackToTheSeed(t *testing.T) {
 			t.Fatalf("presented %v, want %v", sent, want)
 		}
 	}
-	// And the tenant is left with a working credential, so the next run needs
-	// neither the seed nor a browser.
 	if got, _ := saved.Load().(string); got != "fresh-rt" {
 		t.Errorf("saved refresh token = %q, want the renewed %q", got, "fresh-rt")
 	}
 }
 
 func TestBothRefusalsAreReportedWhenNothingWorks(t *testing.T) {
-	// With no seed and no browser profile there is nothing left to try, and
-	// the message has to name the real cause rather than only the last leg.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(`{"error":"invalid_grant","error_description":"grant is invalid"}`))

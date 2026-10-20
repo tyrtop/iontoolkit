@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -60,8 +61,6 @@ func TestElementStatusGroupsTheFlatFieldsIntoChannels(t *testing.T) {
 			Name: "config_and_events", Connected: true,
 			On: 17923299413050015, Off: 17923299316100154, From: "203.0.113.9",
 		}},
-		// A backlog channel that is down still carries both times: it
-		// connects, drains and disconnects, so "down" is normal for it.
 		{"logs_backlog", Channel{
 			Name: "logs_backlog",
 			On:   1792307964995, Off: 1792308036585, From: "198.51.100.24",
@@ -80,8 +79,6 @@ func TestElementStatusGroupsTheFlatFieldsIntoChannels(t *testing.T) {
 	}
 }
 
-// The device facts in the same body, which are the ones worth a hot stat:
-// when it last rebooted and why, and which port the controller talks over.
 func TestElementStatusKeepsTheDeviceFactsBesideTheChannels(t *testing.T) {
 	st, err := decodeElementStatus([]byte(elementStatusBody))
 	if err != nil {
@@ -101,9 +98,6 @@ func TestElementStatusKeepsTheDeviceFactsBesideTheChannels(t *testing.T) {
 	}
 }
 
-// A bypass pair answers with one status per member in the items envelope,
-// where every other interface type answers with a bare object. Decoding only
-// the bare form dropped both members.
 func TestInterfaceStatusTakesEitherTheBareObjectOrTheEnvelope(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -126,9 +120,6 @@ func TestInterfaceStatusTakesEitherTheBareObjectOrTheEnvelope(t *testing.T) {
 			state: "up",
 		},
 		{
-			// Only a service link fills extended_state in, and it is the
-			// difference between "down" and "down because the port under it
-			// is".
 			name:  "service link",
 			body:  `{"id":"97","name":"tunnel","operational_state":"down","extended_state":"lowerlayer_down"}`,
 			want:  1,
@@ -151,10 +142,6 @@ func TestInterfaceStatusTakesEitherTheBareObjectOrTheEnvelope(t *testing.T) {
 	}
 }
 
-// One element-status body carries three scales at once, so these are every
-// one of them, each from a record whose real date is known. A wrong unit
-// comes out centuries adrift, which is why the dates are asserted rather than
-// the arithmetic.
 func TestUTCTimeWorksTheUnitOutFromTheMagnitude(t *testing.T) {
 	tests := []struct {
 		name string
@@ -207,9 +194,6 @@ func TestPortalURLsCarryTheVersionEachResourceAnswersOn(t *testing.T) {
 	}
 }
 
-// routes answers by path suffix, standing in for the SASE endpoints so a
-// snapshot can be taken without a tenant. The longest matching suffix wins,
-// since several of these paths end in /status.
 type routes map[string]func() (int, string)
 
 func (r routes) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -238,8 +222,6 @@ func snapshotClient(t *testing.T, r routes) *Client {
 	return NewClient(c, c, "tok", false, 100, 100)
 }
 
-// A status endpoint that refuses must not cost the interfaces: an element
-// whose portal half is half-answered is still worth a page.
 func TestSnapshotKeepsTheHalfThatAnswered(t *testing.T) {
 	c := snapshotClient(t, routes{
 		"/elements/15/status": func() (int, string) {
@@ -248,8 +230,6 @@ func TestSnapshotKeepsTheHalfThatAnswered(t *testing.T) {
 		"/interfaces": func() (int, string) {
 			return http.StatusOK, `{"items":[{"id":"17","name":"1","used_for":"public","admin_up":true}]}`
 		},
-		// port is an object, not a string, and the status record's own id is
-		// not the interface's. Both cost a decode when they were guessed.
 		"/interfaces/17/status": func() (int, string) {
 			return http.StatusOK, `{"id":"99","name":"1","operational_state":"up",
 				"extended_state":null,"negotiated_mtu":0,"device":"eth0",
@@ -282,7 +262,6 @@ func TestSnapshotKeepsTheHalfThatAnswered(t *testing.T) {
 	if got := len(st.IPv4Addresses); got != 1 {
 		t.Errorf("%d addresses, want 1", got)
 	}
-	// The link detail is in port, since negotiated_mtu is 0 even when up.
 	if st.Port == nil || !st.Port.Connected || st.Port.Speed != 1000 {
 		t.Errorf("port = %+v, want the link up at 1000", st.Port)
 	}
@@ -292,8 +271,6 @@ func TestSnapshotKeepsTheHalfThatAnswered(t *testing.T) {
 	if len(st.Routes) != 1 || st.Routes[0].Destination != "0.0.0.0/0" {
 		t.Errorf("routes = %+v", st.Routes)
 	}
-	// The bodies that did arrive are kept, so a field that never decoded can
-	// be told from one the server left empty.
 	if len(snap.Raw) != 2 {
 		t.Errorf("%d raw bodies, want the 2 that answered: %v", len(snap.Raw), snap.Raw)
 	}
@@ -342,8 +319,6 @@ func TestSpokeClusterStatusCarriesWhoIsActiveAndWhy(t *testing.T) {
 		t.Fatalf("unmarshal cluster status: %v", err)
 	}
 
-	// "unknown" is what a peer the controller cannot see looks like; there is
-	// no separate "standby".
 	if len(st.Members) != 2 || st.Members[1].Status != "unknown" {
 		t.Fatalf("members = %+v", st.Members)
 	}
@@ -356,7 +331,6 @@ func TestSpokeClusterStatusCarriesWhoIsActiveAndWhy(t *testing.T) {
 		t.Fatalf("got %d switchovers, want 2", len(st.Events))
 	}
 
-	// The slow start after a boot is a forced adjustment on the event itself.
 	boot := st.Events[1]
 	if len(boot.Adjustments) != 1 || boot.Adjustments[0].Kind != "force" || boot.Adjustments[0].Adjustment != 159 {
 		t.Errorf("boot adjustments = %+v", boot.Adjustments)
@@ -365,8 +339,6 @@ func TestSpokeClusterStatusCarriesWhoIsActiveAndWhy(t *testing.T) {
 		t.Errorf("switch_over_time reads as %s, want 2026-10-06 — milliseconds", got)
 	}
 
-	// A process dying takes points off without changing who is active, and
-	// that only shows up in the nested history.
 	now := st.Events[0]
 	if len(now.ClusterEvents) != 2 {
 		t.Fatalf("got %d cluster events, want 2", len(now.ClusterEvents))
@@ -380,9 +352,6 @@ func TestSpokeClusterStatusCarriesWhoIsActiveAndWhy(t *testing.T) {
 	}
 }
 
-// The cluster is only fetched for an element whose record says it is in one,
-// and the cluster id comes from spoke_ha_config rather than the record's own
-// cluster_id, which a real clustered spoke left null.
 func TestSnapshotFetchesTheClusterOnlyForAClusteredElement(t *testing.T) {
 	const body = `{"cluster_members":[{"element_id":"15","status":"active"}],
 		"switch_over_events":[{"element_id":"15","active":true,
@@ -443,8 +412,6 @@ func TestSnapshotFetchesTheClusterOnlyForAClusteredElement(t *testing.T) {
 	}
 }
 
-// Interfaces are site-scoped in the path, so an element with no site cannot
-// have them fetched. Saying so beats a request to .../sites//elements/15.
 func TestSnapshotWithNoSiteDoesNotAskForInterfaces(t *testing.T) {
 	asked := false
 	c := snapshotClient(t, routes{
@@ -466,4 +433,143 @@ func TestSnapshotWithNoSiteDoesNotAskForInterfaces(t *testing.T) {
 	if snap.StatusErr != nil {
 		t.Errorf("StatusErr = %v, want the status still fetched", snap.StatusErr)
 	}
+}
+
+// the portal's own capture of 2026-10-19: a POST filtered by element id,
+// dest_page counting from one, answered with a flat row per element whose
+// status is "active" or "backup"
+func TestSpokeClusterStatusesReadsTheAggregate(t *testing.T) {
+	const captured = `{"count":2,"items":[
+		{"id":"163241838","site_id":"1632417734","spoke_cluster_id":"1632417740",
+		 "element_id":"1632412620","status":"active","priority":150,
+		 "last_status_update_ts":1790721802930},
+		{"id":"163241896","site_id":"1632417734","spoke_cluster_id":"1632417740",
+		 "element_id":"1632412630","status":"backup","priority":100,
+		 "last_status_update_ts":1790721802295}]}`
+
+	tests := []struct {
+		name    string
+		status  int
+		body    string
+		want    int
+		wantErr string
+	}{
+		{name: "the shape the portal answers with", status: http.StatusOK, body: captured, want: 2},
+		{
+			name:    "nothing usable in it",
+			status:  http.StatusOK,
+			body:    `{"count":0,"items":[]}`,
+			wantErr: "no members",
+		},
+		{
+			name:    "rows with no element id",
+			status:  http.StatusOK,
+			body:    `{"count":1,"items":[{"status":"active"}]}`,
+			wantErr: "no members",
+		},
+		{name: "refused", status: http.StatusForbidden, body: `{"error":"no"}`, wantErr: "Forbidden"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var seen *http.Request
+			var sent []byte
+			c := snapshotClient(t, routes{
+				"/spokeclusters/status/query": func() (int, string) { return tc.status, tc.body },
+			})
+			c.client.Transport = recorder{
+				inner: c.client.Transport,
+				saw:   func(r *http.Request, b []byte) { seen, sent = r, b },
+			}
+
+			got, err := c.SpokeClusterStatuses(context.Background(), []string{"1632412620", "1632412630"})
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("SpokeClusterStatuses() = %v, want an error so the caller falls back", got)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error = %q, want it to mention %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SpokeClusterStatuses() error = %v", err)
+			}
+			if len(got) != tc.want {
+				t.Fatalf("%d rows, want %d", len(got), tc.want)
+			}
+			if got[0].Status != "active" || got[0].Priority != 150 {
+				t.Errorf("first row = %+v, want the active member at 150", got[0])
+			}
+			if got[1].Status != "backup" {
+				t.Errorf("second row = %+v, want the portal's own word for standby", got[1])
+			}
+			if got[0].ClusterID == "" || got[0].SiteID == "" || got[0].ElementID == "" {
+				t.Errorf("first row = %+v, want its ids decoded", got[0])
+			}
+
+			if seen == nil {
+				t.Fatal("no request was made")
+			}
+			if seen.Method != http.MethodPost {
+				t.Errorf("method = %s, want POST", seen.Method)
+			}
+			if !strings.HasSuffix(seen.URL.Path, "/spokeclusters/status/query") {
+				t.Errorf("path = %s, want the tenant-wide query", seen.URL.Path)
+			}
+			for _, want := range []string{
+				`"query_params":{"element_id":{"in":["1632412620","1632412630"]}}`,
+				`"dest_page":1`,
+				`"limit":200`,
+				`"getDeleted":false`,
+			} {
+				if !strings.Contains(string(sent), want) {
+					t.Errorf("request body\n%s\nis missing %s", sent, want)
+				}
+			}
+		})
+	}
+}
+
+func TestTheAggregateAsksAboutTheElementsItIsGiven(t *testing.T) {
+	var sent []byte
+	c := snapshotClient(t, routes{
+		"/spokeclusters/status/query": func() (int, string) {
+			return http.StatusOK,
+				`{"count":1,"items":[{"element_id":"e2","spoke_cluster_id":"c1","status":"active"}]}`
+		},
+	})
+	calls := 0
+	c.client.Transport = recorder{
+		inner: c.client.Transport,
+		saw:   func(_ *http.Request, b []byte) { sent, calls = b, calls+1 },
+	}
+
+	if _, err := c.SpokeClusterStatuses(context.Background(), []string{"e1", "e2", "e3"}); err != nil {
+		t.Fatalf("SpokeClusterStatuses() error = %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("%d requests, want one for one chunk", calls)
+	}
+	if !strings.Contains(string(sent), `"in":["e1","e2","e3"]`) {
+		t.Errorf("request body %s does not name exactly the elements asked about", sent)
+	}
+	if _, err := c.SpokeClusterStatuses(context.Background(), nil); err == nil {
+		t.Error("asking about no elements should be an error, not a request")
+	}
+}
+
+type recorder struct {
+	inner http.RoundTripper
+	saw   func(*http.Request, []byte)
+}
+
+func (r recorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	var body []byte
+	if req.Body != nil {
+		body, _ = io.ReadAll(req.Body)
+		req.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	r.saw(req, body)
+	return r.inner.RoundTrip(req)
 }

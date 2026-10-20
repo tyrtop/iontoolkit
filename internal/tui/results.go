@@ -14,7 +14,7 @@ import (
 )
 
 func newResultsTable() table.Model {
-	return table.New(
+	t := table.New(
 		table.WithColumns([]table.Column{
 			{Title: "", Width: 2},
 			{Title: "element", Width: 26},
@@ -24,6 +24,52 @@ func newResultsTable() table.Model {
 		}),
 		table.WithFocused(true),
 	)
+	t.SetStyles(tableStyles())
+	return t
+}
+
+func (m *tuiModel) moveResultCursor(delta int) {
+	rows := m.resTable.Rows()
+	if len(rows) == 0 {
+		return
+	}
+	n := max(0, min(m.resTable.Cursor()+delta, len(rows)-1))
+	if at := m.resTable.Cursor(); n >= at {
+		m.resTable.MoveDown(n - at)
+		return
+	}
+
+	fresh := newResultsTable()
+	fresh.SetColumns(m.resTable.Columns())
+	fresh.SetRows(rows)
+	fresh.SetWidth(m.resTable.Width())
+	fresh.SetHeight(m.resTableHeight())
+	fresh.MoveDown(n)
+	m.resTable = fresh
+}
+
+func (m tuiModel) resOutputRoom() int {
+	used := 4 + m.resTableHeight()
+	return max(2, m.height-used-2-m.statsRows())
+}
+
+func (m tuiModel) moveResLine(delta int) tuiModel {
+	idx, ok := m.currentResult()
+	if !ok {
+		return m
+	}
+	n := len(m.resultDetail(idx))
+	room := m.resOutputRoom()
+
+	m.resLine = max(0, min(m.resLine+delta, n-1))
+	if m.resLine < m.resScroll {
+		m.resScroll = m.resLine
+	}
+	if m.resLine >= m.resScroll+room {
+		m.resScroll = m.resLine - room + 1
+	}
+	m.resScroll = max(0, min(m.resScroll, max(0, n-room)))
+	return m
 }
 
 func newResultsFilter() textinput.Model {
@@ -46,6 +92,8 @@ func (m tuiModel) completedCount() int {
 }
 
 func (m *tuiModel) applyResultFilter() {
+	was := m.cursorResultID()
+
 	q := strings.ToLower(strings.TrimSpace(m.resFilter.Value()))
 	m.resMatches = m.resMatches[:0]
 
@@ -69,7 +117,25 @@ func (m *tuiModel) applyResultFilter() {
 	}
 	m.resFilter.SetSuggestions(names)
 	m.rebuildResultRows()
+	m.keepResultCursorOn(was)
+}
 
+func (m tuiModel) cursorResultID() string {
+	if idx, ok := m.currentResult(); ok {
+		return m.results[idx].ElementID
+	}
+	return ""
+}
+
+func (m *tuiModel) keepResultCursorOn(eid string) {
+	if eid != "" {
+		for row, i := range m.resMatches {
+			if m.results[i].ElementID == eid {
+				m.resTable.SetCursor(row)
+				return
+			}
+		}
+	}
 	if c := m.resTable.Cursor(); c >= len(m.resMatches) {
 		m.resTable.SetCursor(max(0, len(m.resMatches)-1))
 	}
@@ -122,16 +188,14 @@ func (m tuiModel) currentResult() (int, bool) {
 
 func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
 	switch key {
-	// Only the main menu's q quits: a key that leaves a page on one screen and
-	// kills the run on the next is one nobody can press with confidence.
 	case "esc", "q":
 		if key == "q" && m.resFilterOn {
-			break // a letter while the filter is being typed
+			break
 		}
 		switch {
 		case m.resOpen:
 			m.resOpen = false
-			m.resScroll = 0
+			m.resScroll, m.resLine = 0, 0
 			m.rebuildResultRows()
 		case m.resFilterOn || m.resFilter.Value() != "":
 			m.resFilterOn = false
@@ -143,34 +207,60 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		}
 		return m, nil
 
-	case "up", "down", "home", "end":
-		if m.resOpen {
-			m.resOpen = false
-			m.resScroll = 0
-			m.rebuildResultRows()
+	case "up", "down", "k", "j", "home", "end":
+		if key == "k" || key == "j" {
+			if m.resFilterOn {
+				break
+			}
 		}
-		var cmd tea.Cmd
-		m.resTable, cmd = m.resTable.Update(msg)
-		return m, cmd
+		if m.resOpen {
+			switch key {
+			case "up", "k":
+				return m.moveResLine(-1), nil
+			case "down", "j":
+				return m.moveResLine(1), nil
+			case "home":
+				return m.moveResLine(-1 << 30), nil
+			case "end":
+				return m.moveResLine(1 << 30), nil
+			}
+		}
+		switch key {
+		case "up", "k":
+			m.moveResultCursor(-1)
+		case "down", "j":
+			m.moveResultCursor(1)
+		case "home":
+			m.moveResultCursor(-1 << 30)
+		case "end":
+			m.moveResultCursor(1 << 30)
+		}
+		return m, nil
 
-	case "pgup":
-		if m.resOpen {
-			m.resScroll = max(0, m.resScroll-5)
-			return m, nil
+	case "pgup", "pgdown":
+		step := max(1, m.resOutputRoom()-1)
+		if !m.resOpen {
+			step = max(1, m.resTable.Height()-1)
 		}
-	case "pgdown":
-		if m.resOpen {
-			m.resScroll += 5
-			return m, nil
+		if key == "pgup" {
+			step = -step
 		}
+		if m.resOpen {
+			return m.moveResLine(step), nil
+		}
+		m.moveResultCursor(step)
+		return m, nil
 
 	case "enter":
 		if _, ok := m.currentResult(); ok {
 			m.resOpen = !m.resOpen
-			m.resScroll = 0
+			m.resScroll, m.resLine = 0, 0
 			m.rebuildResultRows()
 		}
 		return m, nil
+
+	case "alt+y":
+		return m.copyResults()
 
 	case "f", "o", "s":
 		if !m.resFilterOn {
@@ -179,14 +269,21 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 
 	case "/":
 		if !m.resFilterOn {
+			m.resFilter.SetValue("")
 			m.resFilterOn = true
 			m.resOpen = false
-			m.rebuildResultRows()
+			m.applyResultFilter()
 			return m, m.resFilter.Focus()
 		}
 	}
 
 	if m.resFilterOn {
+		if key == "backspace" && m.resFilter.Value() == "" {
+			m.resFilterOn = false
+			m.resFilter.Blur()
+			m.applyResultFilter()
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.resFilter, cmd = m.resFilter.Update(msg)
 		m.applyResultFilter()
@@ -198,10 +295,6 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 	return m, cmd
 }
 
-// onResultsOutputKey carries the save controls, because changing the format in
-// settings means leaving the results to go and find it. Changing the format
-// writes nothing by itself -- the run was already saved in the old one -- so
-// each of these says that s is what writes a file.
 func (m tuiModel) onResultsOutputKey(key string) (tea.Model, tea.Cmd) {
 	if key == "s" {
 		m.status = m.saveBatchResults()
@@ -265,8 +358,6 @@ func (m tuiModel) viewResults() string {
 	if m.failed > 0 {
 		header += ui.StyleErr.Render(fmt.Sprintf("  %d failed", m.failed))
 	}
-	// The save format belongs on the page it is toggled from; f and o are
-	// otherwise keys with nothing on screen to show they did anything.
 	tag := m.batchFormat()
 	if output.Tabular(m.batchFormat()) {
 		tag += " · " + output.OrientationLabel(m.batchOrient())
@@ -301,14 +392,16 @@ func (m tuiModel) viewResults() string {
 		b.WriteString(ui.StyleElement.Render(name) + "\n")
 
 		lines := m.resultDetail(idx)
-		used := len(strings.Split(strings.TrimRight(b.String(), "\n"), "\n"))
-		room := max(2, m.height-used-2-m.statsRows())
+		room := m.resOutputRoom()
+		width := max(10, m.width-1)
 		start := min(m.resScroll, max(0, len(lines)-room))
 		for i := start; i < len(lines) && i-start < room; i++ {
-			b.WriteString(ui.Truncate(lines[i], max(10, m.width-1)) + "\n")
-		}
-		if rest := len(lines) - start - room; rest > 0 {
-			b.WriteString(ui.StyleDim.Render(fmt.Sprintf("  … %d more lines (pgdn)", rest)) + "\n")
+			if i == m.resLine {
+				row := fmt.Sprintf("%-*s", width, ui.Truncate(ui.Plain(lines[i]), width))
+				b.WriteString(ui.StyleRow.Render(row) + "\n")
+				continue
+			}
+			b.WriteString(ui.Truncate(lines[i], width) + "\n")
 		}
 	}
 
@@ -321,13 +414,19 @@ func (m tuiModel) viewResults() string {
 		body += "\n" + m.statsPane()
 	}
 
-	hint := "↑↓ move · / filter · enter open · f/o format · s save · esc/q back"
+	status := m.status
+	hint := "↑↓/jk move · / filter · enter open · f/o format · s save · " + copyKeyHint + " run as json · esc/q back"
 	if m.resOpen {
-		hint = "↑↓ close and move · pgup/pgdn scroll · esc/q close"
+		hint = "↑↓/jk scroll · pgup/pgdn page · home/end ends · " + copyKeyHint + " output · esc/q close"
+		if idx, ok := m.currentResult(); ok {
+			where := fmt.Sprintf("line %d of %d", m.resLine+1, len(m.resultDetail(idx)))
+			if status != "" {
+				where += " · "
+			}
+			status = where + status
+		}
 	}
-	// Truncated rather than wrapped: a hint that takes two rows on a narrow
-	// terminal moves the whole frame.
-	return body + "\n" + ui.Footer(m.status, ui.Truncate(hint, max(10, m.width-1)))
+	return body + "\n" + ui.Footer(status, ui.Truncate(hint, max(10, m.width-1)))
 }
 
 func (m tuiModel) seedResultsForTest(rs []sase.Result, el []time.Duration) tuiModel {

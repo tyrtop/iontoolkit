@@ -11,42 +11,28 @@ import (
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/ui"
 )
 
-// TenantLoad is one step of a --search element load: a tenant starting, then
-// the same tenant finishing. A tenant is the unit because that is what takes
-// the time -- a cold tenant is thousands of elements and a sign-in.
 type TenantLoad struct {
 	Tenant string
-	// Count and Note describe a finished load: how many elements, and where
-	// they came from.
-	Count int
-	Note  string
-	Err   error
-	// Warn marks an answer that arrived but is out of date, which is neither
-	// a success to tick off nor a failure to cross out.
-	Warn bool
-	Done bool
+	Count  int
+	Note   string
+	Err    error
+	Warn   bool
+	Done   bool
 }
 
-// DrainTenants draws element-loading progress on stderr and returns once the
-// channel closes. It never fails the search: the results are collected by the
-// producer, and this only says how it is going.
 func DrainTenants(ctx context.Context, events <-chan TenantLoad, total int) {
 	opts := []tea.ProgramOption{
 		tea.WithContext(ctx),
 		tea.WithOutput(os.Stderr),
 		tea.WithoutSignalHandler(),
-		// stdin belongs to the confirmation prompt that may follow, and to
-		// anything piping IDs in.
 		tea.WithInput(nil),
 	}
 	if _, err := tea.NewProgram(newLoadModel(events, total), opts...).Run(); err != nil &&
 		!errors.Is(err, tea.ErrProgramKilled) {
-		// Drain what is left so the producer is never blocked on a display.
 		for range events {
 		}
 	}
@@ -72,7 +58,7 @@ type loadClosedMsg struct{}
 
 func newLoadModel(events <-chan TenantLoad, total int) loadModel {
 	s := spinner.New()
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	s.Style = ui.StyleSpinner
 	return loadModel{
 		events:  events,
 		total:   total,
@@ -103,7 +89,6 @@ func waitForLoad(ch <-chan TenantLoad) tea.Cmd {
 
 func (m loadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil

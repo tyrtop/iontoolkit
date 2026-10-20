@@ -44,7 +44,6 @@ func TestListTenantsFlattensTheHierarchy(t *testing.T) {
 		t.Errorf("Authorization = %q, want the bearer token", *auth)
 	}
 
-	// Sorted by name, nested entries included.
 	want := []struct{ name, id string }{
 		{"CIS root", "1643707006"},
 		{"NIAGARA BOTTLING, LLC-145595", "1538107912"},
@@ -128,7 +127,6 @@ func TestListTenantsEdgeCases(t *testing.T) {
 }
 
 func TestListTenantsDefaultsToTheRealEndpoint(t *testing.T) {
-	// Passing no base URL must target the portal, not panic or build a bare path.
 	req, err := http.NewRequest(http.MethodGet, TenancyURL+"?hierarchy=true", nil)
 	if err != nil {
 		t.Fatalf("the default endpoint is not a usable URL: %v", err)

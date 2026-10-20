@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ioncmd"
 	"tyrtop.com/iontk/internal/output"
@@ -22,10 +23,25 @@ const (
 	focusContent
 )
 
-var setSections = []string{"General", "Batch", "Tenants", "Users", "Session", "Debug", "Reset"}
+const (
+	guardRow = iota
+	modeRow
+	jumpRow
+	zoneRow
+	refreshRow
+	generalRows
+)
+
+var generalRowLabels = map[int]string{
+	guardRow: "Commands", modeRow: "Mode", jumpRow: "Jump",
+	zoneRow: "Times", refreshRow: "Elements",
+}
+
+var setSections = []string{"General", "Theme", "Batch", "Tenants", "Users", "Session", "Debug", "Reset"}
 
 const (
 	secGeneral = iota
+	secTheme
 	secBatch
 	secTenants
 	secUsers
@@ -37,7 +53,12 @@ const (
 func (m tuiModel) sectionRows() int {
 	switch m.setSection {
 	case secGeneral:
-		return 5
+		return generalRows
+	case secTheme:
+		if m.themeEdit {
+			return 0
+		}
+		return len(ui.Themes()) + 1
 	case secBatch:
 		return 4
 	case secTenants:
@@ -49,16 +70,22 @@ func (m tuiModel) sectionRows() int {
 	case secDebug:
 		return 0
 	case secReset:
-		return 1
+		return 2
 	}
 	return 0
 }
 
 func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
-	// Arming the reset lasts exactly one keypress. Leaving the row with it
-	// still set would mean a later y resets without having been asked.
 	armed := m.resetArmed
 	m.resetArmed = false
+
+	if key != "x" && key != "ctrl+d" {
+		m.themeDel = ""
+	}
+
+	if m.setSection == secTheme && (m.themeEdit || m.pick.on || m.tabEdit) {
+		return m.onThemeKey(key)
+	}
 
 	if key == "enter" && m.setFocus == focusNav {
 		if m.sectionRows() > 0 {
@@ -115,6 +142,8 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 	switch m.setSection {
 	case secGeneral:
 		return m.onGeneralKey(key)
+	case secTheme:
+		return m.onThemeKey(key)
 	case secBatch:
 		return m.onBatchKey(key)
 	case secTenants:
@@ -129,8 +158,6 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// onResetKey arms on enter and fires on y. Two keys, because nothing else in
-// iontk destroys credentials that cannot be fetched again.
 func (m tuiModel) onResetKey(key string, armed bool) (tea.Model, tea.Cmd) {
 	if !armed {
 		if key == "enter" {
@@ -140,18 +167,31 @@ func (m tuiModel) onResetKey(key string, armed bool) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if key != "y" {
-		m.status = "reset cancelled"
+		m.status = "cancelled"
 		return m, nil
+	}
+	if m.setCursor == themeRestoreRow {
+		return m.restoreShippedThemes()
 	}
 	return m.factoryReset()
 }
 
-// factoryReset throws away the saved state and leaves the model looking like a
-// first run, which is the only honest way to show that it worked.
+const (
+	factoryResetRow = iota
+	themeRestoreRow
+)
+
 func (m tuiModel) factoryReset() (tea.Model, tea.Cmd) {
-	// Sessions hold a token that has just been deleted, and a device login that
-	// cannot be typed again from anywhere in this process.
 	m.sessions.CloseAll()
+
+	if err := app.RemoveThemes(m.store); err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+	ui.HideThemes(nil)
+	if err := ui.LoadThemes(app.ThemesPath(m.store)); err != nil {
+		m.status = err.Error()
+	}
 
 	if err := m.store.Reset(); err != nil {
 		m.status = err.Error()
@@ -181,23 +221,20 @@ func (m tuiModel) onGeneralKey(key string) (tea.Model, tea.Cmd) {
 	if key != "enter" && key != " " && key != "space" {
 		return m, nil
 	}
-	if m.setCursor == 4 {
+	if m.setCursor == refreshRow {
 		return m.refreshNow()
 	}
 	switch m.setCursor {
-	case 2:
-		return m.cycleDefaultMode()
-	case 3:
-		return m.cyclePageStep()
-	case 0:
-		next := ui.NextSpinnerName(m.spinnerName)
-		m.cfg.Spinner = next
-		if err := m.store.SaveConfig(m.cfg); err != nil {
-			m.status = err.Error()
-			return m, nil
+	case zoneRow:
+		if key == "enter" {
+			return m.openZoneForm()
 		}
-		return m.withSpinner(next)
-	case 1:
+		return m.cycleZone()
+	case modeRow:
+		return m.cycleDefaultMode()
+	case jumpRow:
+		return m.cyclePageStep()
+	case guardRow:
 		m.cfg.AllowWrites = !m.cfg.AllowWrites
 		if err := m.store.SaveConfig(m.cfg); err != nil {
 			m.status = err.Error()
@@ -224,7 +261,6 @@ func (m tuiModel) onTenantsKey(key string) (tea.Model, tea.Cmd) {
 		if m.tenant.Name == t.Name {
 			m.tenant.Added = added
 		}
-		// Dropping a tenant from the set has to drop its elements too.
 		if !added {
 			kept := make([]elementRow, 0, len(m.all))
 			for _, r := range m.all {
@@ -362,8 +398,6 @@ func (m tuiModel) sectionContent() []string {
 		if m.cfg.BatchDir != "" {
 			folder = ui.StyleDim.Render(ui.Truncate(m.cfg.BatchDir, 44))
 		}
-		// The row stays whether the format sorts rows or not: a section that
-		// gains and loses a row as the format cycles moves everything under it.
 		order := ui.StyleElement.Render(output.OrientationLabel(m.batchOrient())) +
 			ui.StyleDim.Render("  "+output.OrientationHelp(m.batchOrient()))
 		if !output.Tabular(m.batchFormat()) {
@@ -371,11 +405,11 @@ func (m tuiModel) sectionContent() []string {
 				"  only table and csv have rows to sort")
 		}
 		out = append(out,
-			ui.Label("format")+ui.StyleElement.Render(m.batchFormat())+
+			ui.Label("Format")+ui.StyleElement.Render(m.batchFormat())+
 				ui.StyleDim.Render("  "+output.FormatHelp(m.batchFormat())),
-			ui.Label("rows")+order,
-			ui.Label("output")+dest,
-			ui.Label("folder")+folder,
+			ui.Label("Rows")+order,
+			ui.Label("Output")+dest,
+			ui.Label("Folder")+folder,
 		)
 		if m.cfg.BatchToFile && m.cfg.BatchDir == "" {
 			out = append(out, "", ui.StyleWarn.Render("set a folder, or output falls back to stdout"))
@@ -387,16 +421,16 @@ func (m tuiModel) sectionContent() []string {
 			guard = ui.StyleWarn.Render("writes allowed")
 		}
 		out = append(out,
-			ui.Label("spinner")+m.spinner.View()+" "+ui.StyleElement.Render(m.spinnerName),
-			ui.Label("commands")+guard,
-			ui.Label("mode")+ui.StyleElement.Render(m.defaultMode().String())+
+			ui.Label("Commands")+guard,
+			ui.Label("Mode")+ui.StyleElement.Render(m.defaultMode().String())+
 				ui.StyleDim.Render("  what the element list opens in"),
-			ui.Label("jump")+ui.StyleElement.Render(fmt.Sprintf("%d rows", m.pageStep()))+
+			ui.Label("Jump")+ui.StyleElement.Render(fmt.Sprintf("%d rows", m.pageStep()))+
 				ui.StyleDim.Render("  how far alt+↑/↓ moves in the element list"),
-			ui.Label("elements")+m.cacheLine(),
-			ui.Label("views")+m.viewsLine(),
+			ui.Label("Times")+m.zoneLine(),
+			ui.Label("Elements")+m.cacheLine(),
+			ui.Label("Views")+m.viewsLine(),
 			"",
-			ui.Label("secrets")+m.secretsLine(),
+			ui.Label("Secrets")+m.secretsLine(),
 		)
 		if config.Plaintext(m.store.Secrets) {
 			if fp, ok := m.store.Secrets.(interface{ Path() string }); ok {
@@ -404,6 +438,9 @@ func (m tuiModel) sectionContent() []string {
 			}
 			out = append(out, ui.Label("")+ui.StyleWarn.Render("ION passwords are readable by anything that can read that file"))
 		}
+
+	case secTheme:
+		out = append(out, m.themeContent()...)
 
 	case secTenants:
 		if len(m.cfg.Tenants) == 0 {
@@ -421,8 +458,6 @@ func (m tuiModel) sectionContent() []string {
 			if t.Added {
 				box = ui.StyleOK.Render("[x] ")
 			}
-			// A tenant that keeps failing is worth flagging here, since this is
-			// where it can be taken out of the set.
 			if why, bad := m.tenantIssues[t.TSGID]; bad {
 				tag += ui.StyleWarn.Render("  " + why)
 			}
@@ -457,43 +492,44 @@ func (m tuiModel) sectionContent() []string {
 		cols, rows := m.sessionGeometry()
 		warn := ui.StyleWarn.Render("  do not change unless you know what you are doing!")
 		out = append(out,
-			ui.Label("buffer cols")+fmt.Sprintf("%-6d", cols)+warn,
-			ui.Label("buffer rows")+fmt.Sprintf("%-6d", rows)+warn,
+			ui.Label("Buffer Cols")+fmt.Sprintf("%-6d", cols)+warn,
+			ui.Label("Buffer Rows")+fmt.Sprintf("%-6d", rows)+warn,
 		)
 
 	case secReset:
-		out = append(out, ui.StyleWarn.Render("factory reset"))
+		out = append(out, ui.StyleWarn.Render("Factory Reset"))
+		out = append(out, ui.StyleWarn.Render("Restore Themes")+
+			ui.StyleDim.Render("   the schemes iontk ships; your own are untouched"))
 		if m.resetArmed {
-			out = append(out,
-				"",
-				ui.StyleErr.Render("press y to delete every tenant, ION password and token"),
-				ui.StyleDim.Render("the browser profile goes too, so this signs you out"),
+			what := "delete every tenant, ION password, token and scheme"
+			if m.setCursor == themeRestoreRow {
+				what = "put the shipped schemes back"
+			}
+			out = append(out, "",
+				ui.StyleErr.Render("press y to "+what),
 				ui.StyleDim.Render("any other key cancels"),
 			)
-			break
 		}
-		out = append(out,
-			"",
-			ui.StyleDim.Render("deletes saved tenants, ION passwords, browser tokens,"),
-			ui.StyleDim.Render("cached elements and the browser profile"),
-			ui.StyleDim.Render("nothing here can be undone, and nothing is backed up"),
-		)
 
 	case secDebug:
 		out = append(out,
-			ui.Label("config")+ui.StyleDim.Render(m.store.Root),
-			ui.Label("secrets")+ui.StyleDim.Render(m.store.Secrets.Backend()),
-			ui.Label("version")+ui.StyleDim.Render(Version),
-			ui.Label("stats")+ui.StyleDim.Render("alt+i overlays live counters"),
+			ui.Label("Config")+ui.StyleDim.Render(m.store.Root),
+			ui.Label("Secrets")+ui.StyleDim.Render(m.store.Secrets.Backend()),
+			ui.Label("Version")+ui.StyleDim.Render(Version),
+			ui.Label("Stats")+ui.StyleDim.Render("alt+i overlays live counters"),
+			ui.Label("Colours")+ui.StyleDim.Render(ui.CurrentTheme().Name+"  "+profileLabel()),
+			ui.Label("Terminal")+ui.StyleDim.Render(termColourLine()),
+			ui.Label("Times")+ui.StyleDim.Render(clock.Name()),
 			"",
-			ui.Label("tenant")+ui.StyleDim.Render(m.tenant.Name+"  tsg "+m.tenant.TSGID),
-			ui.Label("ion user")+ui.StyleDim.Render(m.ionUser),
-			ui.Label("mode")+ui.StyleDim.Render(m.mode.String()),
+			ui.Label("Tenant")+ui.StyleDim.Render(m.tenant.Name+"  tsg "+m.tenant.TSGID),
+			ui.Label("ION User")+ui.StyleDim.Render(m.ionUser),
+			ui.Label("Mode")+ui.StyleDim.Render(m.mode.String()),
 			"",
-			ui.Label("elements")+ui.StyleDim.Render(fmt.Sprintf("%d cached, %d shown", m.cacheCount, len(m.matches))),
-			ui.Label("sessions")+ui.StyleDim.Render(fmt.Sprintf("%d open, %d detached", m.sessions.Count(), m.sessions.DetachedCount())),
-			ui.Label("catalog")+ui.StyleDim.Render(fmt.Sprintf("%d commands, %d offered", len(ioncmd.Embedded()), len(m.catalog()))),
-			ui.Label("terminal")+ui.StyleDim.Render(fmt.Sprintf("%d x %d", m.width, m.height)),
+			ui.Label("Elements")+ui.StyleDim.Render(fmt.Sprintf("%d cached, %d shown", m.cacheCount, len(m.matches))),
+			ui.Label("Sessions")+ui.StyleDim.Render(fmt.Sprintf("%d open, %d detached", m.sessions.Count(), m.sessions.DetachedCount())),
+			ui.Label("HA")+ui.StyleDim.Render(m.haPath()),
+			ui.Label("Catalog")+ui.StyleDim.Render(fmt.Sprintf("%d commands, %d offered", len(ioncmd.Embedded()), len(m.catalog()))),
+			ui.Label("Terminal")+ui.StyleDim.Render(fmt.Sprintf("%d x %d", m.width, m.height)),
 		)
 		if app.Debug {
 			out = append(out, "", ui.StyleWarn.Render("--debug: throwaway config, no saved tenants, secrets held only in memory"))
@@ -507,6 +543,9 @@ func (m tuiModel) sectionHint() string {
 		return "read only · ↑↓ section · esc back"
 	}
 	if m.setSection == secReset && m.resetArmed {
+		if m.setCursor == themeRestoreRow {
+			return "y restore the shipped themes · any other key cancels"
+		}
 		return "y reset · any other key cancels"
 	}
 	if m.setFocus == focusNav {
@@ -514,7 +553,12 @@ func (m tuiModel) sectionHint() string {
 	}
 	switch m.setSection {
 	case secGeneral:
-		return "↑↓ row · enter change/refresh · tab back · esc back"
+		return "↑↓ row · enter change/refresh/type · space cycle · tab back · esc back"
+	case secTheme:
+		if m.pick.on {
+			return "↑↓←→ move · +/- brightness · tab disc/chart · t type · enter keep · esc cancel"
+		}
+		return ""
 	case secBatch:
 		return "↑↓ row · enter change · tab back · esc back"
 	case secTenants:
@@ -527,9 +571,15 @@ func (m tuiModel) sectionHint() string {
 		return "read only · tab back · esc back"
 	case secReset:
 		if m.resetArmed {
+			if m.setCursor == themeRestoreRow {
+				return "y restore the shipped themes · any other key cancels"
+			}
 			return "y reset · any other key cancels"
 		}
-		return "enter arm the reset · tab back · esc back"
+		if m.setCursor == themeRestoreRow {
+			return "↑↓ row · enter arm the restore · esc back"
+		}
+		return "↑↓ row · enter arm the reset · esc back"
 	}
 	return "tab back · esc back"
 }
@@ -549,7 +599,7 @@ func (m tuiModel) viewSettings() string {
 			} else {
 				cursor = ui.StyleDim.Render("· ")
 			}
-			label = ui.StyleElement.Render(name)
+			label = ui.StyleRow.Render(name)
 		}
 		nav.WriteString(cursor + label + "\n")
 	}
@@ -565,12 +615,12 @@ func (m tuiModel) viewSettings() string {
 	}
 
 	navPane := lipgloss.NewStyle().Width(navWidth).Height(bodyHeight).Render(nav.String())
-	divider := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Height(bodyHeight).
+	divider := ui.StyleDivider.Height(bodyHeight).
 		Render(strings.TrimRight(strings.Repeat("│\n", bodyHeight), "\n"))
 	contentPane := lipgloss.NewStyle().Width(contentWidth).Height(bodyHeight).Render(content.String())
 
 	var b strings.Builder
-	b.WriteString(ui.StyleCmd.Render("settings") + "\n\n")
+	b.WriteString(ui.StyleCmd.Render("Settings") + "\n\n")
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, navPane, divider+" ", contentPane) + "\n")
 
 	body := strings.TrimRight(b.String(), "\n")
@@ -582,8 +632,6 @@ func (m tuiModel) viewSettings() string {
 	return body + "\n" + ui.Footer(m.status, m.sectionHint())
 }
 
-// batchFormat is the saved format, normalized so an unset or stale value still
-// displays as something real.
 func (m tuiModel) batchFormat() string {
 	f, err := output.NormalizeFormat(m.cfg.BatchFormat)
 	if err != nil {
@@ -592,8 +640,6 @@ func (m tuiModel) batchFormat() string {
 	return f
 }
 
-// batchOrient is the saved row orientation, normalized the same way as the
-// format so a stale value still displays as something real.
 func (m tuiModel) batchOrient() string {
 	o, err := output.NormalizeOrientation(m.cfg.BatchOrient)
 	if err != nil {
@@ -640,7 +686,6 @@ func (m tuiModel) openBatchDirForm() (tea.Model, tea.Cmd) {
 	return m.openForm(formBatchDir, "Folder for batch output", phaseAddTenant, []formField{dir})
 }
 
-// secretsLine names the secret store without softening a plaintext fallback.
 func (m tuiModel) secretsLine() string {
 	if config.Plaintext(m.store.Secrets) {
 		return ui.StyleWarn.Render(config.SecretsWarning(m.store.Secrets))
@@ -648,8 +693,6 @@ func (m tuiModel) secretsLine() string {
 	return ui.StyleOK.Render(config.SecretsWarning(m.store.Secrets))
 }
 
-// shortenPath drops the front of a path rather than the end, since the file
-// name is the part worth reading.
 func shortenPath(p string, n int) string {
 	r := []rune(p)
 	if n <= 1 || len(r) <= n {
@@ -658,11 +701,8 @@ func shortenPath(p string, n int) string {
 	return "…" + string(r[len(r)-(n-1):])
 }
 
-// pageSteps is what the setting cycles through. Bounded at both ends: one row
-// is what the arrows already do, and a step past a screen is what pgdn is.
 var pageSteps = []int{5, 10, 20, 25, 50}
 
-// DefaultPageStep is how far alt+up and alt+down move with nothing saved.
 const DefaultPageStep = 10
 
 func (m tuiModel) pageStep() int {
@@ -687,9 +727,6 @@ func (m tuiModel) cyclePageStep() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// viewsLine says what rich-data mode has to show and where a view of one's own
-// would go. A configurable feature nobody can find the file for is not
-// configurable.
 func (m tuiModel) viewsLine() string {
 	n := len(m.viewNames())
 	line := ui.StyleElement.Render(fmt.Sprintf("%d", n)) + ui.StyleDim.Render(" for rich-data mode")
@@ -706,7 +743,6 @@ func (m tuiModel) viewsLine() string {
 	return line + ui.StyleDim.Render("  from "+shortenPath(path, 40))
 }
 
-// defaultMode is the saved mode the element list opens in.
 func (m tuiModel) defaultMode() pickMode {
 	if mode, ok := parseMode(m.cfg.DefaultMode); ok {
 		return mode
@@ -717,8 +753,6 @@ func (m tuiModel) defaultMode() pickMode {
 func (m tuiModel) cycleDefaultMode() (tea.Model, tea.Cmd) {
 	next := m.defaultMode().next()
 	m.cfg.DefaultMode = next.String()
-	// The change applies now as well as next launch, which is what pressing it
-	// on this screen looks like it should do.
 	m.mode = next
 	if err := m.store.SaveConfig(m.cfg); err != nil {
 		m.status = err.Error()

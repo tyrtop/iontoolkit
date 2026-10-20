@@ -144,8 +144,8 @@ func TestTabBarAlwaysHasElementsTab(t *testing.T) {
 	m := pickModel(t)
 
 	got := plain(m.tabBar())
-	if !strings.Contains(got, "1 elements") {
-		t.Errorf("tabBar = %q, want an elements tab", got)
+	if !strings.Contains(got, "elements") || strings.Contains(got, "1 elements") {
+		t.Errorf("tabBar = %q, want an unnumbered elements tab", got)
 	}
 	if m.currentTab() != 0 {
 		t.Errorf("currentTab() = %d in the picker, want 0", m.currentTab())
@@ -174,7 +174,7 @@ func TestNilManagerBehavesAsEmpty(t *testing.T) {
 	if m.tabCount() != 1 {
 		t.Errorf("tabCount() = %d with a nil manager, want 1", m.tabCount())
 	}
-	if got := plain(m.tabBar()); !strings.Contains(got, "1 elements") {
+	if got := plain(m.tabBar()); !strings.Contains(got, "elements") {
 		t.Errorf("tabBar = %q", got)
 	}
 	m.sessions.CloseAll()
@@ -295,9 +295,6 @@ func TestSpinnerOnlyTicksWhereVisible(t *testing.T) {
 		}
 	}
 
-	// The element list is the exception: it carries a "refreshing" marker, so
-	// the spinner has to tick there while a refresh is in flight and stop once
-	// it is not.
 	m.phase = phasePicking
 	m.cacheState = cacheUpdating
 	if !m.wantsSpinner() {
@@ -360,8 +357,6 @@ func TestShellModeEnterOpensOneTabPerSelection(t *testing.T) {
 	if cmd == nil {
 		t.Error("want dial commands")
 	}
-	// Opening several stays on the list: jumping to whichever tab finished
-	// last hid the others, and there was nothing to watch them by.
 	if got.phase != phasePicking {
 		t.Errorf("phase = %v, want to stay on the element list", got.phase)
 	}
@@ -373,8 +368,6 @@ func TestShellModeEnterOpensOneTabPerSelection(t *testing.T) {
 	}
 }
 
-// alt+m walks every mode in pickModes and comes back round, so a third mode
-// is not a mode you can only leave by restarting.
 func TestModeCycle(t *testing.T) {
 	m := pickModel(t)
 	if m.mode != modeShell {
@@ -399,18 +392,6 @@ func TestPickTargetsFallsBackToTheHighlightedElement(t *testing.T) {
 	}
 	if got[0].name != "S0100-RTR-01" {
 		t.Errorf("target = %q, want the highlighted element", got[0].name)
-	}
-}
-
-func TestTabColorsAreNeutral(t *testing.T) {
-	reserved := map[string]string{"1": "red", "2": "green", "3": "yellow", "9": "bright red", "10": "bright green", "11": "bright yellow"}
-	for _, c := range tabColors {
-		if name, bad := reserved[c]; bad {
-			t.Errorf("tab palette uses %s (%s), which carries status meaning", c, name)
-		}
-	}
-	if len(tabColors) < 4 {
-		t.Errorf("palette has %d colors, want enough to tell tabs apart", len(tabColors))
 	}
 }
 
@@ -660,8 +641,6 @@ func (stubConn) Write(ctx context.Context, typ websocket.MessageType, p []byte) 
 func (stubConn) Close(code websocket.StatusCode, reason string) error                 { return nil }
 
 func TestAltWOnElementsReturnsToTheMenu(t *testing.T) {
-	// alt+w closes whatever you are in. On the element list that is the list,
-	// so it falls back to the menu; only the menu's alt+w leaves the app.
 	m := pickModel(t)
 
 	mm, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'w', Mod: tea.ModAlt}))
@@ -685,10 +664,15 @@ type recConn struct {
 	mu      sync.Mutex
 	written []byte
 	done    chan struct{}
+	data    chan []byte
 	once    sync.Once
 }
 
-func newRecConn() *recConn { return &recConn{done: make(chan struct{})} }
+func newRecConn() *recConn {
+	return &recConn{done: make(chan struct{}), data: make(chan []byte, 8)}
+}
+
+func (c *recConn) feed(s string) { c.data <- []byte(s) }
 
 func (c *recConn) Read(ctx context.Context) (websocket.MessageType, []byte, error) {
 	select {
@@ -696,6 +680,8 @@ func (c *recConn) Read(ctx context.Context) (websocket.MessageType, []byte, erro
 		return 0, nil, ctx.Err()
 	case <-c.done:
 		return 0, nil, context.Canceled
+	case b := <-c.data:
+		return websocket.MessageText, b, nil
 	}
 }
 
@@ -1305,8 +1291,6 @@ func TestReattachingToAFailedDetachedSessionOpensAFreshOne(t *testing.T) {
 	}
 }
 
-// hungConn answers reads with a prompt then goes quiet and stops answering
-// pings, which is a black-holed toolkit socket.
 type hungConn struct {
 	done chan struct{}
 	once sync.Once
@@ -1374,8 +1358,6 @@ func TestAHungSessionSaysSoAndOffersAReconnect(t *testing.T) {
 func TestKeystrokesAreNotSentToAHungSession(t *testing.T) {
 	m := hungModel(t)
 
-	// Typing into a socket that is not answering looks like the shell has
-	// swallowed the command.
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"}))
 	got := mm.(tuiModel)
 	if got.sessions.Count() != 1 {
@@ -1396,12 +1378,33 @@ func TestAltROnAHungSessionOpensAFreshOne(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("alt+r produced no command, want it to dial the element again")
 	}
-	// The hung tab goes: a redial is a new CLI session, not a resumption.
-	if s := got.sessions.Find("1"); s == hung {
-		t.Error("the hung session was kept, want it replaced")
+	if s := got.sessions.Find("1"); s != hung {
+		t.Error("the hung tab went before its replacement was up")
+	}
+	if got.redialing != "1" {
+		t.Errorf("redialing = %q, want the element being dialled", got.redialing)
+	}
+	if !strings.Contains(got.status, "redialling") {
+		t.Errorf("status = %q, want it to say a dial is running", got.status)
+	}
+	pane := plain(got.viewSession())
+	if !strings.Contains(pane, "redialling e1") || strings.Contains(pane, "alt+r retry") {
+		t.Errorf("the pane still offers the key it is already running:\n%s", pane)
+	}
+	if bar := plain(got.connectBar()); !strings.Contains(bar, "redial") {
+		t.Errorf("connect bar = %q, want the redial on it", bar)
 	}
 	if got.phase != phaseSession {
 		t.Errorf("phase = %v, want phaseSession while the new session connects", got.phase)
+	}
+
+	next, _ := got.Update(sessionOpenedMsg("1"))
+	after := next.(tuiModel)
+	if after.redialing != "" {
+		t.Errorf("redialing = %q once the session opened, want it cleared", after.redialing)
+	}
+	if s := after.sessions.Find("1"); s == hung {
+		t.Error("the hung tab survived the swap")
 	}
 }
 
@@ -1419,8 +1422,129 @@ func TestAltRIsIgnoredWhileASessionIsHealthy(t *testing.T) {
 	if got.sessions.Count() != 1 {
 		t.Fatalf("Count() = %d, want the session untouched", got.sessions.Count())
 	}
-	// alt+r reaches the shell as an ordinary keystroke when nothing is wrong.
 	if got.sessions.Find("1") == nil {
 		t.Error("the healthy session was replaced by alt+r")
+	}
+}
+
+func TestAltRRedialsAFailedSession(t *testing.T) {
+	m, set := fixtureTUI(t)
+	m.phase = phaseSession
+	t.Cleanup(m.sessions.CloseAll)
+
+	el := set.Tenants[0].Elements[0]
+	next, cmd := m.openSession(el.ID, el.Name, m.tenant.TSGID)
+	m = next.(tuiModel)
+	runCmd(t, cmd)
+	waitForTUI(t, func() bool { return m.sessions.Find(el.ID) != nil })
+
+	s := m.sessions.Find(el.ID)
+	waitForTUI(t, func() bool { return strings.Contains(s.Render(), el.Name+"#") })
+
+	s.SendText("exit\r")
+	waitForTUI(t, func() bool { return s.Ended() || s.Err() != nil })
+	m.sessions.Select(m.sessions.IndexOf(el.ID))
+
+	next, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
+	m = next.(tuiModel)
+	if cmd == nil {
+		t.Fatal("alt+r on a dead session queued nothing")
+	}
+	if m.sessions.Find(el.ID) != s {
+		t.Error("the dead tab went before its replacement was up")
+	}
+	if got := plain(m.viewSession()); !strings.Contains(got, "redial") {
+		t.Errorf("nothing on screen says a redial is running:\n%s", got)
+	}
+
+	m = deliverSessionOpened(t, m, cmd)
+	if m.sessions.Count() != 1 {
+		t.Fatalf("%d tabs after the redial, want the dead one replaced", m.sessions.Count())
+	}
+	again := m.sessions.Find(el.ID)
+	if again == nil || again == s {
+		t.Fatal("the live session did not take the dead tab's place")
+	}
+	waitForTUI(t, func() bool { return strings.Contains(again.Render(), el.Name+"#") })
+}
+
+func deliverSessionOpened(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
+	t.Helper()
+	msgs := make(chan tea.Msg, 8)
+	cmds := []tea.Cmd{cmd}
+	if batch, ok := cmd().(tea.BatchMsg); ok {
+		cmds = batch
+	}
+	for _, c := range cmds {
+		go func(c tea.Cmd) {
+			if msg := c(); msg != nil {
+				select {
+				case msgs <- msg:
+				default:
+				}
+			}
+		}(c)
+	}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case msg := <-msgs:
+			if opened, ok := msg.(sessionOpenedMsg); ok {
+				next, _ := m.Update(opened)
+				return next.(tuiModel)
+			}
+		case <-deadline:
+			t.Fatal("no session opened")
+		}
+	}
+}
+
+func TestAFailedRedialKeepsTheTab(t *testing.T) {
+	m := pickModel(t)
+	m.phase = phaseSession
+	t.Cleanup(m.sessions.CloseAll)
+
+	conn := newRecConn()
+	s, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close(websocket.StatusAbnormalClosure, "torn")
+	waitForTUI(t, func() bool { return s.Err() != nil })
+
+	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
+	after := next.(tuiModel)
+	if cmd != nil {
+		t.Fatal("a redial started with no client to dial with")
+	}
+	if after.sessions.Count() != 1 {
+		t.Errorf("%d tabs after a redial that could not start, want the dead one kept", after.sessions.Count())
+	}
+	if !strings.Contains(after.status, "could not reach") {
+		t.Errorf("status = %q, want it to say why nothing happened", after.status)
+	}
+}
+
+func TestAltROnALiveSessionSaysSo(t *testing.T) {
+	m := pickModel(t)
+	m.phase = phaseSession
+	t.Cleanup(m.sessions.CloseAll)
+
+	conn := newRecConn()
+	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
+		t.Fatal(err)
+	}
+
+	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
+	after := next.(tuiModel)
+	if cmd != nil || after.sessions.Count() != 1 {
+		t.Error("alt+r redialled a session that was still answering")
+	}
+	if !strings.Contains(after.status, "still answering") {
+		t.Errorf("status = %q, want it to say why nothing happened", after.status)
+	}
+	if strings.Contains(conn.sent(), "\x1b") {
+		t.Errorf("alt+r reached the device as an escape sequence: %q", conn.sent())
 	}
 }

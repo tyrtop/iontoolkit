@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,23 +96,55 @@ func TestResultsEnterExpandsInlineNotANewTab(t *testing.T) {
 	}
 }
 
-func TestResultsScrollingDownClosesTheExpansion(t *testing.T) {
+func TestAnOpenResultScrollsWithAHighlight(t *testing.T) {
 	m := resultsModel(t)
+	m.height = 20
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	open := mm.(tuiModel)
 	if !open.resOpen {
 		t.Fatal("expected an open row")
 	}
+	if open.resLine != 0 {
+		t.Errorf("resLine = %d, want the top of the output", open.resLine)
+	}
 
 	mm, _ = open.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
 	moved := mm.(tuiModel)
-
-	if moved.resOpen {
-		t.Error("moving down should close the expansion")
+	if !moved.resOpen {
+		t.Error("↓ closed the output instead of scrolling it")
 	}
-	if moved.resTable.Cursor() != 1 {
-		t.Errorf("cursor = %d, want it to have moved to 1", moved.resTable.Cursor())
+	if moved.resLine != 1 {
+		t.Errorf("resLine = %d, want the highlight moved down one", moved.resLine)
+	}
+	if moved.resTable.Cursor() != 0 {
+		t.Errorf("cursor = %d, want the list left where it was", moved.resTable.Cursor())
+	}
+	mm, _ = moved.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+	moved = mm.(tuiModel)
+	if moved.resLine != 2 {
+		t.Errorf("resLine = %d after j, want 2", moved.resLine)
+	}
+	mm, _ = moved.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
+	moved = mm.(tuiModel)
+	if moved.resLine != 1 {
+		t.Errorf("resLine = %d after k, want it back at 1", moved.resLine)
+	}
+	if got := moved.viewResults(); !strings.Contains(got, ui.StyleRow.Render("")[:4]) {
+		t.Error("no highlight anywhere in the open output")
+	}
+	if got := plain(moved.viewResults()); !strings.Contains(got, "line 2 of") {
+		t.Errorf("the footer does not say where the highlight is:\n%s", got)
+	}
+
+	mm, _ = moved.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	closed := mm.(tuiModel)
+	if closed.resOpen {
+		t.Fatal("esc did not close the output")
+	}
+	mm, _ = closed.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	if got := mm.(tuiModel).resTable.Cursor(); got != 1 {
+		t.Errorf("cursor = %d once the output is closed, want it to move", got)
 	}
 }
 
@@ -286,8 +319,6 @@ func TestResultsHeaderNamesTheSaveFormat(t *testing.T) {
 		t.Errorf("results header does not name the format and orientation:\n%s", got)
 	}
 
-	// json has no rows to sort, so naming an orientation would claim something
-	// the save does not do.
 	m.cfg.BatchFormat = output.FormatJSON
 	got := plain(m.viewResults())
 	if !strings.Contains(got, "json") {
@@ -295,5 +326,84 @@ func TestResultsHeaderNamesTheSaveFormat(t *testing.T) {
 	}
 	if strings.Contains(got, "command-first") {
 		t.Errorf("results header claims an orientation json does not use:\n%s", got)
+	}
+}
+
+func TestTheResultsCursorFollowsItsElementAsResultsArrive(t *testing.T) {
+	m := pickModel(t)
+	m.width, m.height = 100, 30
+	m.ran = []string{"1", "2", "3", "4"}
+	m.results = make([]sase.Result, 4)
+	m.elapsed = make([]time.Duration, 4)
+	m.phase = phaseResults
+
+	done := func(i int, name string) {
+		m.results[i] = sase.Result{
+			ElementID: fmt.Sprint(i + 1), Name: name, Model: "ion 2000",
+			Commands: []ioncli.CommandOutput{{Command: "dump device status", Output: name + " output"}},
+		}
+		m.applyResultFilter()
+	}
+
+	done(3, "S0100-RTR-04")
+	idx, ok := m.currentResult()
+	if !ok || m.results[idx].Name != "S0100-RTR-04" {
+		t.Fatalf("cursor is on %+v, want the only finished element", m.results[idx])
+	}
+
+	done(1, "S0100-RTR-02")
+	idx, ok = m.currentResult()
+	if !ok {
+		t.Fatal("no result under the cursor")
+	}
+	if got := m.results[idx].Name; got != "S0100-RTR-04" {
+		t.Errorf("cursor moved to %s, want it to stay on S0100-RTR-04", got)
+	}
+
+	m.resOpen = true
+	out := plain(m.viewResults())
+	if !strings.Contains(out, "S0100-RTR-04 output") {
+		t.Errorf("the open pane is not the element under the cursor:\n%s", out)
+	}
+
+	m.moveResultCursor(-1)
+	before, _ := m.currentResult()
+	name := m.results[before].Name
+	done(0, "S0100-RTR-01")
+	after, _ := m.currentResult()
+	if got := m.results[after].Name; got != name {
+		t.Errorf("cursor moved from %s to %s when a result arrived", name, got)
+	}
+}
+
+func TestBackspacingTheResultsQueryEmptiesItThenLeaves(t *testing.T) {
+	m := resultsModel(t)
+	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
+	m = next.(tuiModel)
+	if !m.resFilterOn {
+		t.Fatal("/ did not open the results filter")
+	}
+	for _, r := range "S9999" {
+		next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
+		m = next.(tuiModel)
+	}
+	if len(m.resMatches) != 1 {
+		t.Fatalf("%d matches, want the query to have narrowed the list", len(m.resMatches))
+	}
+
+	for range "S9999" {
+		next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+		m = next.(tuiModel)
+	}
+	if !m.resFilterOn {
+		t.Error("the results filter closed on the press that emptied the query")
+	}
+	if len(m.resMatches) != m.completedCount() {
+		t.Errorf("%d matches, want every completed result back", len(m.resMatches))
+	}
+
+	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+	if next.(tuiModel).resFilterOn {
+		t.Error("the results filter is still open after backspacing the empty query")
 	}
 }

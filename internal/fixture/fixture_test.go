@@ -63,8 +63,6 @@ func TestLoadFillsInWhatTheFileLeavesOut(t *testing.T) {
 
 	el := s.Tenants[0].Elements[1]
 	if len(el.ID) != 19 {
-		// A shorter ID would not exercise the filter's deliberate refusal to
-		// substring-match 19-digit identifiers.
 		t.Errorf("generated element id %q is %d digits, want 19", el.ID, len(el.ID))
 	}
 	if el.Model != defaultModel || el.Software != defaultSoftware || el.PageLines != defaultPageLines {
@@ -76,8 +74,6 @@ func TestLoadFillsInWhatTheFileLeavesOut(t *testing.T) {
 }
 
 func TestGeneratedIDsAreStableAcrossLoads(t *testing.T) {
-	// A fixture whose IDs moved every run would invalidate the element cache and
-	// break any --element someone wrote down.
 	first, second := load(t, demo), load(t, demo)
 	for i := range first.Tenants {
 		for j := range first.Tenants[i].Elements {
@@ -98,7 +94,6 @@ func TestLoadRejectsFixturesThatWouldLookLikeABug(t *testing.T) {
 		"duplicate element id": {
 			"tenants:\n  - name: T\n    elements:\n      - name: a\n        id: \"7\"\n      - name: b\n        id: \"7\"\n",
 			"used by both"},
-		// A typo in a key is the whole failure mode of a hand-written fixture.
 		"misspelled key": {
 			"tenants:\n  - name: T\n    elementz:\n      - name: a\n", "field elementz"},
 	}

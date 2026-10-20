@@ -40,7 +40,6 @@ func TestRunPreservesOrderAndRecordsErrors(t *testing.T) {
 	if len(results) != len(elements) {
 		t.Fatalf("len(results) = %d, want %d", len(results), len(elements))
 	}
-	// results[i] must correspond to elements[i] regardless of completion order.
 	for i, r := range results {
 		if r.ElementID != elements[i] {
 			t.Fatalf("results[%d].ElementID = %q, want %q", i, r.ElementID, elements[i])
@@ -71,7 +70,7 @@ func TestRunRespectsConcurrency(t *testing.T) {
 					break
 				}
 			}
-			time.Sleep(2 * time.Millisecond) // hold the slot so workers overlap
+			time.Sleep(2 * time.Millisecond)
 			return api.Element{Name: eid}, nil
 		},
 		session: func(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
@@ -120,7 +119,6 @@ func TestTargetCredsPreferTheirOwn(t *testing.T) {
 	}
 }
 
-// credRecorder notes which login each element was dialled with.
 type credRecorder struct {
 	mu   sync.Mutex
 	seen map[string][2]string
@@ -141,8 +139,6 @@ func (c *credRecorder) ToolkitSession(ctx context.Context, eid, prompt, user, pa
 }
 
 func TestRunStreamDialsEachElementWithItsOwnLogin(t *testing.T) {
-	// A run spanning tenants must not send one tenant's device login to
-	// another's routers.
 	rec := &credRecorder{}
 	o := testOpts()
 	o.Commands = []string{"dump device status"}

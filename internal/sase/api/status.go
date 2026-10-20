@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,51 +9,35 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// ElementStatus is the controller's view of an element: its back-channels and
-// a handful of facts about the device itself. The API spells every channel out
-// flat -- config_and_events_connected, analytics_live_connected_on_utc,
-// logs_backlog_from and so on -- so they are grouped here by prefix instead,
-// and a channel the server adds later needs no field.
 type ElementStatus struct {
 	ElementID string
 	SiteID    string
 	Channels  []Channel
 
-	// DeviceMode is "l3-mode" on a router.
-	DeviceMode string
-	// ControllerInterface is the interface ID the controller session runs
-	// over, which is not otherwise derivable from the interface list.
+	DeviceMode          string
 	ControllerInterface string
 	LastRebooted        int64
-	// LastRebootedInfo is free text: "Requested by API" on a reboot iontk's
-	// own sort of tooling asked for.
-	LastRebootedInfo string
-	LastDisconnected int64
+	LastRebootedInfo    string
+	LastDisconnected    int64
 }
 
-// Channel is one of those back-channels. On and Off are the API's "utc"
-// integers, whose unit varies by field: see UTCTime.
 type Channel struct {
 	Name      string
 	Connected bool
 	On        int64
 	Off       int64
-	// From is the controller address the element is talking to.
-	From string
+	From      string
 }
 
-// UTCTime converts one of the API's timestamp integers. The unit cannot be
-// assumed from the field name, because one element-status body carries three
-// of them: last_rebooted_time in seconds, analytics_live_connected_on_utc in
-// milliseconds, and config_and_events_connected_on_utc and
-// last_disconnected_time in 100ns ticks -- as do the _created_on_utc and
-// _updated_on_utc fields on every record. So the magnitude decides: an epoch
-// date is around 1.8e9 seconds, and each scale shifts that by three digits or
-// seven. Zero means the field was never set.
+// the unit cannot be assumed from the field name: one element-status body
+// carries seconds (last_rebooted_time), milliseconds (analytics_live_...) and
+// 100ns ticks (config_and_events_...), as do every record's _on_utc fields. So
+// the magnitude decides, an epoch date being around 1.8e9 seconds. Zero is unset.
 func UTCTime(v int64) time.Time {
 	switch {
 	case v == 0:
@@ -62,16 +47,12 @@ func UTCTime(v int64) time.Time {
 	case v < 1e14:
 		return time.UnixMilli(v).UTC()
 	case v < 1e16:
-		// Not observed, unlike the other three. Guessing 100ns here would be a
-		// date a century out, which is worse than guessing microseconds.
 		return time.UnixMicro(v).UTC()
 	default:
 		return time.Unix(v/1e7, (v%1e7)*100).UTC()
 	}
 }
 
-// Channel returns one channel by name, "config_and_events" being the one that
-// decides whether the portal calls an element connected at all.
 func (s ElementStatus) Channel(name string) (Channel, bool) {
 	for _, c := range s.Channels {
 		if c.Name == name {
@@ -89,8 +70,6 @@ func (s *Client) ElementStatus(ctx context.Context, eid string) (ElementStatus, 
 	return decodeElementStatus(body)
 }
 
-// Suffixes that make up one channel. The field name up to the suffix is the
-// channel's name.
 const (
 	sufConnected    = "_connected"
 	sufConnectedOn  = "_connected_on_utc"
@@ -114,14 +93,9 @@ func decodeElementStatus(body []byte) (ElementStatus, error) {
 		"last_rebooted_info":         &out.LastRebootedInfo,
 		"last_disconnected_time":     &out.LastDisconnected,
 	} {
-		// A field the server sends as null, or does not send at all, keeps the
-		// zero value: this response has a dozen fields that are null on an
-		// appliance without the hardware for them.
 		_ = json.Unmarshal(raw[field], into)
 	}
 
-	// _connected_on_utc also ends in _connected's suffix, so the longer
-	// suffixes are tested first or every timestamp names its own channel.
 	chans := map[string]*Channel{}
 	pick := func(name string) *Channel {
 		c, ok := chans[name]
@@ -151,28 +125,21 @@ func decodeElementStatus(body []byte) (ElementStatus, error) {
 	return out, nil
 }
 
-// Interface is one configured interface. The live address and state are not
-// here but in InterfaceStatus: this is what somebody configured, which on a
-// down port is a different thing from what the port is doing.
 type Interface struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Type        string   `json:"type"`
-	UsedFor     string   `json:"used_for"`
-	AdminUp     bool     `json:"admin_up"`
-	MTU         int      `json:"mtu"`
-	MACAddress  string   `json:"mac_address"`
-	Parent      string   `json:"parent"`
-	Scope       string   `json:"scope"`
-	Tags        []string `json:"tags"`
-	// WAN interfaces the port is bound to, which is how a port maps to a
-	// circuit.
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Description         string   `json:"description"`
+	Type                string   `json:"type"`
+	UsedFor             string   `json:"used_for"`
+	AdminUp             bool     `json:"admin_up"`
+	MTU                 int      `json:"mtu"`
+	MACAddress          string   `json:"mac_address"`
+	Parent              string   `json:"parent"`
+	Scope               string   `json:"scope"`
+	Tags                []string `json:"tags"`
 	SiteWANInterfaceIDs []string `json:"site_wan_interface_ids"`
 }
 
-// ListInterfaces needs the site as well as the element: interfaces hang off
-// the site in the path, and an element with no site has none to list.
 func (s *Client) ListInterfaces(ctx context.Context, siteID, eid string) ([]Interface, error) {
 	if siteID == "" {
 		return nil, fmt.Errorf("element %s: interfaces need a site id", eid)
@@ -190,45 +157,27 @@ func (s *Client) ListInterfaces(ctx context.Context, siteID, eid string) ([]Inte
 	return wrapped.Items, nil
 }
 
-// InterfaceStatus is the live state of one interface. Its ID is the status
-// record's own, which is not the interface's: pair a status with its interface
-// by the request that fetched it, or by Name.
-//
-// The fields an ion 1200-s leaves null on every interface -- cellular_state,
-// stp_state, svi_state, poe_state, lacp_state, port_channel_member_state,
-// fec_state, effective_vlans, secondary_ipv4_addresses, link_local_address,
-// routes_v6 -- are left out rather than modelled from a shape nothing has
-// seen filled in.
 type InterfaceStatus struct {
-	ID               string `json:"id"`
-	ElementID        string `json:"element_id"`
-	Name             string `json:"name"`
-	OperationalState string `json:"operational_state"`
-	// ExtendedState says why, and only a service link sets it: "tunnel_up",
-	// "lowerlayer_down". A port that is simply up leaves it null.
-	ExtendedState  string   `json:"extended_state"`
-	Device         string   `json:"device"`
-	MACAddress     string   `json:"mac_address"`
-	NegotiatedMTU  int      `json:"negotiated_mtu"`
-	IPv4Addresses  []string `json:"ipv4_addresses"`
-	IPv6Addresses  []string `json:"ipv6_addresses"`
-	RemoteV4Addr   string   `json:"remote_v4_addr"`
-	RemoteHostName string   `json:"remote_host_name"`
-	// LastStateChange is milliseconds, where the element status's own
-	// timestamps are not. UTCTime works it out from the magnitude.
-	LastStateChange int64 `json:"last_state_change"`
-	// Port is nil on anything that is not a physical port -- a subinterface,
-	// a service link, a bypass pair.
-	Port        *PortState        `json:"port"`
-	VRF         *VRF              `json:"vrf"`
-	Routes      []Route           `json:"routes"`
-	ServiceLink *ServiceLinkState `json:"service_link"`
-	LLDPEnabled bool              `json:"lldp_enabled"`
+	ID               string            `json:"id"`
+	ElementID        string            `json:"element_id"`
+	Name             string            `json:"name"`
+	OperationalState string            `json:"operational_state"`
+	ExtendedState    string            `json:"extended_state"`
+	Device           string            `json:"device"`
+	MACAddress       string            `json:"mac_address"`
+	NegotiatedMTU    int               `json:"negotiated_mtu"`
+	IPv4Addresses    []string          `json:"ipv4_addresses"`
+	IPv6Addresses    []string          `json:"ipv6_addresses"`
+	RemoteV4Addr     string            `json:"remote_v4_addr"`
+	RemoteHostName   string            `json:"remote_host_name"`
+	LastStateChange  int64             `json:"last_state_change"`
+	Port             *PortState        `json:"port"`
+	VRF              *VRF              `json:"vrf"`
+	Routes           []Route           `json:"routes"`
+	ServiceLink      *ServiceLinkState `json:"service_link"`
+	LLDPEnabled      bool              `json:"lldp_enabled"`
 }
 
-// PortState is the physical link. Speed is Mbps, and is 0 on a port that is
-// down -- negotiated_mtu is 0 even on one that is up, so this is where the
-// link detail actually lives.
 type PortState struct {
 	Connected  bool `json:"connected"`
 	Speed      int  `json:"speed"`
@@ -245,8 +194,6 @@ type Route struct {
 	Via         string `json:"via"`
 }
 
-// ServiceLinkState is a Prisma Access tunnel's crypto and rekey schedule. The
-// rekey timestamps are milliseconds.
 type ServiceLinkState struct {
 	IPsecAlgo         string `json:"ipsec_algo"`
 	IKEAlgo           string `json:"ike_algo"`
@@ -257,9 +204,8 @@ type ServiceLinkState struct {
 	IPsecNextRekey    int64  `json:"ipsec_next_rekey"`
 }
 
-// InterfaceStatus returns a slice because a bypass pair answers with one
-// status per member, wrapped in the usual items/count envelope, where every
-// other interface type answers with a bare object.
+// a slice because a bypass pair answers with one status per member, wrapped in
+// the usual items/count envelope where every other type sends a bare object
 func (s *Client) InterfaceStatus(ctx context.Context, siteID, eid, iid string) ([]InterfaceStatus, error) {
 	body, err := s.get(ctx, "interface "+iid+" status", interfaceStatusURL(siteID, eid, iid))
 	if err != nil {
@@ -285,43 +231,28 @@ func decodeInterfaceStatus(iid string, body []byte) ([]InterfaceStatus, error) {
 	return []InterfaceStatus{st}, nil
 }
 
-// SpokeClusterStatus is HA state: who is in the cluster, and every switchover
-// with the reason behind it. The element's own spoke_ha_config says only that
-// it belongs to a cluster and at what priority; which member is carrying
-// traffic is here.
 type SpokeClusterStatus struct {
 	Members []ClusterMember `json:"cluster_members"`
 	Events  []SwitchOver    `json:"switch_over_events"`
 }
 
-// ClusterMember is one element in the cluster. Status is "active" on the one
-// carrying traffic and "unknown" for a member the controller cannot see --
-// which is what a dead peer looks like, not a distinct "standby".
+// Status is "active" on the one carrying traffic and "unknown" for a member the
+// controller cannot see -- what a dead peer looks like, not a distinct "standby"
 type ClusterMember struct {
 	ElementID string `json:"element_id"`
 	Status    string `json:"status"`
 }
 
-// SwitchOver is one member becoming active or giving it up, newest first.
-// Time is milliseconds.
 type SwitchOver struct {
-	ElementID         string `json:"element_id"`
-	Active            bool   `json:"active"`
-	Time              int64  `json:"switch_over_time"`
-	EffectivePriority int    `json:"effective_priority"`
-	PeerConnected     bool   `json:"peer_connected"`
-	// Adjustments is why EffectivePriority is not the configured priority.
-	Adjustments []PriorityAdjustment `json:"adjustments"`
-	// ClusterEvents is the priority's history since this switchover, newest
-	// first: the same adjustments arriving and clearing without the active
-	// member changing hands.
-	ClusterEvents []ClusterEvent `json:"cluster_events"`
+	ElementID         string               `json:"element_id"`
+	Active            bool                 `json:"active"`
+	Time              int64                `json:"switch_over_time"`
+	EffectivePriority int                  `json:"effective_priority"`
+	PeerConnected     bool                 `json:"peer_connected"`
+	Adjustments       []PriorityAdjustment `json:"adjustments"`
+	ClusterEvents     []ClusterEvent       `json:"cluster_events"`
 }
 
-// PriorityAdjustment is what took points off the configured priority. Seen on
-// real hardware: kind "process" with the process name ("radvd", "adem", 25
-// points), "interface" with the interface name ("3", 150), "force" for the
-// slow start after a boot, and "system" while initialising.
 type PriorityAdjustment struct {
 	Adjustment int    `json:"adjustment"`
 	Kind       string `json:"kind"`
@@ -335,7 +266,6 @@ type ClusterEvent struct {
 	Adjustments       []PriorityAdjustment `json:"adjustments"`
 }
 
-// Active is the member carrying traffic, if the cluster says.
 func (s SpokeClusterStatus) Active() (ClusterMember, bool) {
 	for _, m := range s.Members {
 		if m.Status == "active" {
@@ -357,10 +287,6 @@ func (s *Client) SpokeClusterStatus(ctx context.Context, siteID, cid string) (Sp
 	return st, nil
 }
 
-// GetJSON is a GET of one SASE path, for a caller whose paths come from
-// configuration rather than from this package: rich-data mode's views. The
-// host is fixed here, and the path has to be a /sdwan read -- a view is
-// user-editable data, and this token can write to production appliances.
 func (s *Client) GetJSON(ctx context.Context, path string) ([]byte, error) {
 	if !strings.HasPrefix(path, "/sdwan/") {
 		return nil, fmt.Errorf("path %q is not a /sdwan read", path)
@@ -376,34 +302,64 @@ func (s *Client) GetJSON(ctx context.Context, path string) ([]byte, error) {
 	return s.get(ctx, strings.TrimPrefix(path, "/"), apiHost+path)
 }
 
-// get is one rate-limited authenticated GET returning the whole body. The
-// callers here keep the raw bytes: the response shapes of the status
-// endpoints are modelled from the portal's own field names rather than from a
-// published schema, so a snapshot can show what was actually sent.
 func (s *Client) get(ctx context.Context, what, url string) ([]byte, error) {
+	return s.do(ctx, what, http.MethodGet, url, nil)
+}
+
+func (s *Client) post(ctx context.Context, what, url string, body []byte) ([]byte, error) {
+	return s.do(ctx, what, http.MethodPost, url, body)
+}
+
+const rateRetries = 2
+
+const rateWaitCap = 5 * time.Second
+
+func (s *Client) do(ctx context.Context, what, method, url string, body []byte) ([]byte, error) {
+	for attempt := 0; ; attempt++ {
+		answer, wait, err := s.attempt(ctx, what, method, url, body)
+		if wait <= 0 || attempt >= rateRetries {
+			return answer, err
+		}
+		if s.verbose {
+			fmt.Fprintf(os.Stderr, "%s: rate limited, waiting %s\n", what, wait)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%s: %w", what, ctx.Err())
+		case <-time.After(wait):
+		}
+	}
+}
+
+func (s *Client) attempt(ctx context.Context, what, method, url string, body []byte) ([]byte, time.Duration, error) {
 	if err := s.limiter.Wait(ctx); err != nil {
-		return nil, fmt.Errorf("%s: rate limit wait: %w", what, err)
+		return nil, 0, fmt.Errorf("%s: rate limit wait: %w", what, err)
 	}
 
 	if s.verbose {
-		fmt.Fprintln(os.Stderr, "GET", url)
+		fmt.Fprintln(os.Stderr, method, url)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	var rdr io.Reader
+	if body != nil {
+		rdr = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, rdr)
 	if err != nil {
-		return nil, fmt.Errorf("%s: build request: %w", what, err)
+		return nil, 0, fmt.Errorf("%s: build request: %w", what, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+s.getToken())
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", browserUA)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s: response: %w", what, err)
+		return nil, 0, fmt.Errorf("%s: response: %w", what, err)
 	}
 
-	// The rate limit is the thing a fleet-wide run hits first, and the headers
-	// are the only warning before a 429.
 	if s.verbose {
 		for k, v := range resp.Header {
 			if strings.HasPrefix(strings.ToLower(k), "x-ratelimit") || strings.EqualFold(k, "retry-after") {
@@ -417,12 +373,95 @@ func (s *Client) get(ctx context.Context, what, url string) ([]byte, error) {
 		resp.Body.Close()
 	}()
 
-	body, err := io.ReadAll(resp.Body)
+	answer, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("%s: read body: %w", what, err)
+		return nil, 0, fmt.Errorf("%s: read body: %w", what, err)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, retryAfter(resp), fmt.Errorf("%s: status %s: %s", what, resp.Status, answer)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: status %s: %s", what, resp.Status, body)
+		return nil, 0, fmt.Errorf("%s: status %s: %s", what, resp.Status, answer)
 	}
-	return body, nil
+	return answer, 0, nil
+}
+
+func retryAfter(resp *http.Response) time.Duration {
+	wait := time.Second
+	if v := resp.Header.Get("Retry-After"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			wait = time.Duration(n) * time.Second
+		}
+	}
+	return min(wait, rateWaitCap)
+}
+
+// The envelope the portal's query_* POSTs take, from its own calls.
+// dest_page counts from one, not zero.
+func queryBody(filter string, limit, page int) []byte {
+	return []byte(fmt.Sprintf(
+		`{"query_params":%s,"dest_page":%d,"limit":%d,"getDeleted":false,`+
+			`"retrieved_fields_mask":false,"retrieved_fields":[]}`, filter, page, limit))
+}
+
+func elementFilter(ids []string) string {
+	quoted := make([]string, 0, len(ids))
+	for _, id := range ids {
+		quoted = append(quoted, `"`+id+`"`)
+	}
+	return `{"element_id":{"in":[` + strings.Join(quoted, ",") + `]}}`
+}
+
+const ClusterQueryLimit = 200
+
+const clusterQueryPages = 20
+
+type ClusterMemberStatus struct {
+	ID        string `json:"id"`
+	SiteID    string `json:"site_id"`
+	ClusterID string `json:"spoke_cluster_id"`
+	ElementID string `json:"element_id"`
+	Status    string `json:"status"`
+	Priority  int    `json:"priority"`
+	UpdatedAt int64  `json:"last_status_update_ts"`
+}
+
+func (s *Client) SpokeClusterStatuses(ctx context.Context, elementIDs []string) ([]ClusterMemberStatus, error) {
+	if len(elementIDs) == 0 {
+		return nil, fmt.Errorf("spoke cluster status query: no elements to ask about")
+	}
+
+	out, err := s.clusterQuery(ctx, elementFilter(elementIDs))
+	if err != nil {
+		return nil, err
+	}
+	for _, st := range out {
+		if st.ElementID != "" {
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("spoke cluster status query: no members in %d item(s)", len(out))
+}
+
+func (s *Client) clusterQuery(ctx context.Context, filter string) ([]ClusterMemberStatus, error) {
+	var out []ClusterMemberStatus
+	for page := 1; page <= clusterQueryPages; page++ {
+		body, err := s.post(ctx, "spoke cluster status query", clusterQueryURL(),
+			queryBody(filter, ClusterQueryLimit, page))
+		if err != nil {
+			return nil, err
+		}
+		var env struct {
+			Count int                   `json:"count"`
+			Items []ClusterMemberStatus `json:"items"`
+		}
+		if err := json.Unmarshal(body, &env); err != nil {
+			return nil, fmt.Errorf("spoke cluster status query: json decode: %w", err)
+		}
+		out = append(out, env.Items...)
+		if len(env.Items) < ClusterQueryLimit {
+			break
+		}
+	}
+	return out, nil
 }

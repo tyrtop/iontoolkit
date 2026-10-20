@@ -11,16 +11,11 @@ import (
 
 var ansi = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 
-// Conn is the half of a websocket a CLI session uses. Declared here rather than
-// taking *websocket.Conn so the playback device in internal/fixture runs the
-// real login and pager code.
 type Conn interface {
 	Read(ctx context.Context) (websocket.MessageType, []byte, error)
 	Write(ctx context.Context, typ websocket.MessageType, p []byte) error
 }
 
-// DefaultPagers are lines a device stops on to wait for a keypress. The text
-// is firmware-specific, so these are only the ones we've seen.
 var DefaultPagers = []string{
 	"press space to continue",
 	"press any key to continue",
@@ -28,27 +23,23 @@ var DefaultPagers = []string{
 	"-- more --",
 }
 
-// A pager prompt is whatever comes after the last line break, since the device
-// stops there without a newline. The offset matters because the next page
-// prints the same prompt text.
 func lastLineAt(s string) (string, int) {
 	s = strings.TrimRight(s, " \t\b")
 	i := strings.LastIndexAny(s, "\r\n") + 1
 	return strings.TrimSpace(s[i:]), i
 }
 
-// Takes the earliest match in the line, not the first pattern in the list.
-// ION 6.3.4 prints "--More--(4%)[Press space to continue, 'q' to quit.]",
-// which matches two of them, and cutting the later one left "--More--(4%)[" in
-// every paged command's output.
+// the earliest match in the line, not the first pattern in the list: ION 6.3.4
+// prints "--More--(4%)[Press space to continue, 'q' to quit.]", which matches
+// two of them, and cutting the later one left "--More--(4%)[" in the output.
 //
-// Whatever follows the prompt is the device's own progress and hint, so it goes
-// too. Backspaces are the exception: the device erased the prompt in place, and
-// what comes after them is the next page.
+// What follows the prompt is the device's own progress, so it goes too.
+// Backspaces are the exception: the prompt was erased in place and what comes
+// after them is the next page.
 func stripPager(line string, pagers []string) (string, bool) {
 	low := strings.ToLower(line)
 	if len(low) != len(line) {
-		return line, false // not ASCII, so the offsets would not line up
+		return line, false
 	}
 	start, end := -1, -1
 	for _, p := range pagers {
@@ -98,8 +89,6 @@ func clean(out, prompt, cmd string, pagers []string) string {
 		line := strings.TrimRight(lines[i], " \t")
 		if rest, hit := stripPager(line, pagers); hit {
 			if rest == "" {
-				// The device erases its own prompt, and by now those carriage
-				// returns have turned into blank lines.
 				for i+1 < len(lines) && strings.TrimSpace(lines[i+1]) == "" {
 					i++
 				}
@@ -130,14 +119,8 @@ func readUntil(ctx context.Context, conn Conn, pattern string) (string, error) {
 	}
 }
 
-// A paging device waits for a keypress and never sends the prompt. If nothing
-// answers it, any command with more than a screen of output uses up the whole
-// session timeout.
 func readUntilPrompt(ctx context.Context, conn Conn, prompt string, pagers []string) (string, error) {
 	var buf strings.Builder
-	// The device doesn't erase its prompt right away, and a second space would
-	// end up in whatever runs next. Tracked by offset, not by text, because
-	// consecutive pages print the same line.
 	answeredAt := -1
 	for {
 		_, data, err := conn.Read(ctx)
@@ -151,8 +134,6 @@ func readUntilPrompt(ctx context.Context, conn Conn, prompt string, pagers []str
 			return buf.String(), nil
 		}
 
-		// The tail only, never the whole buffer. Once a pager line has gone
-		// past, a Contains match over the buffer is true from then on.
 		last, at := lastLineAt(seen)
 		if at > answeredAt && isPager(last, pagers) {
 			// A plain space, no carriage return. The device wants a keypress,
@@ -165,19 +146,14 @@ func readUntilPrompt(ctx context.Context, conn Conn, prompt string, pagers []str
 	}
 }
 
-// What the device had sent when a read gave up. Without it, a paging device
-// and a prompt we don't match both look like a device that went quiet.
 func tail(raw, redact string) string {
 	s := strings.TrimRight(strip(raw), " \b\r\n")
-	// Some firmware echoes the password back, and batch errors get written to
-	// a report file.
 	if redact != "" {
 		s = strings.ReplaceAll(s, redact, "***")
 	}
 	if s == "" {
 		return "nothing"
 	}
-	// A paged read can be a screen or more of output.
 	const max = 120
 	if r := []rune(s); len(r) > max {
 		s = "\u2026" + string(r[len(r)-max:])
@@ -185,21 +161,13 @@ func tail(raw, redact string) string {
 	return fmt.Sprintf("%q", s)
 }
 
-// RunOptions is one session's worth of settings. A struct rather than more
-// positional strings: there were already six and they were all strings.
 type RunOptions struct {
 	Prompt   string
 	User     string
 	Pass     string
 	Commands []string
-	// PagerOff is sent once after login to stop the device paging its output.
-	// Empty sends nothing. The syntax differs by firmware and is unproven, so
-	// it is a setting rather than a constant.
 	PagerOff string
-	// Pagers get answered with a space. Nil means DefaultPagers, empty turns
-	// it off. Still used when PagerOff is set, since some firmware ignores
-	// that.
-	Pagers []string
+	Pagers   []string
 }
 
 func (o RunOptions) pagers() []string {
@@ -234,9 +202,6 @@ func Run(ctx context.Context, conn Conn, o RunOptions) ([]CommandOutput, error) 
 		if err := conn.Write(ctx, websocket.MessageText, []byte(o.PagerOff+"\r")); err != nil {
 			return nil, fmt.Errorf("write %q: %w", o.PagerOff, err)
 		}
-		// A firmware that does not know the command answers with an error and
-		// its prompt, which is indistinguishable from success here. Whether it
-		// worked shows up in the commands that follow.
 		if raw, err := readUntilPrompt(ctx, conn, prompt, o.pagers()); err != nil {
 			return nil, fmt.Errorf("read after %q: %w; last saw %s", o.PagerOff, err, tail(raw, o.Pass))
 		}

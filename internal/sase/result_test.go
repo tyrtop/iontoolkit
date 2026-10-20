@@ -30,7 +30,6 @@ func TestRunElementSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The contract between result.go:32 and ioncli's prompt matching.
 	if gotPrompt != "S5032-RTR-01#" {
 		t.Errorf("prompt = %q, want %q", gotPrompt, "S5032-RTR-01#")
 	}
@@ -48,11 +47,9 @@ func TestRunElementLookupError(t *testing.T) {
 		lookup: func(context.Context, string) (api.Element, error) {
 			return api.Element{}, want
 		},
-		// session deliberately nil: it must not be reached
 	}
 
 	_, err := runElement(context.Background(), f, testOpts(), Target{ElementID: "123"})
-	// result.go:29 returns the error unwrapped, unlike the session path below.
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want %v", err, want)
 	}
@@ -75,8 +72,6 @@ func TestRunElementDoesNotRerunASessionThatConnected(t *testing.T) {
 	if _, err := runElement(context.Background(), f, o, Target{ElementID: "123"}); err == nil {
 		t.Fatal("runElement() error = nil, want the failure reported")
 	}
-	// Commands may already have taken effect on the device, so a connected
-	// session is never replayed; the dial is what retries.
 	if calls != 1 {
 		t.Errorf("session calls = %d, want 1", calls)
 	}
