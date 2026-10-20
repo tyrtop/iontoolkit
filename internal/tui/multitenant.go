@@ -15,6 +15,7 @@ import (
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ionterm"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
@@ -113,11 +114,14 @@ func loadTenant(ctx context.Context, f app.Flags, t config.Tenant, pool *clientP
 
 		els, err := c.ListElements(ctx)
 		if err != nil {
+			logging.L().Warn("element list failed", "tsg", t.TSGID, "tenant", t.Name, "err", err)
 			return fail(err)
 		}
 
 		sites := map[string]string{}
 		ss, siteErr := c.ListSites(ctx)
+		logging.L().Info("elements loaded", "tsg", t.TSGID, "tenant", t.Name,
+			"elements", len(els), "sites", len(ss), "site_err", siteErr)
 		for _, s := range ss {
 			sites[t.TSGID+"/"+s.ID] = s.Name
 		}

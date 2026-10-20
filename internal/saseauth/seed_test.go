@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"tyrtop.com/iontk/internal/logging"
 )
 
 func seedServer(t *testing.T, rotate bool) (*httptest.Server, *[]url.Values, *atomic.Int32) {
@@ -50,7 +52,7 @@ func TestSeedRedeemedByOneTenantAtATime(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			seed.redeem(context.Background(), srv.Client(), srv.URL, tsg)
+			seed.redeem(context.Background(), srv.Client(), srv.URL, tsg, logging.L())
 		}()
 	}
 	wg.Wait()
@@ -64,7 +66,7 @@ func TestSeedRetiredOnceRotated(t *testing.T) {
 	srv, seen, _ := seedServer(t, true)
 	seed := NewSeed("account-rt")
 
-	tok, tried, err := seed.redeem(context.Background(), srv.Client(), srv.URL, "1")
+	tok, tried, err := seed.redeem(context.Background(), srv.Client(), srv.URL, "1", logging.L())
 	if err != nil || !tried {
 		t.Fatalf("redeem() = tried %v, error %v, want a successful first redemption", tried, err)
 	}
@@ -72,7 +74,7 @@ func TestSeedRetiredOnceRotated(t *testing.T) {
 		t.Fatal("the test server did not rotate, so this proves nothing")
 	}
 
-	if _, tried, _ := seed.redeem(context.Background(), srv.Client(), srv.URL, "2"); tried {
+	if _, tried, _ := seed.redeem(context.Background(), srv.Client(), srv.URL, "2", logging.L()); tried {
 		t.Error("redeem() tried = true after a rotation, want the spent seed to be skipped")
 	}
 	if len(*seen) != 1 {
@@ -85,7 +87,7 @@ func TestSeedSurvivesAServerThatDoesNotRotate(t *testing.T) {
 	seed := NewSeed("account-rt")
 
 	for _, tsg := range []string{"1", "2", "3"} {
-		tok, tried, err := seed.redeem(context.Background(), srv.Client(), srv.URL, tsg)
+		tok, tried, err := seed.redeem(context.Background(), srv.Client(), srv.URL, tsg, logging.L())
 		if err != nil || !tried {
 			t.Fatalf("tenant %s: redeem() = tried %v, error %v, want it to succeed", tsg, tried, err)
 		}
@@ -121,10 +123,10 @@ func TestSeedRetiredOnlyWhenTheTokenItselfIsRefused(t *testing.T) {
 			defer srv.Close()
 
 			seed := NewSeed("account-rt")
-			if _, tried, err := seed.redeem(context.Background(), srv.Client(), srv.URL, "1"); !tried || err == nil {
+			if _, tried, err := seed.redeem(context.Background(), srv.Client(), srv.URL, "1", logging.L()); !tried || err == nil {
 				t.Fatalf("redeem() = tried %v, error %v, want a reported failure", tried, err)
 			}
-			_, tried, _ := seed.redeem(context.Background(), srv.Client(), srv.URL, "2")
+			_, tried, _ := seed.redeem(context.Background(), srv.Client(), srv.URL, "2", logging.L())
 			if tried == tt.wantSpent {
 				t.Errorf("second redeem tried = %v, want the seed spent = %v", tried, tt.wantSpent)
 			}
@@ -134,7 +136,7 @@ func TestSeedRetiredOnlyWhenTheTokenItselfIsRefused(t *testing.T) {
 
 func TestNilSeedIsNotTried(t *testing.T) {
 	var seed *Seed
-	tok, tried, err := seed.redeem(context.Background(), http.DefaultClient, "http://unused", "1")
+	tok, tried, err := seed.redeem(context.Background(), http.DefaultClient, "http://unused", "1", logging.L())
 	if tried || tok != nil || err != nil {
 		t.Errorf("redeem() on a nil seed = (%v, %v, %v), want it to be a no-op", tok, tried, err)
 	}

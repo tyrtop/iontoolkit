@@ -10,6 +10,7 @@ import (
 
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/fixture"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/saseauth"
 )
@@ -111,6 +112,12 @@ func ShortAuthError(err error) string {
 	if err == nil {
 		return ""
 	}
+	short := shortAuthError(err)
+	logging.L().Info("auth error shortened", "short", short, "err", err)
+	return short
+}
+
+func shortAuthError(err error) string {
 	text := err.Error()
 	switch {
 	case strings.Contains(text, "did not complete within"):

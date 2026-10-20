@@ -2,10 +2,14 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/tui"
 )
 
@@ -26,6 +30,13 @@ var (
 	flagViews        string
 	flagThemes       string
 )
+
+func wantsTheTerminal(cmd *cobra.Command) bool {
+	if cmd.Parent() != nil {
+		return cmd.Name() == "shell"
+	}
+	return len(flagCommands) == 0 && flagSearch == ""
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "iontk [flags]",
@@ -64,7 +75,23 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		_ = godotenv.Load()
 		app.ThemesFile = flagThemes
-		return loadFixtures(cmd.ErrOrStderr())
+		if err := loadFixtures(cmd.ErrOrStderr()); err != nil {
+			return err
+		}
+
+		var toStderr io.Writer
+		if app.LogLevelAsked() != "" && !wantsTheTerminal(cmd) {
+			toStderr = cmd.ErrOrStderr()
+		}
+		if err := app.StartLogging(app.OpenStore(), toStderr); err != nil {
+			if app.LogLevel != "" {
+				return err
+			}
+			fmt.Fprintln(cmd.ErrOrStderr(), err)
+		}
+		logging.L().Info("iontk starting", "version", buildVersion(),
+			"command", cmd.CommandPath(), "args", strings.Join(os.Args[1:], " "))
+		return nil
 	},
 
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -124,6 +151,8 @@ func init() {
 	pf.StringVar(&flagFixtures, "fixtures", "", "YAML file of fake tenants, elements and CLI responses to run against instead of real hardware")
 	pf.StringVar(&flagViews, "views", "", "YAML file of rich-data views to use instead of views.yaml in the config directory")
 	pf.StringVar(&flagThemes, "themes", "", "YAML file of color schemes to add to the built-in ones, instead of themes.yaml in the config directory")
+	pf.StringVar(&app.LogFile, "log", "", "write this run's log here instead of a stamped file under logs/ in the config directory")
+	pf.StringVar(&app.LogLevel, "log-level", "", "how much to log: "+strings.Join(logging.LevelNames(), ", ")+" (default info, or ION_LOG_LEVEL)")
 	pf.StringVar(&app.Defaults.TSGID, "tsg", "", "tenant service group ID (overrides SCM_TSG_ID)")
 	pf.StringVar(&flagFormat, "format", "", `batch output format: "json", "jsonl", "text", "table" or "csv" (default from settings, else json)`)
 	pf.StringVar(&flagOrient, "orientation", "", `row order for "table" and "csv": "ion" groups each element's commands, "command" puts one command across the fleet together (default from settings, else ion)`)

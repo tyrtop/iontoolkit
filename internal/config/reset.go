@@ -33,7 +33,8 @@ func (s *Store) Reset() error {
 		errs = append(errs, removePath(p.Path()))
 	}
 
-	errs = append(errs, removePath(s.BrowserDir()), removePath(s.configPath()))
+	errs = append(errs, removePath(s.BrowserDir()), removePath(s.LogsDir()),
+		removePath(s.configPath()))
 	return errors.Join(errs...)
 }
 

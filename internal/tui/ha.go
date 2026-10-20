@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -97,6 +98,8 @@ func loadHAChunk(ctx context.Context, c *api.Client, tsg string, w haWork, ids [
 	return func() tea.Msg {
 		sts, err := c.SpokeClusterStatuses(ctx, ask)
 		if err != nil {
+			logging.L().Warn("ha falling back to the per-cluster sweep", "tsg", tsg,
+				"asked", len(ask), "clusters", len(w.pairs), "err", err)
 			msg := haStatesMsg{tsg: tsg, bulk: shortTenantErr(err), rest: w.pairs}
 			if len(w.noSite) > 0 {
 				msg.failed = map[string]string{}
@@ -117,6 +120,8 @@ func loadHAChunk(ctx context.Context, c *api.Client, tsg string, w haWork, ids [
 				answered = append(answered, st.ClusterID)
 			}
 		}
+		logging.L().Info("ha read in bulk", "tsg", tsg, "asked", len(ask),
+			"rows", len(sts), "clusters", len(answered), "queued", len(rest))
 		return haStatesMsg{
 			tsg: tsg, states: states, answered: answered,
 			bulk: "used", restElements: rest,

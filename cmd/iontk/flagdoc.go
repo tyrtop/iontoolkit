@@ -68,6 +68,9 @@ var flagGroups = []struct {
 	{"Rich data", "The TUI's third element mode reads the portal instead of opening a session. Its panes are defined in YAML: `--views` points at a file instead of `views.yaml` in the config directory, which is also how a `--fixtures` run gets views of its own.", []string{
 		"views",
 	}},
+	{"Logging", "Every run writes a JSON log to `logs/` in the config directory, keeping the last ten. Secrets never reach it: tokens and passwords are logged as a fingerprint — the last four characters and a length. With an explicit level, a headless run gets the same records on stderr as text.", []string{
+		"log", "log-level",
+	}},
 	{"Appearance", "Color schemes are YAML too: `--themes` points at a file whose schemes are added to the built-in ones, or replace one of the same name, instead of `themes.yaml` in the config directory. The same escape hatch as `--views`, for the same reason.", []string{
 		"themes",
 	}},
@@ -116,6 +119,7 @@ func writeFlagDocs(w io.Writer, root *cobra.Command) error {
 		{"SCM_TOKEN", "bearer token, overriding the service account entirely"},
 		{"ION_USER", "device CLI login, required with `--cmd`"},
 		{"ION_PASS", "device CLI password, required with `--cmd`"},
+		{"ION_LOG_LEVEL", "log level; `--log-level` wins"},
 	} {
 		fmt.Fprintf(&b, "| `%s` | %s |\n", e[0], e[1])
 	}

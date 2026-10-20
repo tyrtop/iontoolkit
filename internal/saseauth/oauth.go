@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"tyrtop.com/iontk/internal/logging"
 )
 
 const (
@@ -155,6 +157,8 @@ func exchange(ctx context.Context, client *http.Client, tokenURL string, form ur
 }
 
 func ExchangeCode(ctx context.Context, client *http.Client, tokenURL, code, verifier string) (*Token, error) {
+	logging.Mask(code)
+	logging.Mask(verifier)
 	return exchange(ctx, client, tokenURL, url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},

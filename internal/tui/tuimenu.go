@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -993,6 +994,7 @@ func (m tuiModel) startSignInAuto() (tea.Model, tea.Cmd) {
 	if !m.browserAuthDone || why == "" {
 		return m.startSignIn()
 	}
+	logging.L().Info("automatic sign-in refused", "tsg", m.tenant.TSGID, "why", why)
 	m.signInResume = false
 	m.cacheState = cacheFailed
 	m.status = m.tenantName(m.tenant.TSGID) + ": " + why +

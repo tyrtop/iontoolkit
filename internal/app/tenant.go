@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/logging"
 )
 
 func tenantFromEnv() (config.Tenant, bool) {
@@ -59,6 +60,8 @@ func TenantFlags(st *config.Store, t config.Tenant, ionUser string) Flags {
 			}
 		}
 	}
+	logging.Mask(f.ClientSecret)
+	logging.Mask(f.IONPassword)
 	return f
 }
 
