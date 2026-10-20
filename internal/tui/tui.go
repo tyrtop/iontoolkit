@@ -23,6 +23,7 @@ import (
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/dataview"
 	"tyrtop.com/iontk/internal/ionterm"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/ioncli"
@@ -358,6 +359,8 @@ func Run(ctx context.Context) error {
 			return fmt.Errorf("no saved tenant named %q; %s", Tenant, app.TenantChoices(cfg))
 		}
 	}
+
+	logging.L().Info("tui started", "version", Version, "tenant", Tenant, "config", store.Root)
 
 	model := newTUIModel(ctx, store, cfg)
 	defer model.sessions.CloseAll()

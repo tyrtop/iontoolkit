@@ -7,11 +7,15 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+
+	"tyrtop.com/iontk/internal/logging"
 )
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+
+	defer logging.Close()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)

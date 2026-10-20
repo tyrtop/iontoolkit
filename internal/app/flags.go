@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/ioncli"
 )
@@ -90,6 +91,9 @@ func BaseFlags() Flags {
 	if Defaults.TSGID != "" {
 		f.TSGID = Defaults.TSGID
 	}
+	logging.Mask(f.Token)
+	logging.Mask(f.ClientSecret)
+	logging.Mask(f.IONPassword)
 	return f
 }
 

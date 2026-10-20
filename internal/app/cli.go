@@ -3,12 +3,15 @@ package app
 import (
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -149,4 +152,47 @@ func TenantChoices(cfg *config.Config) string {
 		return "no tenants are saved — run iontk to sign in, or set SCM_CLIENT_ID, SCM_CLIENT_SECRET and SCM_TSG_ID"
 	}
 	return "saved tenants: " + strings.Join(names, ", ")
+}
+
+var (
+	LogFile  string
+	LogLevel string
+)
+
+func LogsPath(st *config.Store) string {
+	if LogFile != "" {
+		return LogFile
+	}
+	if st == nil {
+		return ""
+	}
+	return st.LogsDir()
+}
+
+func LogLevelAsked() string {
+	if LogLevel != "" {
+		return LogLevel
+	}
+	return os.Getenv("ION_LOG_LEVEL")
+}
+
+func StartLogging(st *config.Store, stderr io.Writer) error {
+	level, lvlErr := logging.ParseLevel(LogLevelAsked())
+	if lvlErr != nil {
+		if LogLevel != "" {
+			return lvlErr
+		}
+		level = slog.LevelInfo
+	}
+
+	opt := logging.Options{Level: level, Stderr: stderr}
+	if LogFile != "" {
+		opt.File = LogFile
+	} else if st != nil {
+		opt.Dir = st.LogsDir()
+	}
+	if _, err := logging.Start(opt); err != nil {
+		return fmt.Errorf("logging: %w", err)
+	}
+	return lvlErr
 }

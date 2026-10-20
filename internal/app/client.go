@@ -8,10 +8,17 @@ import (
 	"time"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
 func NewClient(ctx context.Context, st *config.Store, f Flags, logw io.Writer) (*api.Client, error) {
+	log := logging.L().With("tsg", f.TSGID)
+	chose := func(what string) {
+		fmt.Fprintln(logw, what)
+		log.Info("credential path", "path", what)
+	}
+
 	wsClient := &http.Client{Transport: &http.Transport{
 		MaxConnsPerHost:     f.Concurrency,
 		MaxIdleConnsPerHost: 50,
@@ -28,28 +35,30 @@ func NewClient(ctx context.Context, st *config.Store, f Flags, logw io.Writer) (
 	}
 
 	if Fixture != nil {
-		fmt.Fprintln(logw, "using fixtures")
+		chose("using fixtures")
 		fake := &http.Client{Transport: Fixture.Transport(f.TSGID)}
 		const fixtureRPS = 1000
 		return setup(api.NewClient(fake, fake, "fixture", f.Verbose, fixtureRPS, fixtureRPS)), nil
 	}
 	if f.Token != "" {
-		fmt.Fprintln(logw, "using SCM_TOKEN")
+		chose("using SCM_TOKEN")
 		return setup(api.NewClient(httpClient, wsClient, f.Token, f.Verbose, f.RPS, f.Burst)), nil
 	}
 	if f.BrowserAuth {
-		fmt.Fprintln(logw, "using the browser sign-in for this tenant")
+		chose("using the browser sign-in for this tenant")
 		src := BrowserSource(f, httpClient, st)
 		c, err := api.NewTokenSourceClient(ctx, httpClient, wsClient, src, f.RefreshMargin, f.Verbose, f.RPS, f.Burst)
 		if err != nil {
+			log.Warn("the browser credential did not produce a token", "err", err)
 			return nil, err
 		}
 		return setup(c), nil
 	}
-	fmt.Fprintln(logw, "minting from service account")
+	chose("minting from service account")
 	c, err := api.NewServiceAccountClient(ctx, httpClient, wsClient,
 		f.ClientID, f.ClientSecret, f.TSGID, f.RefreshMargin, f.Verbose, f.RPS, f.Burst)
 	if err != nil {
+		log.Warn("the service account did not mint a token", "err", err, "client_id", f.ClientID)
 		return nil, err
 	}
 	return setup(c), nil

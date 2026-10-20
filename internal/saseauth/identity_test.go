@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"tyrtop.com/iontk/internal/logging"
 )
 
 func jwt(t *testing.T, claims map[string]any) string {
@@ -132,7 +134,7 @@ func TestSourceExposesIdentityAndTTL(t *testing.T) {
 		AccessToken: jwt(t, map[string]any{"tsg_id": "123"}),
 		ExpiresIn:   899 * time.Second,
 	}
-	if _, _, err := src.accept(tok); err != nil {
+	if _, _, err := src.accept(tok, logging.L()); err != nil {
 		t.Fatalf("accept() error = %v", err)
 	}
 	if got := src.Identity().Name; got != "Ben" {

@@ -17,6 +17,7 @@ import (
 	"golang.org/x/term"
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/api"
@@ -344,11 +345,14 @@ func (fl *fleet) fetch(ctx context.Context, t config.Tenant, cached *config.Elem
 
 	els, err := c.ListElements(ctx)
 	if err != nil {
+		logging.L().Warn("element list failed", "tsg", t.TSGID, "tenant", t.Name, "err", err)
 		return nil, nil, err
 	}
 
 	sites := search.SiteMap{}
 	ss, siteErr := c.ListSites(ctx)
+	logging.L().Info("elements loaded", "tsg", t.TSGID, "tenant", t.Name,
+		"elements", len(els), "sites", len(ss), "site_err", siteErr)
 	for _, s := range ss {
 		sites[t.TSGID+"/"+s.ID] = s.Name
 	}

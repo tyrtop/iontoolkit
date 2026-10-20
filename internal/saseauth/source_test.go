@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"tyrtop.com/iontk/internal/logging"
 )
 
 func TestSourceTokenUsesStoredRefreshToken(t *testing.T) {
@@ -170,7 +172,7 @@ func TestSourcePrefersItsOwnTokenOverTheSeed(t *testing.T) {
 	if got := form.Get("refresh_token"); got != "tenant-rt" {
 		t.Errorf("sent refresh_token = %q, want the tenant's own %q", got, "tenant-rt")
 	}
-	if _, tried, _ := seed.redeem(context.Background(), srv.Client(), srv.URL, "9"); !tried {
+	if _, tried, _ := seed.redeem(context.Background(), srv.Client(), srv.URL, "9", logging.L()); !tried {
 		t.Error("the shared seed was spent by a tenant that did not need it")
 	}
 }

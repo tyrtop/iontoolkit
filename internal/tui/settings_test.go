@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -715,5 +716,60 @@ func TestTheResetSectionsTwoRowsArmSeparately(t *testing.T) {
 	}
 	if len(m.cfg.Tenants) == 0 {
 		t.Error("a cancelled reset still wiped the tenants")
+	}
+}
+
+func TestDebugSectionNamesTheLogAndItsLastLines(t *testing.T) {
+	if _, err := logging.Start(logging.Options{Dir: t.TempDir()}); err != nil {
+		t.Fatalf("logging.Start() error = %v", err)
+	}
+	defer logging.Close()
+	logging.L().Info("stored refresh token accepted", "tsg", "1436146912")
+
+	m := settingsModel(t)
+	m.setSection = secDebug
+	m.width = 120
+
+	got := plain(m.viewSettings())
+	if !strings.Contains(got, logging.Path()) {
+		t.Errorf("Debug never names the log file %q:\n%s", logging.Path(), got)
+	}
+	if !strings.Contains(got, "stored refresh token accepted") {
+		t.Errorf("Debug shows no tail, so the file has to be found by hand:\n%s", got)
+	}
+}
+
+func TestDebugSectionSaysWhenNothingIsBeingLogged(t *testing.T) {
+	logging.Close()
+
+	m := settingsModel(t)
+	m.setSection = secDebug
+	m.width = 120
+
+	if got := plain(m.viewSettings()); !strings.Contains(got, "Log") || !strings.Contains(got, "off") {
+		t.Errorf("Debug should say the log is off:\n%s", got)
+	}
+}
+
+func TestTheDebugPageKeepsTheFrameHeight(t *testing.T) {
+	if _, err := logging.Start(logging.Options{Dir: t.TempDir()}); err != nil {
+		t.Fatalf("logging.Start() error = %v", err)
+	}
+	defer logging.Close()
+	for i := 0; i < logTailLines*2; i++ {
+		logging.L().Info("a line that pads the tail out")
+	}
+
+	m := settingsModel(t)
+	m.setSection = secDebug
+	m.width, m.height = 100, 24
+
+	general := m
+	general.setSection = secGeneral
+
+	got := len(strings.Split(m.viewSettings(), "\n"))
+	if want := len(strings.Split(general.viewSettings(), "\n")); got != want {
+		t.Errorf("the Debug page is %d lines where General is %d on a %d-row terminal; the tail must be clipped, not grow the frame",
+			got, want, m.height)
 	}
 }

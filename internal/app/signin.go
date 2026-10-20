@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/saseauth"
 )
 
@@ -45,12 +46,14 @@ type TenantWarm struct {
 func WarmEach(ctx context.Context, st *config.Store, tenants []config.Tenant) []TenantWarm {
 	httpClient := &http.Client{Timeout: Defaults.HTTPTimeout}
 	out := make([]TenantWarm, 0, len(tenants))
+	logging.L().Info("warming every tenant", "tenants", len(tenants))
 	for _, t := range tenants {
 		if !t.UsesBrowser() {
 			out = append(out, TenantWarm{Tenant: t, Skipped: true})
 			continue
 		}
 		_, _, err := tenantSource(st, httpClient, t.TSGID).Token(ctx)
+		logging.L().Info("tenant warmed", "tsg", t.TSGID, "tenant", t.Name, "err", err)
 		out = append(out, TenantWarm{Tenant: t, Err: err})
 		if ctx.Err() != nil {
 			return out

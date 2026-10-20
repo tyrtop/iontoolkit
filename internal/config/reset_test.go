@@ -52,6 +52,12 @@ func savedStore(t *testing.T) (*Store, *Config) {
 	if err := os.WriteFile(filepath.Join(st.BrowserDir(), "Default", "Cookies"), []byte("session"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(st.LogsDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(st.LogsDir(), "iontk-20261020-091403.log"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	return st, cfg
 }
 
@@ -85,6 +91,7 @@ func TestResetLeavesNothingBehind(t *testing.T) {
 		st.cacheDir(),
 		st.commandsPath(),
 		st.BrowserDir(),
+		st.LogsDir(),
 		filepath.Join(st.Root, "secrets.json"),
 	} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {

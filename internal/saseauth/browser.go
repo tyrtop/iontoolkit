@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"tyrtop.com/iontk/internal/logging"
 )
 
 var ErrNoSession = errors.New("no existing browser session")
@@ -27,8 +29,16 @@ type Options struct {
 	AuthorizeURL string
 	TokenURL     string
 	Client       *http.Client
+	Logger       *slog.Logger
 
 	Seed *Seed
+}
+
+func (o Options) log() *slog.Logger {
+	if o.Logger != nil {
+		return o.Logger
+	}
+	return logging.L()
 }
 
 func (o Options) authorize() string {
@@ -95,11 +105,13 @@ func LoginSilent(ctx context.Context, tsg string, opt Options) (*Token, error) {
 	}
 	key := refusalKey(opt.DataDir, tsg)
 	if _, refused := silentRefused.Load(key); refused {
+		opt.log().Info("silent sign-in skipped", "tsg", tsg, "reason", "already refused for this profile")
 		return nil, fmt.Errorf("%w: a silent sign-in was already refused for this profile", ErrNoSession)
 	}
 	tok, err := login(ctx, tsg, opt, true)
 	if err != nil && ctx.Err() == nil {
 		silentRefused.Store(key, struct{}{})
+		opt.log().Info("silent sign-in refused", "tsg", tsg, "err", err)
 		return nil, fmt.Errorf("%w: %v", ErrNoSession, err)
 	}
 	return tok, err
@@ -115,15 +127,26 @@ func login(ctx context.Context, tsg string, opt Options, silent bool) (*Token, e
 }
 
 func loginToken(ctx context.Context, tsg string, opt Options, silent bool) (*Token, error) {
+	log := opt.log().With("tsg", tsg, "silent", silent)
+
 	p, err := newPKCE()
 	if err != nil {
 		return nil, err
 	}
+	log.Info("launching chrome", "data_dir", opt.DataDir, "chrome", opt.Chrome)
 	code, err := codeFromBrowser(ctx, p.authorizeURL(opt.authorize(), tsg, silent), p.state, opt, silent)
 	if err != nil {
+		log.Warn("browser leg failed", "err", err)
 		return nil, err
 	}
-	return ExchangeCode(ctx, opt.httpClient(), opt.token(), code, p.verifier)
+
+	log.Info("authorization code received")
+	tok, err := ExchangeCode(ctx, opt.httpClient(), opt.token(), code, p.verifier)
+	if err != nil {
+		log.Warn("code exchange failed", "err", err)
+		return nil, err
+	}
+	return tok, nil
 }
 
 var cleanUpGrace = 5 * time.Second
@@ -205,6 +228,7 @@ func codeFromBrowser(ctx context.Context, authorizeURL, state string, opt Option
 		if ev.Request == nil || !strings.HasPrefix(ev.Request.URL, RedirectURI) {
 			continue
 		}
+		opt.log().Debug("callback reached", "url", ev.Request.URL)
 		return CodeFromCallback(ev.Request.URL, state)
 	}
 

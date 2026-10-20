@@ -12,6 +12,7 @@ import (
 	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ioncmd"
+	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/saseauth"
@@ -522,6 +523,7 @@ func (m tuiModel) sectionContent() []string {
 			ui.Label("Colors")+ui.StyleDim.Render(ui.CurrentTheme().Name+"  "+profileLabel()),
 			ui.Label("Terminal")+ui.StyleDim.Render(termColorLine()),
 			ui.Label("Times")+ui.StyleDim.Render(clock.Name()),
+			ui.Label("Log")+logLine(),
 			"",
 			ui.Label("Tenant")+ui.StyleDim.Render(m.tenant.Name+"  tsg "+m.tenant.TSGID),
 			ui.Label("ION User")+ui.StyleDim.Render(m.ionUser),
@@ -536,8 +538,26 @@ func (m tuiModel) sectionContent() []string {
 		if app.Debug {
 			out = append(out, "", ui.StyleWarn.Render("--debug: throwaway config, no saved tenants, secrets held only in memory"))
 		}
+		if tail := logging.Recent(logTailLines); len(tail) > 0 {
+			out = append(out, "")
+			for _, line := range tail {
+				out = append(out, ui.StyleDim.Render("  "+ui.Truncate(line, max(20, m.width-4))))
+			}
+		}
 	}
 	return out
+}
+
+const logTailLines = 5
+
+func logLine() string {
+	if err := logging.Problem(); err != nil {
+		return ui.StyleWarn.Render("nothing written: " + err.Error())
+	}
+	if !logging.On() {
+		return ui.StyleDim.Render("off")
+	}
+	return ui.StyleDim.Render(logging.Path() + "  " + logging.LevelName() + ", run " + logging.RunID())
 }
 
 func (m tuiModel) sectionHint() string {
@@ -607,6 +627,9 @@ func (m tuiModel) viewSettings() string {
 	}
 
 	rows := m.sectionContent()
+	if len(rows) > bodyHeight {
+		rows = rows[:bodyHeight]
+	}
 	var content strings.Builder
 	for i, r := range rows {
 		cursor := "  "

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"tyrtop.com/iontk/internal/logging"
 )
 
 type IONUser struct {
@@ -138,6 +140,8 @@ func OpenDebug() (*Store, error) {
 func (s *Store) configPath() string { return filepath.Join(s.Root, "config.json") }
 
 func (s *Store) BrowserDir() string { return filepath.Join(s.Root, "browser") }
+
+func (s *Store) LogsDir() string { return filepath.Join(s.Root, logging.DirName) }
 
 func (s *Store) Config() (*Config, error) {
 	b, err := os.ReadFile(s.configPath())
