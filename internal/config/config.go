@@ -143,6 +143,8 @@ func (s *Store) BrowserDir() string { return filepath.Join(s.Root, "browser") }
 
 func (s *Store) LogsDir() string { return filepath.Join(s.Root, logging.DirName) }
 
+func (s *Store) ExportsDir() string { return filepath.Join(s.Root, "exports") }
+
 func (s *Store) Config() (*Config, error) {
 	b, err := os.ReadFile(s.configPath())
 	if os.IsNotExist(err) {

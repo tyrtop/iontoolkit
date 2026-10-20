@@ -244,8 +244,8 @@ func (m tuiModel) onSessionKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		return m, nil
 	}
 
-	if key == "alt+y" {
-		return m.copySession()
+	if key == "alt+e" {
+		return m.exportSession()
 	}
 
 	if key == "alt+r" {
@@ -412,7 +412,7 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 		return b.String(), nil
 	}
 
-	const hint = "ctrl+] elements · alt+←→/hl tab · alt+1-9 favourite · alt+f save · " + copyKeyHint +
+	const hint = "ctrl+] elements · alt+←→/hl tab · alt+1-9 favourite · alt+f save · " + exportKeyHint +
 		" scrollback · alt+w detach · alt+k close · shift+pgup scroll"
 
 	status := m.status

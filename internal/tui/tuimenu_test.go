@@ -637,3 +637,22 @@ func TestTUIBlocksWriteCommands(t *testing.T) {
 		t.Errorf("AllowWrites did not lift the guard: %q", got)
 	}
 }
+
+func TestTheListHasARowUnderTheCursorOnceItLoads(t *testing.T) {
+	m := pickModel(t)
+
+	setTestElements(&m, nil)
+	if got := m.table.Cursor(); got >= 0 {
+		t.Fatalf("cursor = %d on an empty list, want the widget's own -1", got)
+	}
+
+	setTestElements(&m, []api.Element{
+		{ID: "1", Name: "S0100-RTR-01", Connected: true},
+		{ID: "2", Name: "S0100-RTR-02", Connected: true},
+	})
+
+	if _, ok := m.current(); !ok {
+		t.Errorf("no row under the cursor after the list loaded (cursor = %d), so enter does nothing until an arrow key is pressed",
+			m.table.Cursor())
+	}
+}

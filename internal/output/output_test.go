@@ -359,3 +359,35 @@ func TestExpandHome(t *testing.T) {
 		})
 	}
 }
+
+func TestExportNameNamesThePageAndTheSecond(t *testing.T) {
+	at := time.Date(2026, 10, 20, 9, 14, 3, 0, time.UTC)
+
+	tests := []struct {
+		name, slug, ext, want string
+	}{
+		{"a session", "S0100-RTR-01", "txt", "iontk-20261020-091403-s0100-rtr-01.txt"},
+		{"a data tab", "store-0003-rtr-01 · Overview", "txt", "iontk-20261020-091403-store-0003-rtr-01-overview.txt"},
+		{"a run", "run", "json", "iontk-20261020-091403-run.json"},
+		{"nothing to name it after", "", "txt", "iontk-20261020-091403.txt"},
+		{"punctuation only", "···", "txt", "iontk-20261020-091403.txt"},
+		{"no extension given", "run", "", "iontk-20261020-091403-run.txt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExportName(tt.slug, tt.ext, at); got != tt.want {
+				t.Errorf("ExportName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSlugStaysShortEnoughToReadInAFilename(t *testing.T) {
+	got := Slug(strings.Repeat("element-name-", 10))
+	if len(got) > slugMax {
+		t.Errorf("Slug() = %q, %d chars, want at most %d", got, len(got), slugMax)
+	}
+	if strings.HasSuffix(got, "-") {
+		t.Errorf("Slug() = %q, want no trailing dash", got)
+	}
+}

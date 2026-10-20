@@ -208,7 +208,41 @@ type nopCloser struct{ io.Writer }
 func (nopCloser) Close() error { return nil }
 
 func outputName(format string, now time.Time) string {
-	return "iontk-" + now.Format("20060102-150405") + "." + formatExt(format)
+	return "iontk-" + stamp(now) + "." + formatExt(format)
+}
+
+func stamp(now time.Time) string { return now.Format("20060102-150405") }
+
+func ExportName(slug, ext string, now time.Time) string {
+	name := "iontk-" + stamp(now)
+	if s := Slug(slug); s != "" {
+		name += "-" + s
+	}
+	if ext == "" {
+		ext = "txt"
+	}
+	return name + "." + ext
+}
+
+const slugMax = 40
+
+func Slug(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			dash = false
+		case b.Len() > 0 && !dash:
+			b.WriteByte('-')
+			dash = true
+		}
+		if b.Len() >= slugMax {
+			break
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 func Open(explicit, dir, format string, now time.Time) (io.WriteCloser, string, error) {

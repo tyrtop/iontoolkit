@@ -1226,6 +1226,9 @@ func (m *tuiModel) rebuildRows() {
 		m.table.SetColumns(tcols)
 		m.table.SetRows(rows)
 	}
+	if len(rows) > 0 && m.table.Cursor() < 0 {
+		m.table.SetCursor(0)
+	}
 	m.table.SetWidth(min(m.width, total))
 	m.table.SetHeight(m.listHeight())
 }

@@ -286,8 +286,8 @@ func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
 		if !m.dataFilterOn {
 			return m.startCompare()
 		}
-	case "alt+y":
-		return m.copyDataPage()
+	case "alt+e":
+		return m.exportDataPage()
 	}
 
 	tab, ok := m.activeData()
@@ -579,7 +579,7 @@ func (m tuiModel) viewData() string {
 		status = scrolled + status
 	}
 	hint := "alt+↑↓ next heading · ↑↓ scroll · / filter · r refresh · c CLI check · " +
-		copyKeyHint + " page · alt+←→/hl tab · alt+k close · ctrl+] elements"
+		exportKeyHint + " page · alt+←→/hl tab · alt+k close · ctrl+] elements"
 	if m.dataFilterOn {
 		hint = "type to narrow the page · ↑↓ scroll · enter apply · esc clear"
 	}
@@ -599,7 +599,7 @@ func newDataFilter() textinput.Model {
 func (m tuiModel) onDataFilterKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd, bool) {
 	switch key {
 	case "esc", "enter", "down", "up", "pgdown", "pgup", "home", "end",
-		"alt+down", "alt+up", "alt+left", "alt+right", "alt+k", "alt+w", "alt+y":
+		"alt+down", "alt+up", "alt+left", "alt+right", "alt+k", "alt+w", "alt+e":
 		return m, nil, false
 	case "backspace":
 		if m.dataFilter.Value() == "" {

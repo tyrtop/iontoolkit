@@ -259,8 +259,8 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		}
 		return m, nil
 
-	case "alt+y":
-		return m.copyResults()
+	case "alt+e":
+		return m.exportResults()
 
 	case "f", "o", "s":
 		if !m.resFilterOn {
@@ -415,9 +415,9 @@ func (m tuiModel) viewResults() string {
 	}
 
 	status := m.status
-	hint := "↑↓/jk move · / filter · enter open · f/o format · s save · " + copyKeyHint + " run as json · esc/q back"
+	hint := "↑↓/jk move · / filter · enter open · f/o format · s save · " + exportKeyHint + " run as json · esc/q back"
 	if m.resOpen {
-		hint = "↑↓/jk scroll · pgup/pgdn page · home/end ends · " + copyKeyHint + " output · esc/q close"
+		hint = "↑↓/jk scroll · pgup/pgdn page · home/end ends · " + exportKeyHint + " output · esc/q close"
 		if idx, ok := m.currentResult(); ok {
 			where := fmt.Sprintf("line %d of %d", m.resLine+1, len(m.resultDetail(idx)))
 			if status != "" {
