@@ -13,7 +13,10 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-const exportKeyHint = "alt+e export"
+const (
+	exportKey     = "alt+y"
+	exportKeyHint = exportKey + " export"
+)
 
 func (m tuiModel) exportText(what, slug, ext, text string) (tuiModel, tea.Cmd) {
 	text = strings.TrimRight(text, "\n")

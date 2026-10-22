@@ -20,6 +20,7 @@ import (
 	"golang.org/x/term"
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/clock"
+	"tyrtop.com/iontk/internal/column"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/dataview"
 	"tyrtop.com/iontk/internal/ionterm"
@@ -28,8 +29,10 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/ioncli"
 	"tyrtop.com/iontk/internal/saseauth"
+	"tyrtop.com/iontk/internal/script"
 	"tyrtop.com/iontk/internal/search"
 	"tyrtop.com/iontk/internal/ui"
+	"tyrtop.com/iontk/internal/view"
 )
 
 type tuiPhase int
@@ -56,6 +59,7 @@ const (
 	phaseData
 	phaseMacros
 	phaseZone
+	phaseEdit
 )
 
 type pickMode int
@@ -262,9 +266,26 @@ type tuiModel struct {
 	table          table.Model
 	filter         textinput.Model
 	filterOn       bool
-	listKeep       []int
+	listCols       []elementColumn
+	listSpec       []elementColumn
+	listFrom       string
+	columnsErr     string
+	fetched        map[string]map[string]fetchedCell
+	fetchQueue     map[string][]string
+	fetchOut       map[string]bool
+	fetchDone      map[string]int
+	fetchTotal     map[string]int
+	fetchErr       map[string]string
+	fetchBulk      map[string]string
+	listSpecs      []column.Spec
+	listPaths      map[string]string
+	fleet          map[string]map[string]map[string]any
+	fleetOut       map[string]bool
+	fleetErr       map[string]string
 	listWidths     []int
-	listValues     [][]string
+	listCells      []rowCells
+	listCache      map[string]rowCells
+	rowCtx         rowContext
 
 	cmdInput textinput.Model
 	cmdPick  suggest
@@ -309,6 +330,15 @@ type tuiModel struct {
 	mode         pickMode
 	views        *dataview.Set
 	viewsErr     string
+	viewFiles    []view.File
+	keys         keymap
+	keysErr      string
+	scripts      *script.Set
+	scriptsErr   string
+	scriptOn     string
+	menuSpec     []menuEntry
+	menuFrom     string
+	menuErr      string
 	data         []dataTab
 	dataActive   int
 	dataFilter   textinput.Model
@@ -333,8 +363,18 @@ type tuiModel struct {
 	askMacro      string
 	askMacroOn    []elementRow
 
-	width  int
-	height int
+	mouseOff        bool
+	tut             tutorialRun
+	flows           []tutorialFlow
+	flowsErr        string
+	edit            yamlEdit
+	real            realWorld
+	askTutorial     bool
+	askTutorialNote bool
+
+	width      int
+	height     int
+	termHeight int
 }
 
 var Version = "dev"
@@ -362,7 +402,7 @@ func Run(ctx context.Context) error {
 
 	logging.L().Info("tui started", "version", Version, "tenant", Tenant, "config", store.Root)
 
-	model := newTUIModel(ctx, store, cfg)
+	model := newTUIModel(ctx, store, cfg).raiseTutorialAsk()
 	defer model.sessions.CloseAll()
 	// bubbletea's own reset is OSC 111, which not every terminal implements
 	defer restoreTermColor(os.Stdout)
@@ -420,11 +460,7 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 		m.typedZone = z
 	}
 
-	views, err := dataview.Load(ViewsPath(store))
-	if err != nil {
-		m.viewsErr = err.Error()
-	}
-	m.views = views
+	m.loadRuntime(store)
 
 	m.dataFilter = newDataFilter()
 	m.cmds = &config.CommandStore{}
@@ -452,7 +488,7 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 			}
 		}
 	}
-	return m
+	return m.readFlows()
 }
 
 func tableStyles() table.Styles {
@@ -592,6 +628,18 @@ func watchToken(ch <-chan error) tea.Cmd {
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+
+	mm, ok := next.(tuiModel)
+	if !ok || !mm.tut.on || !mm.tut.passing {
+		return next, cmd
+	}
+	mm.tut.passing = false
+	mm, passed := mm.passStep()
+	return mm, tea.Batch(cmd, passed)
+}
+
+func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.ColorProfileMsg:
 		ui.SetProfile(msg.Profile)
@@ -622,7 +670,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
+		m.width, m.termHeight = msg.Width, msg.Height
+		m.height = m.usableHeight()
 		m.resFilter.SetWidth(min(26, max(10, m.width-30)))
 		m.rebuildResultRows()
 		m.filter.SetWidth(min(26, max(10, m.width-30)))
@@ -631,6 +680,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form[i].input.SetWidth(min(48, max(16, m.width-24)))
 		}
 		m.rebuildRows()
+		m.fitEdit()
 		return m, nil
 
 	case clientErrMsg:
@@ -815,7 +865,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, watch
 
 	case tenantElementsMsg:
-		var ha tea.Cmd
+		var ha, cells tea.Cmd
 		if m.pendingTenants > 0 {
 			m.pendingTenants--
 		}
@@ -838,6 +888,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.markHAOut(msg.tsg)
 				ha = loadHABulk(m.ctx, m.pool.get(msg.tsg), msg.tsg, w)
 			}
+			cells = tea.Batch(m.startCells(), m.readFleets())
 		}
 
 		if m.pendingTenants == 0 {
@@ -852,7 +903,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.phase == phaseLoading && len(m.all) > 0 {
 			m.phase = phasePicking
 		}
-		return m, ha
+		return m, tea.Batch(ha, cells)
 
 	case spinner.TickMsg:
 		if !m.wantsSpinner() {
@@ -939,6 +990,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case haTickMsg:
 		return m.onHATick(msg.tsg)
 
+	case scriptDoneMsg:
+		return m.onScriptDone(msg)
+
+	case fetchedMsg:
+		return m.onFetchedCells(msg)
+
+	case fleetReadMsg:
+		return m.onFleetRead(msg)
+
+	case fetchTickMsg:
+		return m.onFetchTick(msg)
+
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
 
@@ -967,7 +1030,7 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.filter, cmd = m.filter.Update(msg)
 			m.applyFilter()
-			return m, tea.Batch(cmd, m.askVisibleHA())
+			return m, tea.Batch(cmd, m.askVisibleHA(), m.askVisibleCells())
 		}
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
@@ -1013,6 +1076,11 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case phaseEdit:
+		var cmd tea.Cmd
+		m.edit.area, cmd = m.edit.area.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -1022,9 +1090,11 @@ func (m tuiModel) wantsSpinner() bool {
 	case phaseLoading, phaseRunning, phaseSettings, phaseSignIn, phaseDiscover, phaseWarming:
 		return true
 	case phasePicking:
-		return m.cacheState == cacheUpdating
+		return m.cacheState == cacheUpdating || m.fetchWorking()
 	case phaseSession:
 		return m.connectingAny() || m.awaitingDevice()
+	case phaseEdit:
+		return false
 	case phaseData:
 		for _, t := range m.data {
 			if t.loading() || t.cmp.loading {
@@ -1052,6 +1122,7 @@ func (m *tuiModel) setElements(els []elementRow) {
 		}
 	}
 	m.filter.SetSuggestions(names)
+	m.forgetRows()
 	m.applyFilter()
 }
 
@@ -1063,9 +1134,9 @@ func (m *tuiModel) record(el elementRow) search.Record {
 	return search.Of(el.Element, el.TSG, el.Tenant, search.SiteMap(m.sites))
 }
 
-func (m tuiModel) showTenantColumn() bool { return m.tenantCount > 1 }
+func (m *tuiModel) showTenantColumn() bool { return m.tenantCount > 1 }
 
-func (m tuiModel) showHAColumn() bool {
+func (m *tuiModel) showHAColumn() bool {
 	for _, r := range m.all {
 		if r.ClusterID() != "" {
 			return true
@@ -1074,7 +1145,7 @@ func (m tuiModel) showHAColumn() bool {
 	return false
 }
 
-func (m tuiModel) showSerialColumn() bool {
+func (m *tuiModel) showSerialColumn() bool {
 	for _, r := range m.all {
 		if r.Serial != "" {
 			return true
@@ -1083,123 +1154,30 @@ func (m tuiModel) showSerialColumn() bool {
 	return false
 }
 
-type elementColumn struct {
-	title string
-	min   int
-	max   int
-	flex  bool
-}
-
-var elementColumns = []elementColumn{
-	{title: "", min: 2, max: 2},
-	{title: "", min: 3, max: 3},
-	{title: "Element", min: 14, max: 30, flex: true},
-	{title: "Site", min: 8, max: 22, flex: true},
-	{title: "Model", min: 8, max: 11, flex: true},
-	{title: "SN", min: 10, max: 24, flex: true},
-	{title: "State", min: 9, max: 9},
-	{title: "HA", min: 8, max: 8},
-	{title: "Tenant", min: 8, max: 20, flex: true},
-}
-
-const (
-	colCaret = iota
-	colStatus
-	colName
-	colSite
-	colModel
-	colSerial
-	colState
-	colHA
-	colTenant
-)
-
-const colGap = 2
-
-func fitColumns(cols []elementColumn, values [][]string, avail int) []int {
-	w := make([]int, len(cols))
-	for i, c := range cols {
-		w[i] = max(c.min, ui.Width(c.title))
-		for _, row := range values {
-			if i < len(row) {
-				w[i] = max(w[i], ui.Width(row[i]))
-			}
-		}
-		w[i] = min(w[i], c.max)
-	}
-	return shaveColumns(cols, w, avail)
-}
-
-func shaveColumns(cols []elementColumn, w []int, avail int) []int {
-	total := func() int {
-		n := 0
-		for _, x := range w {
-			n += x + colGap
-		}
-		return n
-	}
-	for total() > avail {
-		widest, at := 0, -1
-		for i, c := range cols {
-			if c.flex && w[i] > c.min && w[i] > widest {
-				widest, at = w[i], i
-			}
-		}
-		if at < 0 {
-			break
-		}
-		w[at]--
-	}
-	return w
-}
-
 func (m *tuiModel) rebuildRows() {
-	tenants := m.showTenantColumn()
-	ha := m.showHAColumn()
-	serials := m.showSerialColumn()
-
-	keep := []int{colCaret, colStatus, colName, colSite, colModel}
-	if serials {
-		keep = append(keep, colSerial)
+	m.rowCtx = rowContext{}
+	cols := m.columns()
+	if !sameColumns(cols, m.listCols) {
+		m.listCols, m.listCache = cols, nil
 	}
-	keep = append(keep, colState)
-	if ha {
-		keep = append(keep, colHA)
-	}
-	if tenants {
-		keep = append(keep, colTenant)
+	if m.listCache == nil {
+		m.listCache = make(map[string]rowCells, len(m.all))
 	}
 
-	cols := make([]elementColumn, 0, len(keep))
-	widths := make([]int, len(keep))
-	for j, c := range keep {
-		cols = append(cols, elementColumns[c])
-		widths[j] = max(elementColumns[c].min, ui.Width(elementColumns[c].title))
-	}
-
-	values := make([][]string, 0, len(m.matches))
+	cells := make([]rowCells, 0, len(m.matches))
+	widths := make([][]int, 0, len(m.matches))
 	for _, i := range m.matches {
-		el := m.all[i]
-		row := make([]string, len(keep))
-		for j, c := range keep {
-			row[j] = m.cellValue(el, c)
-			if w := ui.Width(row[j]); w > widths[j] {
-				widths[j] = w
-			}
-		}
-		values = append(values, row)
-	}
-	for j, c := range keep {
-		widths[j] = min(widths[j], elementColumns[c].max)
+		rc := m.rowCells(cols, m.all[i])
+		cells = append(cells, rc)
+		widths = append(widths, rc.width)
 	}
 
-	m.listKeep = keep
-	m.listValues = values
-	m.listWidths = shaveColumns(cols, widths, max(20, m.width))
+	m.listCells = cells
+	m.listWidths = fitColumns(cols, widths, max(20, m.width))
 
-	rows := make([]table.Row, len(values))
-	lo, hi := m.paintWindow(len(values))
-	for n := range values {
+	rows := make([]table.Row, len(cells))
+	lo, hi := m.paintWindow(len(cells))
+	for n := range cells {
 		if n >= lo && n < hi {
 			rows[n] = m.listRow(n)
 		} else {
@@ -1207,7 +1185,7 @@ func (m *tuiModel) rebuildRows() {
 		}
 	}
 
-	tcols := make([]table.Column, 0, len(keep))
+	tcols := make([]table.Column, 0, len(cols))
 	total := 0
 	for i, c := range cols {
 		tcols = append(tcols, table.Column{Title: c.title, Width: m.listWidths[i]})
@@ -1233,99 +1211,40 @@ func (m *tuiModel) rebuildRows() {
 	m.table.SetHeight(m.listHeight())
 }
 
-const selectedMark = "▌ "
-
-func splitMark(cell string) (mark, name string) {
-	r := []rune(cell)
-	if len(r) < 2 {
-		return "", cell
-	}
-	return string(r[:2]), string(r[2:])
-}
-
-func (m *tuiModel) cellValue(el elementRow, col int) string {
-	switch col {
-	case colStatus:
-		glyph, _ := m.rowStatusOf(el)
-		return glyph
-	case colName:
-		if m.selected[el.key()] {
-			return selectedMark + el.label()
-		}
-		return "  " + el.label()
-	case colSite:
-		return m.siteName(el)
-	case colModel:
-		return el.Model
-	case colSerial:
-		return el.Serial
-	case colState:
-		if el.Connected {
-			return "connected"
-		}
-		return "offline"
-	case colHA:
-		word, cached := m.haState(el)
-		if cached {
-			return word + "*"
-		}
-		return word
-	case colTenant:
-		return el.Tenant
-	}
-	return ""
-}
-
 func (m *tuiModel) listRow(n int) table.Row {
-	vals := m.listValues[n]
+	rc := m.listCells[n]
 	el := m.all[m.matches[n]]
 	here := n == m.table.Cursor()
 
-	paint := func(s string) string { return s }
+	row := func(s string) string { return s }
 	if el.Connected && !here {
-		paint = func(s string) string { return ui.StyleOK.Render(s) }
+		row = func(s string) string { return ui.StyleOK.Render(s) }
 	}
 	ticked := m.selected[el.key()]
 
-	row := make(table.Row, 0, len(vals))
-	for i, c := range m.listKeep {
-		v := ui.Truncate(vals[i], m.listWidths[i])
-		switch c {
-		case colCaret:
-			if here {
-				v = ">"
-			}
-		case colName:
-			if ticked && !here {
-				mark, name := splitMark(v)
-				v = ui.StyleRow.Render(mark) + ui.StyleBold.Render(paint(name))
-				row = append(row, v)
-				continue
-			}
-			v = paint(v)
-		case colStatus, colHA:
-			v = plainIf(here, v)
-		case colState:
-			switch {
-			case here:
-			case el.Connected:
-				v = paint(v)
-			default:
-				v = ui.StyleErr.Render(v)
-			}
-		default:
-			v = paint(v)
+	out := make(table.Row, len(m.listCols))
+	for i, c := range m.listCols {
+		cl := cell{
+			el:     el,
+			text:   truncCell(rc.text[i], rc.width[i], m.listWidths[i]),
+			here:   here,
+			ticked: ticked,
+			row:    row,
 		}
-		row = append(row, v)
+		if c.paint != nil {
+			out[i] = c.paint(m, cl)
+			continue
+		}
+		out[i] = row(cl.text)
 	}
-	return row
+	return out
 }
 
 func (m *tuiModel) listRowPlain(n int) table.Row {
-	vals := m.listValues[n]
-	row := make(table.Row, len(vals))
-	for i := range vals {
-		row[i] = ui.Truncate(vals[i], m.listWidths[i])
+	rc := m.listCells[n]
+	row := make(table.Row, len(rc.text))
+	for i := range rc.text {
+		row[i] = truncCell(rc.text[i], rc.width[i], m.listWidths[i])
 	}
 	return row
 }
@@ -1341,17 +1260,29 @@ func (m *tuiModel) windowAround(at, n int) (int, int) {
 
 func (m *tuiModel) repaintCursorRows(prev int) {
 	rows := m.table.Rows()
-	if len(rows) != len(m.listValues) {
+	if len(rows) != len(m.listCells) {
 		return
 	}
 	lo, hi := m.paintWindow(len(rows))
 	plo, phi := m.windowAround(prev, len(rows))
-	for i := min(lo, plo); i < max(hi, phi); i++ {
+
+	repaint := func(i int) {
+		if i < 0 || i >= len(rows) {
+			return
+		}
 		if i >= lo && i < hi {
 			rows[i] = m.listRow(i)
-			continue
+			return
 		}
 		rows[i] = m.listRowPlain(i)
+	}
+	repaint(prev)
+	repaint(m.table.Cursor())
+	for i := min(lo, plo); i < max(lo, plo); i++ {
+		repaint(i)
+	}
+	for i := min(hi, phi); i < max(hi, phi); i++ {
+		repaint(i)
 	}
 	m.table.SetRows(rows)
 }
@@ -1403,8 +1334,8 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	if key == "alt+i" {
-		return m.toggleStats()
+	if m.askTutorial || m.askTutorialNote {
+		return m.onTutorialAskKey(key)
 	}
 
 	if m.askMacro != "" {
@@ -1413,6 +1344,22 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.askRetry.eid != "" {
 		return m.onRetryKey(key)
+	}
+
+	if m.tut.on {
+		next, cmd, handled := m.onTutorialKey(key)
+		if handled {
+			return next, cmd
+		}
+		m = next
+	}
+
+	if m.phase == phaseEdit {
+		return m.onEditKey(msg, key)
+	}
+
+	if next, cmd, ran := m.runGlobalBinding(key); ran {
+		return next, cmd
 	}
 
 	switch m.phase {
@@ -1493,6 +1440,10 @@ func (m tuiModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
+	if next, cmd, ran := m.bindingOn(scrElements, key); ran {
+		return next, cmd
+	}
+
 	switch key {
 	case "esc", "q":
 		if key == "q" && m.filterOn {
@@ -1523,13 +1474,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		m.moveCursor(step)
 		return m, nil
 
-	case "alt+up", "alt+k":
-		m.moveCursor(-m.pageStep())
-		return m, nil
-	case "alt+down", "alt+j":
-		m.moveCursor(m.pageStep())
-		return m, nil
-
 	case "k", "j", "home", "end":
 		if !m.filterOn {
 			switch key {
@@ -1545,91 +1489,10 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 			return m, nil
 		}
 
-	case "alt+c":
-		if len(m.selected) == 0 {
-			m.status = "nothing selected"
-			return m, nil
-		}
-		n := len(m.selected)
-		m.lastCleared = make(map[string]bool, n)
-		for k := range m.selected {
-			m.lastCleared[k] = true
-		}
-		m.lastClearedView = m.showSelected
-
-		m.selected = map[string]bool{}
-		m.showSelected = false
-		m.applyFilter()
-		m.status = fmt.Sprintf("cleared %d selected — alt+z to undo", n)
-		return m, nil
-
-	case "alt+z", "ctrl+z":
-		if len(m.lastCleared) == 0 {
-			m.status = "nothing to undo"
-			return m, nil
-		}
-		for k := range m.lastCleared {
-			m.selected[k] = true
-		}
-		n := len(m.lastCleared)
-		m.lastCleared = nil
-		m.showSelected = m.lastClearedView
-		m.applyFilter()
-		m.status = fmt.Sprintf("restored %d selected", n)
-		return m, nil
-
-	case "alt+s":
-		if !m.showSelected && len(m.selected) == 0 {
-			m.status = "nothing selected"
-			return m, nil
-		}
-		m.showSelected = !m.showSelected
-		m.status = ""
-		m.applyFilter()
-		m.table.SetCursor(0)
-		return m, nil
-
 	case "space":
 		if !m.filterOn {
 			return m.toggleCurrent(), nil
 		}
-
-	case "alt+r":
-		return m.refreshNow()
-
-	case "alt+u":
-		m.userCursor = 0
-		m.status = ""
-		m.usersTSG = m.tenant.TSGID
-		if el, ok := m.current(); ok {
-			m.usersTSG = el.TSG
-		}
-		m.phase = phaseUsers
-		return m, nil
-
-	case "alt+m", "alt+a":
-		m.mode = m.mode.next()
-		m.armedMacro = ""
-		m.status = ""
-		return m, nil
-
-	case "ctrl+a":
-		all := true
-		for _, i := range m.matches {
-			if !m.selected[m.all[i].key()] {
-				all = false
-				break
-			}
-		}
-		for _, i := range m.matches {
-			if all {
-				delete(m.selected, m.all[i].key())
-			} else {
-				m.selected[m.all[i].key()] = true
-			}
-		}
-		m.rebuildRows()
-		return m, nil
 
 	case "enter":
 		if m.filterOn {
@@ -1664,12 +1527,9 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		var cmd tea.Cmd
 		m.filter, cmd = m.filter.Update(msg)
 		m.applyFilter()
-		return m, tea.Batch(cmd, m.askVisibleHA())
+		return m, tea.Batch(cmd, m.askVisibleHA(), m.askVisibleCells())
 	}
 
-	if key == "alt+t" {
-		return m.reopenLastTab()
-	}
 	if key == "alt+w" {
 		m.status = ""
 		m.phase = m.listReturn()
@@ -1680,13 +1540,6 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 	}
 
 	switch key {
-	case "/":
-		if m.filter.Value() != "" {
-			m.filter.SetValue("")
-			m.applyFilter()
-		}
-		m.filterOn = true
-		return m, m.filter.Focus()
 	case "ctrl+]":
 		if m.sessions.Count() > 0 {
 			m.phase = phaseSession
@@ -1968,14 +1821,25 @@ func (m tuiModel) View() tea.View {
 		v = tea.NewView(m.viewData())
 	case phaseMacros:
 		v = tea.NewView(m.viewMacros())
+	case phaseEdit:
+		v = tea.NewView(m.viewEdit())
 	}
 	if m.askRetry.eid != "" {
 		v = tea.NewView(m.overlayRetry(v.Content))
 	}
+	if m.tut.on {
+		v = tea.NewView(m.overlayTutorial(v.Content))
+	}
 	if m.askMacro != "" {
 		v = tea.NewView(m.overlayMacroWarn(v.Content))
 	}
-	v.Content = ui.ClipFrame(v.Content, m.height)
+	switch {
+	case m.askTutorial:
+		v = tea.NewView(overlayUnder(v.Content, m.tutorialAsk(), m.termHeight))
+	case m.askTutorialNote:
+		v = tea.NewView(overlayUnder(v.Content, m.tutorialNote(), m.termHeight))
+	}
+	v.Content = ui.ClipFrame(v.Content, m.termHeight)
 	v.AltScreen = true
 	v.MouseMode = m.mouseMode()
 	v.BackgroundColor, v.ForegroundColor = frameColors()
@@ -2003,7 +1867,7 @@ func (m tuiModel) viewPicking() string {
 		}
 		b.WriteString(line + "\n")
 	} else {
-		b.WriteString(ui.StyleDim.Render("press / to filter") + "\n")
+		b.WriteString(ui.StyleDim.Render("press "+m.legend(scrElements, "to filter", "filter")) + "\n")
 	}
 	b.WriteString("\n")
 
@@ -2027,15 +1891,23 @@ func (m tuiModel) viewPicking() string {
 		case modeMacro:
 			act = fmt.Sprintf("enter run %s on %d", m.armedMacro, n)
 		}
-		clear := "alt+c clear"
+		clear := m.legend(scrElements, "clear", "clear-selection")
 		if len(m.lastCleared) > 0 {
-			clear = "alt+z undo clear"
+			clear = m.legend(scrElements, "undo clear", "undo-clear")
 		}
 		back := "back"
 		if m.listReturn() == phaseMacros {
 			back = "macros"
 		}
-		hint := fmt.Sprintf("↑↓/jk move · / filter · space select · alt+s selected · %s · alt+r refresh · alt+m/alt+a mode · %s · esc/q/alt+w %s", clear, act, back)
+		hint := fmt.Sprintf("↑↓/jk move · %s · space select · %s · %s · %s · %s · %s · %s · esc/q/alt+w %s",
+			m.legend(scrElements, "filter", "filter"),
+			m.legend(scrElements, "selected", "show-selected"),
+			clear,
+			m.legend(scrElements, "refresh", "refresh"),
+			m.legend(scrElements, "mode", "cycle-mode"),
+			act,
+			m.legend(scrAny, "yaml", "edit-yaml"),
+			back)
 		if m.showSelected {
 			hint = fmt.Sprintf("↑↓/jk move · alt+s all · alt+c clear · space unselect · %s · esc/q/alt+w %s", act, back)
 		}
@@ -2122,11 +1994,4 @@ func (m tuiModel) viewRunning() string {
 	}
 
 	return b.String()
-}
-
-func plainIf(here bool, cell string) string {
-	if here {
-		return ui.Plain(cell)
-	}
-	return cell
 }

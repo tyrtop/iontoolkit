@@ -409,6 +409,21 @@ func tableRow(t *testing.T, p dataPane, want string) []string {
 	return nil
 }
 
+func columnAt(t *testing.T, p dataPane, header string) int {
+	t.Helper()
+	var headers []string
+	for _, sec := range p.rendered.Sections {
+		for i, h := range sec.Headers {
+			if h == header {
+				return i
+			}
+		}
+		headers = append(headers, sec.Headers...)
+	}
+	t.Fatalf("no %s column in %v", header, headers)
+	return -1
+}
+
 func containsCell(cells []string, want string) bool {
 	for _, c := range cells {
 		if strings.TrimSpace(c) == want {
@@ -517,21 +532,7 @@ func TestInterfacesShowTheSecurityZone(t *testing.T) {
 		t.Errorf("a fetch failed: %s", e)
 	}
 
-	var headers []string
-	for _, sec := range pane.rendered.Sections {
-		if len(sec.Headers) > 0 {
-			headers = sec.Headers
-		}
-	}
-	var zoneAt = -1
-	for i, h := range headers {
-		if h == "ZONE" {
-			zoneAt = i
-		}
-	}
-	if zoneAt < 0 {
-		t.Fatalf("no ZONE column in %v", headers)
-	}
+	zoneAt := columnAt(t, pane, "ZONE")
 
 	vlan := tableRow(t, pane, "vlan1")
 	if got := vlan[zoneAt]; got != "Store - LAN" {
@@ -540,6 +541,37 @@ func TestInterfacesShowTheSecurityZone(t *testing.T) {
 	for _, port := range []string{"1", "3"} {
 		if got := tableRow(t, pane, port)[zoneAt]; got != "" {
 			t.Errorf("port %s zone = %q, want nothing: zones are on the vlans", port, got)
+		}
+	}
+}
+
+func TestInterfacesSayWhetherAnAddressIsStaticOrDHCP(t *testing.T) {
+	m, set := fixtureTUIWith(t, haFixtureYAML)
+	m.phase = phasePicking
+	m.mode = modeData
+	m.rebuildRows()
+
+	el := set.Tenants[0].Elements[0]
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	m = runDataLoads(t, next.(tuiModel), cmd)
+
+	pane := paneFor(t, m.data[0], "Interfaces")
+	if pane.err != "" {
+		t.Fatalf("the Interfaces view failed: %s", pane.err)
+	}
+	at := columnAt(t, pane, "CONFIG")
+
+	for _, tc := range []struct {
+		port string
+		want string
+	}{
+		{"1", "dhcp"},
+		{"3", "static"},
+		{"vlan1", "static"},
+		{"5", "-"},
+	} {
+		if got := tableRow(t, pane, tc.port)[at]; got != tc.want {
+			t.Errorf("interface %s config = %q, want %q", tc.port, got, tc.want)
 		}
 	}
 }

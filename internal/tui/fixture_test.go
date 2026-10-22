@@ -65,7 +65,7 @@ func fixtureTUIWith(t *testing.T, yaml string) (tuiModel, *fixture.Set) {
 	}
 
 	flags := app.TenantFlags(st, m.tenant, m.ionUser)
-	msg := loadTenant(t.Context(), flags, m.tenant, m.pool, st)()
+	msg := loadTenant(t.Context(), flags, m.tenant, m.pool, st, m.listPaths)()
 	next, _ := m.Update(msg)
 	return next.(tuiModel), set
 }

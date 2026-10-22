@@ -537,6 +537,43 @@ func Apply(t Theme) {
 
 func CurrentTheme() Theme { return current }
 
+func StyleNames() []string {
+	return []string{"ok", "err", "warn", "cmd", "element", "hot", "row",
+		"divider", "spinner", "dim", "ghost", "bold", "plain"}
+}
+
+func StyleNamed(name string) (lipgloss.Style, bool) {
+	switch name {
+	case "ok":
+		return StyleOK, true
+	case "err":
+		return StyleErr, true
+	case "warn":
+		return StyleWarn, true
+	case "cmd":
+		return StyleCmd, true
+	case "element":
+		return StyleElement, true
+	case "hot":
+		return StyleHot, true
+	case "row":
+		return StyleRow, true
+	case "divider":
+		return StyleDivider, true
+	case "spinner":
+		return StyleSpinner, true
+	case "dim":
+		return StyleDim, true
+	case "ghost":
+		return StyleGhost, true
+	case "bold":
+		return StyleBold, true
+	case "plain":
+		return lipgloss.NewStyle(), true
+	}
+	return lipgloss.NewStyle(), false
+}
+
 func StyleTab(kind TabKind, ring, nth int, active bool) lipgloss.Style {
 	s := tabStyle(kind, ring, nth)
 	if active {
@@ -858,6 +895,14 @@ func (t Theme) RoleStyle(role string) lipgloss.Style {
 const themeFileHeader = "# Written by iontk's theme editor. One scheme to a file; a scheme here\n" +
 	"# replaces the built-in of the same name, and deleting the file puts it back.\n"
 
+func ThemeYAML(t Theme) (string, error) {
+	b, err := yaml.Marshal(t)
+	if err != nil {
+		return "", fmt.Errorf("encode %s: %w", t.Name, err)
+	}
+	return themeFileHeader + string(b), nil
+}
+
 func saveThemeFile(dir string, t Theme) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("make %s: %w", dir, err)
@@ -936,6 +981,19 @@ func RemoveOverrides(path string) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+func UserThemePath(path, name string) (string, bool) {
+	if path == "" {
+		return "", false
+	}
+	if file, ok := userThemeSource(path, name); ok {
+		return file, true
+	}
+	if pathIsFile(path) {
+		return path, true
+	}
+	return filepath.Join(path, ThemeFileName(name)), true
 }
 
 func IsUserTheme(path, name string) bool {

@@ -39,14 +39,12 @@ func exportPath(t *testing.T, status string) string {
 func TestTheElementListNeitherCopiesNorExports(t *testing.T) {
 	m := pickModel(t)
 
-	for _, key := range []tea.Key{altKey('y'), altKey('e')} {
-		mm, cmd := m.Update(tea.KeyPressMsg(key))
-		if cmd != nil {
-			t.Errorf("%s on the element list did something: %q", key, fmt.Sprint(cmd()))
-		}
-		if got := mm.(tuiModel).status; strings.Contains(got, "exported") {
-			t.Errorf("status = %q, want nothing exported from the element list", got)
-		}
+	mm, cmd := m.Update(tea.KeyPressMsg(altKey('y')))
+	if cmd != nil {
+		t.Errorf("alt+y on the element list did something: %q", fmt.Sprint(cmd()))
+	}
+	if got := mm.(tuiModel).status; strings.Contains(got, "exported") {
+		t.Errorf("status = %q, want nothing exported from the element list", got)
 	}
 	if out := plain(m.viewPicking()); strings.Contains(out, "copy id") {
 		t.Errorf("the element list still advertises copy id:\n%s", out)
@@ -57,7 +55,7 @@ func TestExportingAnOpenResultWritesItsOutput(t *testing.T) {
 	m := resultsModel(t)
 	m.resOpen = true
 
-	mm, cmd := m.Update(tea.KeyPressMsg(altKey('e')))
+	mm, cmd := m.Update(tea.KeyPressMsg(altKey('y')))
 	m = mm.(tuiModel)
 	got, where := exported(t, m, cmd)
 
@@ -79,7 +77,7 @@ func TestExportingTheResultsPageWritesTheRunAsJSON(t *testing.T) {
 	m := resultsModel(t)
 	m.resOpen = false
 
-	mm, cmd := m.Update(tea.KeyPressMsg(altKey('e')))
+	mm, cmd := m.Update(tea.KeyPressMsg(altKey('y')))
 	m = mm.(tuiModel)
 	got, where := exported(t, m, cmd)
 
@@ -114,7 +112,7 @@ func TestExportingAShellKeepsTheWholeBuffer(t *testing.T) {
 	s := m.sessions.Active()
 	waitForTUI(t, func() bool { return strings.Contains(s.Buffer(), "Serial: 1234") })
 
-	m, cmd := pressSessionKey(t, m, altKey('e'))
+	m, cmd := pressSessionKey(t, m, altKey('y'))
 	got, where := exported(t, m, cmd)
 
 	if !strings.Contains(got, "dump device status") || !strings.Contains(got, "Serial: 1234") {
@@ -127,7 +125,7 @@ func TestExportingAShellKeepsTheWholeBuffer(t *testing.T) {
 		t.Errorf("export landed at %q, want the session named in the filename", where)
 	}
 	if strings.Contains(conn.sent(), "\x1be") {
-		t.Errorf("alt+e reached the device: %q", conn.sent())
+		t.Errorf("alt+y reached the device: %q", conn.sent())
 	}
 }
 
@@ -165,27 +163,19 @@ func TestAnEmptyPageExportsNothing(t *testing.T) {
 	}
 }
 
-func TestNothingIsBoundToAltYAnyMore(t *testing.T) {
+func TestAltYIsTheExportKeyAndTheFootersSayIt(t *testing.T) {
 	m := resultsModel(t)
-
-	mm, cmd := m.Update(tea.KeyPressMsg(altKey('y')))
-	if cmd != nil {
-		t.Errorf("alt+y still does something: %q", fmt.Sprint(cmd()))
-	}
-	if got := mm.(tuiModel).status; got != m.status {
-		t.Errorf("alt+y set the status to %q; the key is unbound and stays free to bind", got)
-	}
-}
-
-func TestNoFooterOffersAltYAnyMore(t *testing.T) {
-	m := resultsModel(t)
-	if got := plain(m.viewResults()); strings.Contains(got, "alt+y") {
-		t.Errorf("the results footer still offers alt+y:\n%s", got)
+	if got := plain(m.viewResults()); !strings.Contains(got, "alt+y export") {
+		t.Errorf("the results footer does not offer alt+y:\n%s", got)
 	}
 
 	mac := macroModel(t)
 	if got := plain(mac.viewMacros()); strings.Contains(got, "alt+y") {
-		t.Errorf("the macro page still offers alt+y:\n%s", got)
+		t.Errorf("the macro page has nothing to export and offers alt+y anyway:\n%s", got)
+	}
+
+	if got := plain(m.viewResults()); strings.Contains(got, "alt+e") {
+		t.Errorf("the results page is not drawn from a file and offers alt+e:\n%s", got)
 	}
 }
 
@@ -196,7 +186,7 @@ func TestExportingAFavouriteSlotWritesItsCommand(t *testing.T) {
 	}
 	m.favPick, m.favCursor = true, 3
 
-	mm, cmd := m.Update(tea.KeyPressMsg(altKey('e')))
+	mm, cmd := m.Update(tea.KeyPressMsg(altKey('y')))
 	got, where := exported(t, mm.(tuiModel), cmd)
 
 	if strings.TrimSpace(got) != "dump interface status all" {
@@ -262,7 +252,7 @@ func TestExportingADataPaneWritesTheWholePagePlain(t *testing.T) {
 	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	mm, cmd := m.Update(tea.KeyPressMsg(altKey('e')))
+	mm, cmd := m.Update(tea.KeyPressMsg(altKey('y')))
 	m = mm.(tuiModel)
 	got, _ := exported(t, m, cmd)
 

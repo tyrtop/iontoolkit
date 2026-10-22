@@ -15,6 +15,8 @@ require (
 	golang.org/x/time v0.15.0
 )
 
+require github.com/yuin/gopher-lua v1.1.2
+
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3

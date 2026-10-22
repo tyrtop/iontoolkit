@@ -689,11 +689,11 @@ func TestLoginSendsStoredCredentialsOnDemand(t *testing.T) {
 		t.Fatalf("something was sent without credentials: %q", conn.sent())
 	}
 
-	if !s.Login(Credentials{User: "cisops", Pass: "s3cret"}) {
+	if !s.Login(Credentials{User: "ops", Pass: "s3cret"}) {
 		t.Fatal("Login returned false with both credentials")
 	}
 	eventually(t, "the username on the wire", func() bool {
-		return strings.Contains(conn.sent(), "cisops\r")
+		return strings.Contains(conn.sent(), "ops\r")
 	})
 
 	conn.feed <- []byte("\r\nPassword: ")

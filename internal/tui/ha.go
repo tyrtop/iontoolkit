@@ -234,6 +234,7 @@ func (m tuiModel) onHAStates(msg haStatesMsg) (tea.Model, tea.Cmd) {
 			m.haErr = why
 		}
 	}
+	m.forgetHARows(msg)
 	if len(msg.rest) == 0 && m.haFailed > 0 && m.status == "" {
 		m.status = fmt.Sprintf("HA state unread for %d cluster(s): %s", m.haFailed, m.haErr)
 	}
@@ -349,6 +350,27 @@ func saveHA(st *config.Store, tsg string, states map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		_ = st.SaveHA(tsg, bare)
 		return nil
+	}
+}
+
+func (m *tuiModel) forgetHARows(msg haStatesMsg) {
+	for k := range msg.states {
+		m.forgetRow(k)
+	}
+	if len(msg.answered) == 0 && len(msg.failed) == 0 {
+		return
+	}
+	clusters := make(map[string]bool, len(msg.answered)+len(msg.failed))
+	for _, cid := range msg.answered {
+		clusters[cid] = true
+	}
+	for cid := range msg.failed {
+		clusters[cid] = true
+	}
+	for _, el := range m.all {
+		if el.TSG == msg.tsg && clusters[el.ClusterID()] {
+			m.forgetRow(el.key())
+		}
 	}
 }
 

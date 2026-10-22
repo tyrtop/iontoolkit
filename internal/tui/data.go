@@ -2,29 +2,15 @@ package tui
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/dataview"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
 )
-
-var Views string
-
-func ViewsPath(st *config.Store) string {
-	if Views != "" {
-		return Views
-	}
-	if st == nil {
-		return ""
-	}
-	return filepath.Join(st.Root, dataview.FileName)
-}
 
 type dataTab struct {
 	eid     string
@@ -252,6 +238,10 @@ func (m tuiModel) closeDataTab() tuiModel {
 }
 
 func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
+	if next, cmd, ran := m.bindingOn(scrData, key); ran {
+		return next, cmd
+	}
+
 	if next, handled := m.onTabKey(key); handled {
 		return next, nil
 	}
@@ -286,7 +276,7 @@ func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
 		if !m.dataFilterOn {
 			return m.startCompare()
 		}
-	case "alt+e":
+	case exportKey:
 		return m.exportDataPage()
 	}
 
@@ -409,6 +399,12 @@ type dataPage struct {
 	lines []string
 	heads []int
 	hdrs  []int
+	views []pageView
+}
+
+type pageView struct {
+	at   int
+	name string
 }
 
 func (p dataPage) String() string { return strings.Join(p.lines, "\n") }
@@ -424,6 +420,7 @@ func (m tuiModel) dataPage(tab dataTab) dataPage {
 	var p dataPage
 
 	for _, pane := range tab.panes {
+		p.views = append(p.views, pageView{at: len(p.lines), name: pane.view})
 		switch {
 		case pane.loading:
 			p.head(ui.StyleElement.Render("── "+pane.view+" ") +
@@ -458,6 +455,21 @@ func (m tuiModel) dataPage(tab dataTab) dataPage {
 		m.comparePane(&p, tab, pane.view, width)
 	}
 	return p
+}
+
+func (m tuiModel) viewAtScroll(tab dataTab) string {
+	page := m.dataPage(tab)
+	name := ""
+	for _, v := range page.views {
+		if v.at > tab.scroll {
+			break
+		}
+		name = v.name
+	}
+	if name == "" && len(tab.panes) > 0 {
+		name = tab.panes[0].view
+	}
+	return name
 }
 
 func (m tuiModel) tableLines(sec dataview.RenderedSection, width int) []string {
@@ -579,7 +591,7 @@ func (m tuiModel) viewData() string {
 		status = scrolled + status
 	}
 	hint := "alt+↑↓ next heading · ↑↓ scroll · / filter · r refresh · c CLI check · " +
-		exportKeyHint + " page · alt+←→/hl tab · alt+k close · ctrl+] elements"
+		exportKeyHint + " · " + editKeyHint + " · alt+←→/hl tab · alt+k close · ctrl+] elements"
 	if m.dataFilterOn {
 		hint = "type to narrow the page · ↑↓ scroll · enter apply · esc clear"
 	}
@@ -599,7 +611,8 @@ func newDataFilter() textinput.Model {
 func (m tuiModel) onDataFilterKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd, bool) {
 	switch key {
 	case "esc", "enter", "down", "up", "pgdown", "pgup", "home", "end",
-		"alt+down", "alt+up", "alt+left", "alt+right", "alt+k", "alt+w", "alt+e":
+		"alt+down", "alt+up", "alt+left", "alt+right", "alt+k", "alt+w",
+		exportKey, editKey:
 		return m, nil, false
 	case "backspace":
 		if m.dataFilter.Value() == "" {

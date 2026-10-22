@@ -139,6 +139,11 @@ views:
           - header: ADDRESS
             value: "{{ dash (first (unwrap .st).ipv4_addresses) }}"
             width: 18
+          # Static or dhcp, from the record rather than the status: it is how
+          # the address was asked for, not what the port came up with.
+          - header: CONFIG
+            value: "{{ with .item.ipv4_config }}{{ dash .type }}{{ else }}-{{ end }}"
+            width: 7
           - header: LINK
             value: "{{ with (unwrap .st).port }}{{ if .connected }}{{ .speed }}M{{ if .full_duplex }} full{{ end }}{{ else }}no carrier{{ end }}{{ end }}"
             width: 11

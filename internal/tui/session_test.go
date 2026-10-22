@@ -416,7 +416,7 @@ func TestFirstLoginAsksForCredentialsThenProceeds(t *testing.T) {
 		t.Fatalf("form has %d fields, want user and password", len(f.form))
 	}
 
-	f = typeString(t, f, "cisops")
+	f = typeString(t, f, "ops")
 	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	f = mm.(tuiModel)
 	f = typeString(t, f, "pw")
@@ -426,13 +426,13 @@ func TestFirstLoginAsksForCredentialsThenProceeds(t *testing.T) {
 	if done.phase != phaseSession {
 		t.Errorf("phase = %v, want the shell to open after saving credentials", done.phase)
 	}
-	if got, err := st.Secrets.Get(config.IONPassKey("1", "cisops")); err != nil || got != "pw" {
+	if got, err := st.Secrets.Get(config.IONPassKey("1", "ops")); err != nil || got != "pw" {
 		t.Errorf("password not stored: %q %v", got, err)
 	}
 
 	m2 := newTUIModel(context.Background(), st, cfg)
 	m2.tenant, m2.hasTenant = done.tenant, true
-	m2.ionUser = "cisops"
+	m2.ionUser = "ops"
 	if app.NeedsIONPassword(st, m2.tenant, m2.ionUser) {
 		t.Error("second login should not ask again")
 	}
@@ -461,7 +461,7 @@ func TestUserMenuSelectsRunAsUser(t *testing.T) {
 	st := config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json"))
 	cfg := &config.Config{Tenants: []config.Tenant{{
 		Name: "t", TSGID: "1",
-		Users: []config.IONUser{{Name: "readonly", Default: true}, {Name: "cisops"}},
+		Users: []config.IONUser{{Name: "readonly", Default: true}, {Name: "ops"}},
 	}}}
 
 	m := newTUIModel(context.Background(), st, cfg)
@@ -474,8 +474,8 @@ func TestUserMenuSelectsRunAsUser(t *testing.T) {
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	got := mm.(tuiModel)
 
-	if got.ionUser != "cisops" {
-		t.Errorf("ionUser = %q, want cisops", got.ionUser)
+	if got.ionUser != "ops" {
+		t.Errorf("ionUser = %q, want ops", got.ionUser)
 	}
 	if got.phase != phaseUsers {
 		t.Errorf("phase = %v, want to stay in the panel for repeated switches", got.phase)
@@ -512,18 +512,18 @@ func TestSessionCredentialsComeFromTheStore(t *testing.T) {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json"))
 	cfg := &config.Config{Tenants: []config.Tenant{{
-		Name: "t", TSGID: "1", Users: []config.IONUser{{Name: "cisops", Default: true}},
+		Name: "t", TSGID: "1", Users: []config.IONUser{{Name: "ops", Default: true}},
 	}}}
-	if err := st.Secrets.Set(config.IONPassKey("1", "cisops"), "s3cret"); err != nil {
+	if err := st.Secrets.Set(config.IONPassKey("1", "ops"), "s3cret"); err != nil {
 		t.Fatal(err)
 	}
 
 	m := newTUIModel(context.Background(), st, cfg)
 	m.tenant, m.hasTenant = cfg.Tenants[0], true
-	m.ionUser = "cisops"
+	m.ionUser = "ops"
 
 	creds := m.credsFor("1")
-	if creds.User != "cisops" || creds.Pass != "s3cret" {
+	if creds.User != "ops" || creds.Pass != "s3cret" {
 		t.Errorf("sessionCreds = %+v, want the stored pair", creds)
 	}
 }
@@ -1143,8 +1143,8 @@ func TestInsertedCommandEndsWithASpace(t *testing.T) {
 			if got != "dump device status " {
 				t.Errorf("sent %q, want exactly the command plus one space", got)
 			}
-			if sess := mm.(tuiModel).sessions.Active(); sess != nil && sess.Line() != "dump device status " {
-				t.Errorf("line buffer = %q, want it to match what was sent", sess.Line())
+			if sess := mm.(tuiModel).sessions.Active(); sess != nil && sess.Line() != "dump device status" {
+				t.Errorf("Line() = %q, want the command without the space it was sent with", sess.Line())
 			}
 			return
 		}

@@ -15,6 +15,13 @@ const (
 	clusterStatusVer = "v2.0"
 )
 
+// the two the element list is built from, which a kind: list file writes out
+// and overrides; everything else a file names reaches the generic readers
+const (
+	ElementsPath = "/sdwan/" + elementsVer + "/api/elements"
+	SitesPath    = "/sdwan/" + sitesVer + "/api/sites"
+)
+
 const scmBase = apiHost + "/sdwan/" + elementsVer + "/api"
 
 // its own version because v3.2/sites does not answer, which left site names raw

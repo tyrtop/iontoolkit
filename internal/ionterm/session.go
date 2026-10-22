@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 	"github.com/coder/websocket"
 )
@@ -330,10 +332,42 @@ func (s *Session) LineEmpty() bool {
 	return len(s.line) == 0
 }
 
+// the device echoes a recalled or completed command we never typed, so the
+// screen is the only place the real line is
 func (s *Session) Line() string {
+	if line := s.screenLine(); line != "" {
+		return line
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return string(s.line)
+	return strings.TrimSpace(string(s.line))
+}
+
+func (s *Session) screenLine() string {
+	s.emuMu.Lock()
+	defer s.emuMu.Unlock()
+
+	pos := s.emu.CursorPosition()
+	if pos.Y < 0 || pos.X <= 0 {
+		return ""
+	}
+	rows := strings.Split(strings.TrimRight(s.emu.Render(), "\n"), "\n")
+	if pos.Y >= len(rows) {
+		return ""
+	}
+	return strings.TrimSpace(afterPrompt(ansi.Strip(ansi.Truncate(rows[pos.Y], pos.X, "")), s.Name))
+}
+
+func afterPrompt(row, name string) string {
+	if name != "" {
+		if _, rest, ok := strings.Cut(row, name+"#"); ok {
+			return rest
+		}
+	}
+	if i := strings.LastIndexAny(row, "#>$"); i >= 0 {
+		return row[i+1:]
+	}
+	return row
 }
 
 func (s *Session) Insert(text string) {

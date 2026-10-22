@@ -1,0 +1,217 @@
+# A tutorial, a page at a time, run in the order they are written. This one is
+# the placeholders iontk ships; yours go in tutorials/ in the config directory,
+# one file per flow, and the first one you write takes this one's place in
+# Settings -> Tutorial. A flow is named by its name: line, or by its file name
+# if it has none.
+#
+# The pages below each name where they are drawn and what moves past them, so
+# one walk through shows you every kind of page and every place one can sit.
+# Copy this file into tutorials/, rewrite the text, reorder the blocks,
+# delete what you do not want. --tutorial takes a file or a folder and points
+# somewhere else again; a tutorial.yaml in the config root is still read, from
+# before there was a folder.
+#
+# A page is two things: the keys that work while it is up, and the key that
+# ends it.
+#
+#   keys:  the keys that reach the page. Everything else does nothing, so a
+#          wrong key cannot take someone off the step. "typing" stands for any
+#          single character, space included, so a filter or a command can be
+#          typed. Leave it out and nothing reaches the page, which is what a
+#          page with nothing to do wants.
+#   stop:  the key that ends the page, enter if you do not say. One that is
+#          also in keys: does its own job on the way past -- / opens the filter
+#          and moves on -- and one that is not is taken by the tutorial.
+#
+# Either of those may name an action instead of a key -- "filter" instead of
+# "/" -- and the page then waits for whatever that action is bound to now.
+# Write the keys nobody can rebind (enter, esc, the ones that go to an
+# appliance) as keys and the rest as actions. Page text can do it too:
+# `press {{ key "filter" }} to narrow the list` prints the key bound now, not
+# the one you had when you wrote the page.
+#
+# A page can also move the user itself, instead of asking them to navigate:
+#
+#   go:    where to be when the page opens. It happens first, then the page
+#          waits.
+#
+# The rest:
+#
+#   name:  the page, as an error or the log names it. At the top of the file,
+#          outside pages:, it is the tutorial's own name, which is the row
+#          Settings -> Tutorial lists it as.
+#   text:  what it says. The bar fits two lines; a box fits more.
+#   box:   yes draws a box over the page instead of a line in the bar. A box
+#          holds every key, so it has no keys: of its own -- its stop key moves
+#          on and esc leaves.
+#   show:  no leaves the page in the file and out of the run. It is neither
+#          drawn nor counted.
+#
+# go: takes one of these:
+#
+#   menu  elements  settings  theme-section  macros
+#
+# A page that could not work is refused when the file loads, and the status
+# line says which page and why: no text, a box with keys: of its own, a go:
+# nothing answers, two pages called the same thing.
+#
+# It all runs against a fake tenant -- Tutorial Co, six elements, nothing on
+# the other end of the wire -- so a page can teach any key, the ones that open
+# a shell included.
+
+name: Placeholder Tour
+
+pages:
+  - name: welcome
+    box: yes
+    text:
+      - placeholder - a box, drawn over whatever page you are on.
+      - A box says something; it does not ask you to do anything.
+      - ""
+      - enter to accept it
+
+  - name: the-menu
+    go: menu
+    text:
+      - placeholder - the bar, on the menu the tutorial just went to
+      - enter to accept
+
+  - name: open-the-list
+    text:
+      - placeholder - the bar, waiting for you to do the thing
+      - enter on Elements, which opens the list and moves the page on
+    keys: [enter]
+    stop: enter
+
+  - name: the-list
+    text:
+      - placeholder - the bar again, with nothing to do but read it
+      - enter to accept
+
+  - name: open-the-filter
+    text:
+      - placeholder - press / to open the filter
+    keys: [/]
+    stop: /
+
+  - name: type-a-name
+    text:
+      - placeholder - type part of an element name, then press enter
+    keys: [typing, backspace, enter]
+    stop: enter
+
+  - name: parked
+    show: no
+    text:
+      - "placeholder - show: no keeps this page in the file and out of the run"
+      - nothing accepts it, because it is never drawn
+
+  - name: tick-a-row
+    text:
+      - placeholder - space to tick a row
+    keys: [space, up, down]
+    stop: space
+
+  - name: switch-to-batch
+    text:
+      - placeholder - alt+m for the next mode, which is batch
+    keys: [alt+m]
+    stop: alt+m
+
+  - name: open-the-command-box
+    text:
+      - placeholder - enter opens the box a batch command goes in
+    keys: [enter]
+    stop: enter
+
+  - name: run-a-command
+    text:
+      - placeholder - type uptime, then enter to run it
+    keys: [typing, backspace, enter]
+    stop: enter
+
+  - name: switch-to-data
+    text:
+      - placeholder - esc back to the list, then alt+m for rich-data mode
+    keys: [esc, alt+m]
+    stop: alt+m
+
+  - name: open-a-data-tab
+    text:
+      - placeholder - enter on an element to read the portal on it
+    keys: [up, down, enter]
+    stop: enter
+
+  - name: switch-to-shell
+    text:
+      - placeholder - ctrl+] back to the list, then alt+m for shell mode
+    keys: ["ctrl+]", alt+m]
+    stop: alt+m
+
+  - name: open-a-shell
+    text:
+      - placeholder - enter on an element to open a shell on it
+    keys: [up, down, enter]
+    stop: enter
+
+  - name: open-the-favourites
+    text:
+      - placeholder - alt+f for the favourite slots
+    keys: [alt+f]
+    stop: alt+f
+
+  - name: find-settings
+    text:
+      - placeholder - esc, ctrl+] to the list, esc to the menu, then Settings
+    keys: [esc, "ctrl+]", up, down, enter]
+    stop: enter
+
+  - name: find-the-theme-section
+    text:
+      - placeholder - down to Theme
+    keys: [up, down]
+    stop: down
+
+  - name: find-the-macros
+    text:
+      - placeholder - esc to the menu, then Macros
+    keys: [esc, up, down, enter]
+    stop: enter
+
+  - name: back-to-the-menu
+    text:
+      - placeholder - esc back to the menu
+    keys: [esc]
+    stop: esc
+
+  - name: jump-to-the-list
+    go: elements
+    text:
+      - placeholder - from here on the tutorial does the walking
+      - the element list, without being asked for. enter to accept
+
+  - name: jump-to-settings
+    go: settings
+    text:
+      - placeholder - settings, opened by the tutorial
+      - enter to accept
+
+  - name: jump-to-the-theme-section
+    go: theme-section
+    text:
+      - placeholder - settings, on the Theme section
+      - enter to accept
+
+  - name: jump-to-the-macros
+    go: macros
+    text:
+      - placeholder - the macro page
+      - enter to accept
+
+  - name: done
+    box: yes
+    go: menu
+    text:
+      - placeholder - the closing box, back at the menu
+      - ""
+      - enter to finish

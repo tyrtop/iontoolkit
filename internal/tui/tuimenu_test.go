@@ -316,7 +316,7 @@ func TestRenderSettings(t *testing.T) {
 			LastTenant: "Acme Co",
 			Tenants: []config.Tenant{
 				{Name: "Acme Co", TSGID: "1234567890", Users: []config.IONUser{
-					{Name: "readonly", Default: true}, {Name: "cisops"},
+					{Name: "readonly", Default: true}, {Name: "ops"},
 				}},
 				{Name: "Lab", TSGID: "9876543210"},
 			},
@@ -654,5 +654,32 @@ func TestTheListHasARowUnderTheCursorOnceItLoads(t *testing.T) {
 	if _, ok := m.current(); !ok {
 		t.Errorf("no row under the cursor after the list loaded (cursor = %d), so enter does nothing until an arrow key is pressed",
 			m.table.Cursor())
+	}
+}
+
+func TestNoFormGhostsARealUsername(t *testing.T) {
+	m := pickModel(t)
+	tenant := m.tenant
+
+	tests := []struct {
+		name string
+		open func() (tea.Model, tea.Cmd)
+	}{
+		{"adding an ION user", func() (tea.Model, tea.Cmd) { return m.openUserFormFor(tenant) }},
+		{"asked for credentials", func() (tea.Model, tea.Cmd) { return m.openPasswordForm(tenant, "") }},
+		{"editing a user", func() (tea.Model, tea.Cmd) { return m.openEditUserForm("someone") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			next, _ := tt.open()
+			for _, f := range next.(tuiModel).form {
+				if f.label != "ion user" {
+					continue
+				}
+				if got := f.input.Placeholder; got != "" {
+					t.Errorf("the ion user field ghosts %q; a username is somebody's, so there is no example to give", got)
+				}
+			}
+		})
 	}
 }

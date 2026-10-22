@@ -126,18 +126,29 @@ func decodeElementStatus(body []byte) (ElementStatus, error) {
 }
 
 type Interface struct {
-	ID                  string   `json:"id"`
-	Name                string   `json:"name"`
-	Description         string   `json:"description"`
-	Type                string   `json:"type"`
-	UsedFor             string   `json:"used_for"`
-	AdminUp             bool     `json:"admin_up"`
-	MTU                 int      `json:"mtu"`
-	MACAddress          string   `json:"mac_address"`
-	Parent              string   `json:"parent"`
-	Scope               string   `json:"scope"`
-	Tags                []string `json:"tags"`
-	SiteWANInterfaceIDs []string `json:"site_wan_interface_ids"`
+	ID                  string      `json:"id"`
+	Name                string      `json:"name"`
+	Description         string      `json:"description"`
+	Type                string      `json:"type"`
+	UsedFor             string      `json:"used_for"`
+	AdminUp             bool        `json:"admin_up"`
+	MTU                 int         `json:"mtu"`
+	MACAddress          string      `json:"mac_address"`
+	Parent              string      `json:"parent"`
+	Scope               string      `json:"scope"`
+	Tags                []string    `json:"tags"`
+	SiteWANInterfaceIDs []string    `json:"site_wan_interface_ids"`
+	IPv4Config          *IPv4Config `json:"ipv4_config"`
+}
+
+// null on a port with no IPv4, and on the parent of a set of subinterfaces.
+type IPv4Config struct {
+	Type         string            `json:"type"`
+	StaticConfig *IPv4StaticConfig `json:"static_config"`
+}
+
+type IPv4StaticConfig struct {
+	Address string `json:"address"`
 }
 
 func (s *Client) ListInterfaces(ctx context.Context, siteID, eid string) ([]Interface, error) {
@@ -288,18 +299,44 @@ func (s *Client) SpokeClusterStatus(ctx context.Context, siteID, cid string) (Sp
 }
 
 func (s *Client) GetJSON(ctx context.Context, path string) ([]byte, error) {
+	if err := checkRead(path); err != nil {
+		return nil, err
+	}
+	return s.get(ctx, strings.TrimPrefix(path, "/"), apiHost+path)
+}
+
+func (s *Client) QueryJSON(ctx context.Context, path, field string, ids []string, limit, page int) ([]byte, error) {
+	if err := checkRead(path); err != nil {
+		return nil, err
+	}
+	if field == "" || len(ids) == 0 {
+		return nil, fmt.Errorf("query %s: nothing to ask about", path)
+	}
+	filter := fmt.Sprintf(`{%q:{"in":[%s]}}`, field, quoted(ids))
+	return s.post(ctx, strings.TrimPrefix(path, "/"), apiHost+path, queryBody(filter, limit, page))
+}
+
+func quoted(ids []string) string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, `"`+id+`"`)
+	}
+	return strings.Join(out, ",")
+}
+
+func checkRead(path string) error {
 	if !strings.HasPrefix(path, "/sdwan/") {
-		return nil, fmt.Errorf("path %q is not a /sdwan read", path)
+		return fmt.Errorf("path %q is not a /sdwan read", path)
 	}
 	if strings.Contains(path, "://") || strings.HasPrefix(path, "//") {
-		return nil, fmt.Errorf("path %q names a host of its own", path)
+		return fmt.Errorf("path %q names a host of its own", path)
 	}
 	for _, seg := range strings.Split(path, "/") {
 		if seg == ".." {
-			return nil, fmt.Errorf("path %q walks up out of /sdwan", path)
+			return fmt.Errorf("path %q walks up out of /sdwan", path)
 		}
 	}
-	return s.get(ctx, strings.TrimPrefix(path, "/"), apiHost+path)
+	return nil
 }
 
 func (s *Client) get(ctx context.Context, what, url string) ([]byte, error) {
@@ -405,11 +442,7 @@ func queryBody(filter string, limit, page int) []byte {
 }
 
 func elementFilter(ids []string) string {
-	quoted := make([]string, 0, len(ids))
-	for _, id := range ids {
-		quoted = append(quoted, `"`+id+`"`)
-	}
-	return `{"element_id":{"in":[` + strings.Join(quoted, ",") + `]}}`
+	return `{"element_id":{"in":[` + quoted(ids) + `]}}`
 }
 
 const ClusterQueryLimit = 200

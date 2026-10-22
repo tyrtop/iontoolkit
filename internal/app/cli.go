@@ -12,6 +12,7 @@ import (
 	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/logging"
+	"tyrtop.com/iontk/internal/tutorial"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -195,4 +196,16 @@ func StartLogging(st *config.Store, stderr io.Writer) error {
 		return fmt.Errorf("logging: %w", err)
 	}
 	return lvlErr
+}
+
+var TutorialFile string
+
+func TutorialsPath(st *config.Store) string {
+	if TutorialFile != "" {
+		return TutorialFile
+	}
+	if st == nil {
+		return ""
+	}
+	return filepath.Join(st.Root, tutorial.DirName)
 }

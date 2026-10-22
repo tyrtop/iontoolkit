@@ -2,6 +2,7 @@ package fixture
 
 import (
 	"crypto/sha256"
+	_ "embed"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -61,17 +62,26 @@ func Load(path string) (*Set, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read fixtures: %w", err)
 	}
+	return Parse(b, path)
+}
+
+func Parse(b []byte, name string) (*Set, error) {
 	var s Set
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&s); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, fmt.Errorf("parse %s: %w", name, err)
 	}
 	if err := s.normalize(); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return &s, nil
 }
+
+//go:embed tutorial.yaml
+var tutorialYAML []byte
+
+func Tutorial() (*Set, error) { return Parse(tutorialYAML, "tutorial.yaml") }
 
 func (s *Set) normalize() error {
 	if len(s.Tenants) == 0 {

@@ -28,6 +28,9 @@ var (
 	flagNoValidate   bool
 	flagNoLogin      bool
 	flagViews        string
+	flagColumns      string
+	flagKeybinds     string
+	flagActions      string
 	flagThemes       string
 )
 
@@ -115,6 +118,9 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
 			tui.Version = buildVersion()
 			tui.Tenant = flagTenant
 			tui.Views = flagViews
+			tui.Columns = flagColumns
+			tui.Keybinds = flagKeybinds
+			tui.Scripts = flagActions
 			return tui.Run(cmd.Context())
 		}
 	},
@@ -149,7 +155,11 @@ func init() {
 	pf.StringVar(&flagTenant, "tenant", "", "saved tenant to run as, by name (overrides the environment)")
 	pf.BoolVar(&app.Debug, "debug", false, "run against a throwaway config with no saved tenants and secrets held only in memory")
 	pf.StringVar(&flagFixtures, "fixtures", "", "YAML file of fake tenants, elements and CLI responses to run against instead of real hardware")
-	pf.StringVar(&flagViews, "views", "", "YAML file of rich-data views to use instead of views.yaml in the config directory")
+	pf.StringVar(&flagViews, "views", "", "folder of screen files (or a single file of rich-data views) to use instead of views/ in the config directory")
+	pf.StringVar(&flagColumns, "columns", "", "YAML file naming the element list's columns and their order, instead of views/elements.yaml in the config directory")
+	pf.StringVar(&flagKeybinds, "keybinds", "", "YAML file of key bindings and actions, instead of keybinds.yaml in the config directory")
+	pf.StringVar(&flagActions, "actions", "", "folder of Lua actions, instead of actions/ in the config directory")
+	pf.StringVar(&app.TutorialFile, "tutorial", "", "tutorial YAML file, or a folder of them, to use instead of tutorials/ in the config directory")
 	pf.StringVar(&flagThemes, "themes", "", "YAML file of color schemes to add to the built-in ones, instead of themes.yaml in the config directory")
 	pf.StringVar(&app.LogFile, "log", "", "write this run's log here instead of a stamped file under logs/ in the config directory")
 	pf.StringVar(&app.LogLevel, "log-level", "", "how much to log: "+strings.Join(logging.LevelNames(), ", ")+" (default info, or ION_LOG_LEVEL)")

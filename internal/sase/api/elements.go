@@ -10,11 +10,21 @@ import (
 )
 
 func (s *Client) ListElements(ctx context.Context) ([]Element, error) {
+	return s.ListElementsFrom(ctx, ElementsPath)
+}
+
+func (s *Client) ListElementsFrom(ctx context.Context, path string) ([]Element, error) {
+	if path == "" {
+		path = ElementsPath
+	}
+	if err := checkRead(path); err != nil {
+		return nil, fmt.Errorf("elements: %w", err)
+	}
 	if err := s.limiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("elements: rate limit wait: %w", err)
 	}
 
-	url := scmBase + "/elements"
+	url := apiHost + path
 
 	if s.verbose {
 		fmt.Fprintln(os.Stderr, "GET", url)

@@ -20,7 +20,7 @@ func settingsModel(t *testing.T) tuiModel {
 		LastTenant: "Acme Co",
 		Tenants: []config.Tenant{
 			{Name: "Acme Co", TSGID: "1", Users: []config.IONUser{
-				{Name: "readonly", Default: true}, {Name: "cisops"},
+				{Name: "readonly", Default: true}, {Name: "ops"},
 			}},
 			{Name: "Lab", TSGID: "2"},
 		},
@@ -187,7 +187,7 @@ func TestEditPasswordFromElementsReturnsToElements(t *testing.T) {
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'p', Text: "p"}))
 	f := mm.(tuiModel)
-	if f.formKind != formEditPass || f.formUserName != "cisops" {
+	if f.formKind != formEditPass || f.formUserName != "ops" {
 		t.Fatalf("form = %d/%q", f.formKind, f.formUserName)
 	}
 	if f.formReturn != phasePicking {
@@ -201,7 +201,7 @@ func TestEditPasswordFromElementsReturnsToElements(t *testing.T) {
 	if done.phase != phasePicking {
 		t.Errorf("phase = %v, want to drop back into elements", done.phase)
 	}
-	if got, _ := done.store.Secrets.Get(config.IONPassKey("1", "cisops")); got != "pw2" {
+	if got, _ := done.store.Secrets.Get(config.IONPassKey("1", "ops")); got != "pw2" {
 		t.Errorf("password = %q, want pw2", got)
 	}
 }
@@ -339,7 +339,7 @@ func TestDefaultUserSwitchesRepeatedlyInSettings(t *testing.T) {
 		cursor int
 		want   string
 	}{
-		{2, "cisops"}, {1, "readonly"}, {2, "cisops"},
+		{2, "ops"}, {1, "readonly"}, {2, "ops"},
 	} {
 		m.setCursor = step.cursor
 		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
@@ -370,7 +370,7 @@ func TestDefaultUserSwitchesRepeatedlyInUserPanel(t *testing.T) {
 		cursor int
 		want   string
 	}{
-		{1, "cisops"}, {0, "readonly"}, {1, "cisops"},
+		{1, "ops"}, {0, "readonly"}, {1, "ops"},
 	} {
 		m.userCursor = step.cursor
 		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
@@ -398,8 +398,8 @@ func TestDefaultUserSwitchViaNavigationKeys(t *testing.T) {
 	t.Logf("after down: setCursor=%d focus=%d rows=%d", m.setCursor, m.setFocus, m.sectionRows())
 	m = press(m, tea.Key{Code: 'd', Text: "d"})
 	t.Logf("after d: default=%q active=%q", m.tenant.DefaultUser(), m.ionUser)
-	if got := m.tenant.DefaultUser(); got != "cisops" {
-		t.Errorf("default = %q, want cisops", got)
+	if got := m.tenant.DefaultUser(); got != "ops" {
+		t.Errorf("default = %q, want ops", got)
 	}
 
 	m = press(m, tea.Key{Code: tea.KeyUp})
@@ -418,7 +418,7 @@ func TestUserPanelStaysOpenForRepeatedSwitches(t *testing.T) {
 	for _, step := range []struct {
 		cursor int
 		want   string
-	}{{1, "cisops"}, {0, "readonly"}, {1, "cisops"}} {
+	}{{1, "ops"}, {0, "readonly"}, {1, "ops"}} {
 		m.userCursor = step.cursor
 		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 		m = mm.(tuiModel)

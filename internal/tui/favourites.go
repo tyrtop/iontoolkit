@@ -71,7 +71,7 @@ func (m tuiModel) onFavouriteKey(key string) (tea.Model, tea.Cmd) {
 		return m.clearFavourite(m.favCursor)
 	case "a":
 		return m.openFavouriteForm(m.favCursor)
-	case "alt+e":
+	case exportKey:
 		f, ok := m.cmds.Favourite(m.favCursor)
 		if !ok {
 			m.status = fmt.Sprintf("alt+%d is empty", m.favCursor)
@@ -151,9 +151,16 @@ func (m tuiModel) submitFavourite() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) overlayFavourites(content string) string {
-	lines := []string{
-		ui.StyleCmd.Render("favourites") + ui.StyleDim.Render("   alt+1-9 inserts one"),
+	line := ""
+	if s := m.sessions.Active(); s != nil {
+		line = strings.TrimSpace(s.Line())
 	}
+
+	heading := ui.StyleCmd.Render("favourites") + ui.StyleDim.Render("   press 1-9 to add favourite")
+	if line == "" {
+		heading = ui.StyleCmd.Render("favourites") + ui.StyleWarn.Render("   nothing on the line to add")
+	}
+	lines := []string{heading}
 	for slot := 1; slot <= config.FavouriteSlots; slot++ {
 		cursor := "  "
 		if slot == m.favCursor {
@@ -177,8 +184,13 @@ func (m tuiModel) overlayFavourites(content string) string {
 		}
 		lines = append(lines, row+cmd+"  "+tag)
 	}
+	foot := "1-9 add this line · a by hand · " + exportKeyHint + " · ctrl+d clear · esc close"
+	if line != "" {
+		lines = append(lines, "", ui.StyleDim.Render("adding: ")+ui.Truncate(line, 42))
+	}
 	lines = append(lines, "",
-		ui.StyleDim.Render("1-9/enter saves this line · a by hand · "+exportKeyHint+" · ctrl+d clears · esc close"))
+		ui.StyleDim.Render(foot),
+		ui.StyleDim.Render("alt+1-9 puts one on the line"))
 
 	modal := ui.Modal(lines, m.width)
 	keep := max(0, m.height-ui.ModalHeight(len(lines))-1)

@@ -1,0 +1,19 @@
+# Key bindings. A key here wins over what iontk binds it to, and `none` hands
+# the key back. keys: holds the ones that work everywhere, screens: the ones
+# for menu or elements alone. An action of your own is a sequence of do, goto,
+# set and status; Settings -> Keys lists what is bound and what iontk ships.
+
+keys:
+  alt+E: edit-yaml
+
+screens:
+  elements:
+    f: filter
+    "/": none
+    alt+d: offline-only
+
+actions:
+  offline-only:
+    - set:
+        filter: offline
+    - status: offline elements only

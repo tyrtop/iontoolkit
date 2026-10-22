@@ -684,8 +684,8 @@ func TestHintOffersUndoAfterAClear(t *testing.T) {
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
 	got := mm.(tuiModel)
 	out := plain(got.viewPicking())
-	if !strings.Contains(out, "alt+z undo clear") {
-		t.Errorf("the hint does not offer the undo:\n%s", out)
+	if !strings.Contains(out, "alt+z/ctrl+z undo clear") {
+		t.Errorf("the hint does not offer the undo, by every key that does it:\n%s", out)
 	}
 }
 
@@ -992,8 +992,15 @@ func TestColumnsAreSizedToTheirContent(t *testing.T) {
 	values := [][]string{
 		{"store-0003-rtr-01", "Store 0003", "ION1200ABCDEF123456", "connected"},
 	}
+	widths := make([][]int, len(values))
+	for i, row := range values {
+		widths[i] = make([]int, len(row))
+		for j, v := range row {
+			widths[i][j] = ui.Width(v)
+		}
+	}
 
-	wide := fitColumns(cols, values, 200)
+	wide := fitColumns(cols, widths, 200)
 	if wide[1] != len("Store 0003") {
 		t.Errorf("site = %d, want the width of its widest name (%d)", wide[1], len("Store 0003"))
 	}
@@ -1001,7 +1008,7 @@ func TestColumnsAreSizedToTheirContent(t *testing.T) {
 		t.Errorf("sn = %d, want the whole serial (%d)", wide[2], len("ION1200ABCDEF123456"))
 	}
 
-	narrow := fitColumns(cols, values, 60)
+	narrow := fitColumns(cols, widths, 60)
 	total := 0
 	for _, w := range narrow {
 		total += w + colGap
@@ -1045,8 +1052,8 @@ func TestATickedRowCarriesABarAgainstItsName(t *testing.T) {
 	}
 
 	nameCell := func(row int) string {
-		for i, c := range m.listKeep {
-			if c == colName {
+		for i, c := range m.listCols {
+			if c.name == colName {
 				return m.table.Rows()[row][i]
 			}
 		}

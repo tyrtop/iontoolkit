@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -38,7 +37,7 @@ var generalRowLabels = map[int]string{
 	zoneRow: "Times", refreshRow: "Elements",
 }
 
-var setSections = []string{"General", "Theme", "Batch", "Tenants", "Users", "Session", "Debug", "Reset"}
+var setSections = []string{"General", "Theme", "Batch", "Tenants", "Users", "Session", "Tutorial", "Keys", "Debug", "Reset"}
 
 const (
 	secGeneral = iota
@@ -47,9 +46,20 @@ const (
 	secTenants
 	secUsers
 	secSession
+	secTutorial
+	secKeys
 	secDebug
 	secReset
 )
+
+// the Tutorial section is built from whatever is in tutorials/ at the moment
+// it is opened, so a file dropped in shows up without a relaunch
+func (m tuiModel) enteredSection() tuiModel {
+	if m.setSection == secTutorial {
+		return m.readFlows()
+	}
+	return m
+}
 
 func (m tuiModel) sectionRows() int {
 	switch m.setSection {
@@ -71,6 +81,10 @@ func (m tuiModel) sectionRows() int {
 		return len(m.tenant.Users) + 1
 	case secSession:
 		return 2
+	case secTutorial:
+		return len(m.flows)
+	case secKeys:
+		return 0
 	case secDebug:
 		return 0
 	case secReset:
@@ -124,6 +138,7 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 		if m.setFocus == focusNav {
 			m.setSection = max(0, m.setSection-1)
 			m.setCursor = 0
+			return m.enteredSection(), nil
 		} else {
 			m.setCursor = max(0, m.setCursor-1)
 		}
@@ -133,6 +148,7 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 		if m.setFocus == focusNav {
 			m.setSection = min(len(setSections)-1, m.setSection+1)
 			m.setCursor = 0
+			return m.enteredSection(), nil
 		} else {
 			m.setCursor = min(max(0, m.sectionRows()-1), m.setCursor+1)
 		}
@@ -156,6 +172,11 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 		return m.onUsersSectionKey(key)
 	case secSession:
 		return m.onSessionGeoKey(key)
+	case secTutorial:
+		if key == "enter" {
+			return m.startFlow(m.setCursor)
+		}
+		return m, nil
 	case secReset:
 		return m.onResetKey(key, armed)
 	}
@@ -218,6 +239,9 @@ func (m tuiModel) factoryReset() (tea.Model, tea.Cmd) {
 	m.menuCursor = 0
 	m.phase = phaseMenu
 	m.status = "reset — nothing is saved any more"
+
+	m.tut = tutorialRun{}
+	m = m.fitTutorial().raiseTutorialAsk()
 	return m, nil
 }
 
@@ -289,6 +313,7 @@ func (m tuiModel) onTenantsKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.all, m.matches, m.selected = nil, nil, map[string]bool{}
+		m.forgetRows()
 		m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
 		m.status = "switched to " + t.Name
 	case "u":
@@ -433,7 +458,7 @@ func (m tuiModel) sectionContent() []string {
 				ui.StyleDim.Render("  how far alt+↑/↓ moves in the element list"),
 			ui.Label("Times")+m.zoneLine(),
 			ui.Label("Elements")+m.cacheLine(),
-			ui.Label("Views")+m.viewsLine(),
+			ui.Label("Screens")+m.screensLine(),
 			"",
 			ui.Label("Secrets")+m.secretsLine(),
 		)
@@ -514,6 +539,26 @@ func (m tuiModel) sectionContent() []string {
 			)
 		}
 
+	case secTutorial:
+		for _, f := range m.flows {
+			pages := fmt.Sprintf("   %d pages", len(f.steps))
+			if len(f.steps) == 1 {
+				pages = "   1 page"
+			}
+			out = append(out, ui.StyleCmd.Render(f.name)+ui.StyleDim.Render(pages))
+		}
+		if len(m.flows) == 0 {
+			out = append(out, ui.StyleDim.Render("no tutorials"))
+		}
+		if m.flowsErr != "" {
+			out = append(out, "", ui.StyleWarn.Render(ui.Truncate(m.flowsErr, max(20, m.width-4))))
+		}
+		out = append(out, "", ui.Label("Folder")+
+			ui.StyleDim.Render(ui.Truncate(app.TutorialsPath(m.store), max(20, m.width-ui.LabelWidth-20))))
+
+	case secKeys:
+		out = append(out, m.keysContent()...)
+
 	case secDebug:
 		out = append(out,
 			ui.Label("Config")+ui.StyleDim.Render(m.store.Root),
@@ -574,6 +619,10 @@ func (m tuiModel) sectionHint() string {
 		return "↑↓ section · enter/→ open · esc back"
 	}
 	switch m.setSection {
+	case secTutorial:
+		return "enter start · " + editKeyHint + " · tab back · esc back"
+	case secKeys:
+		return "read only · " + editKeyHint + " · esc back"
 	case secGeneral:
 		return "↑↓ row · enter change/refresh/type · space cycle · tab back · esc back"
 	case secTheme:
@@ -752,20 +801,20 @@ func (m tuiModel) cyclePageStep() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m tuiModel) viewsLine() string {
-	n := len(m.viewNames())
-	line := ui.StyleElement.Render(fmt.Sprintf("%d", n)) + ui.StyleDim.Render(" for rich-data mode")
-	if m.viewsErr != "" {
-		return line + "  " + ui.StyleErr.Render(ui.Truncate(m.viewsErr, 46))
+func (m tuiModel) screensLine() string {
+	n := fmt.Sprintf("%d views · %d columns", len(m.viewNames()), len(m.columns()))
+	line := ui.StyleElement.Render(n)
+	if err := m.runtimeErr(); err != nil {
+		return line + "  " + ui.StyleErr.Render(ui.Truncate(err.Error(), 46))
 	}
-	path := ViewsPath(m.store)
-	if path == "" {
+	dir := ViewsDir(m.store)
+	if dir == "" {
 		return line
 	}
-	if _, err := os.Stat(path); err != nil {
-		return line + ui.StyleDim.Render("  add "+shortenPath(path, 40))
+	if len(m.viewFiles) == 0 {
+		return line + ui.StyleDim.Render("  add "+shortenPath(dir, 40))
 	}
-	return line + ui.StyleDim.Render("  from "+shortenPath(path, 40))
+	return line + ui.StyleDim.Render(fmt.Sprintf("  %d files from %s", len(m.viewFiles), shortenPath(dir, 34)))
 }
 
 func (m tuiModel) defaultMode() pickMode {

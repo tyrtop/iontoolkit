@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/column"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/logging"
@@ -96,7 +97,7 @@ type tenantElementsMsg struct {
 	err      error
 }
 
-func loadTenant(ctx context.Context, f app.Flags, t config.Tenant, pool *clientPool, st *config.Store) tea.Cmd {
+func loadTenant(ctx context.Context, f app.Flags, t config.Tenant, pool *clientPool, st *config.Store, paths map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		fail := func(err error) tea.Msg {
 			return tenantElementsMsg{tsg: t.TSGID, tenant: t.Name, err: err}
@@ -112,14 +113,14 @@ func loadTenant(ctx context.Context, f app.Flags, t config.Tenant, pool *clientP
 			c = built
 		}
 
-		els, err := c.ListElements(ctx)
+		els, err := c.ListElementsFrom(ctx, paths[column.ElementsSrc])
 		if err != nil {
 			logging.L().Warn("element list failed", "tsg", t.TSGID, "tenant", t.Name, "err", err)
 			return fail(err)
 		}
 
 		sites := map[string]string{}
-		ss, siteErr := c.ListSites(ctx)
+		ss, siteErr := c.ListSitesFrom(ctx, paths[column.SitesSrc])
 		logging.L().Info("elements loaded", "tsg", t.TSGID, "tenant", t.Name,
 			"elements", len(els), "sites", len(ss), "site_err", siteErr)
 		for _, s := range ss {
@@ -173,6 +174,7 @@ func (m *tuiModel) loadFromCache() {
 			}
 			m.sites[k] = v
 		}
+		m.loadCachedCells(t.TSGID, c.Cells)
 		for eid, w := range c.HA {
 			if m.haCached == nil {
 				m.haCached = map[string]string{}
@@ -215,7 +217,7 @@ func (m tuiModel) refreshActive() (tea.Model, tea.Cmd) {
 			continue
 		}
 		pending++
-		cmds = append(cmds, loadTenant(m.ctx, f, t, m.pool, m.store))
+		cmds = append(cmds, loadTenant(m.ctx, f, t, m.pool, m.store, m.listPaths))
 	}
 
 	if pending == 0 {
@@ -397,6 +399,18 @@ func (m tuiModel) elementsNote() string {
 }
 
 func (m tuiModel) haNote() string {
+	note := m.haLine()
+	cells := m.cellsNote()
+	switch {
+	case note == "":
+		return cells
+	case cells == "":
+		return note
+	}
+	return note + ui.StyleDim.Render(" · ") + cells
+}
+
+func (m tuiModel) haLine() string {
 	if m.haWorking() {
 		note := m.spinner.View() + " " + ui.StyleWarn.Render("refreshing HA")
 		if m.haTotal > 0 {

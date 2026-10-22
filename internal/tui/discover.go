@@ -148,6 +148,7 @@ func (m tuiModel) useTenant(c tenantChoice) (tuiModel, error) {
 	m.tenant, m.hasTenant = t, true
 	m.ionUser = t.DefaultUser()
 	m.all, m.matches, m.selected = nil, nil, map[string]bool{}
+	m.forgetRows()
 	m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
 	m.client = nil
 	m.pool.drop(c.tsg)
@@ -290,6 +291,7 @@ func (m tuiModel) saveTenantPick() (tea.Model, tea.Cmd) {
 	}
 
 	m.all, m.matches, m.selected = nil, nil, map[string]bool{}
+	m.forgetRows()
 	m.discovered, m.picked = nil, nil
 	m.menuCursor = 0
 	m.status = ""

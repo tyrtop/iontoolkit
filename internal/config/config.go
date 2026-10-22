@@ -76,6 +76,7 @@ type Config struct {
 	Theme        string   `json:"theme,omitempty"`
 	HiddenThemes []string `json:"hidden_themes,omitempty"`
 	Zone         string   `json:"zone,omitempty"`
+	TutorialSeen bool     `json:"tutorial_seen,omitempty"`
 	BatchFormat  string   `json:"batch_format,omitempty"`
 	BatchOrient  string   `json:"batch_orient,omitempty"`
 	BatchToFile  bool     `json:"batch_to_file,omitempty"`

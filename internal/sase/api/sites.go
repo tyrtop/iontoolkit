@@ -15,11 +15,21 @@ type Site struct {
 }
 
 func (s *Client) ListSites(ctx context.Context) ([]Site, error) {
+	return s.ListSitesFrom(ctx, SitesPath)
+}
+
+func (s *Client) ListSitesFrom(ctx context.Context, path string) ([]Site, error) {
+	if path == "" {
+		path = SitesPath
+	}
+	if err := checkRead(path); err != nil {
+		return nil, fmt.Errorf("sites: %w", err)
+	}
 	if err := s.limiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("sites: rate limit wait: %w", err)
 	}
 
-	url := sitesBase + "/sites"
+	url := apiHost + path
 
 	if s.verbose {
 		fmt.Fprintln(os.Stderr, "GET", url)

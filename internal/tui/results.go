@@ -259,7 +259,7 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		}
 		return m, nil
 
-	case "alt+e":
+	case exportKey:
 		return m.exportResults()
 
 	case "f", "o", "s":

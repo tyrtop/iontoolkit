@@ -38,6 +38,9 @@ func (m tuiModel) menuEntries() []menuEntry {
 	if m.cfg == nil {
 		return []menuEntry{{"Quit", actQuit}}
 	}
+	if m.menuSpec != nil {
+		return m.menuSpec
+	}
 
 	e = append(e, menuEntry{"Elements", actElements})
 
@@ -99,24 +102,11 @@ func (m tuiModel) cacheAgeNow() time.Duration {
 func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 	entries := m.menuEntries()
 
+	if next, cmd, ran := m.bindingOn(scrMenu, key); ran {
+		return next, cmd
+	}
+
 	switch key {
-	case "q":
-		return m, tea.Quit
-	case "alt+w":
-		m.sessions.CloseAll()
-		return m, tea.Quit
-	case "alt+t":
-		return m.reopenFromMenu()
-	case "alt+m", "alt+a":
-		m.authMode = m.authMode.next()
-		m.cfg.AuthMode = m.authMode.String()
-		if err := m.store.SaveConfig(m.cfg); err != nil {
-			m.status = err.Error()
-			return m, nil
-		}
-		m.switchCursor = 0
-		m.status = ""
-		return m, nil
 	case "up", "k":
 		m.menuCursor = max(0, m.menuCursor-1)
 		return m, nil
@@ -157,7 +147,7 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 		case actSettings:
 			m.setCursor = 0
 			m.phase = phaseSettings
-			return m, m.spinner.Tick
+			return m.enteredSection(), m.spinner.Tick
 		case actQuit:
 			return m, tea.Quit
 		}
@@ -166,7 +156,7 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) startContinue() (tea.Model, tea.Cmd) {
-	m.status = ""
+	m.status = m.columnsErr
 	m.cacheState = cacheUpdating
 
 	m.loadFromCache()
@@ -285,7 +275,7 @@ func (m tuiModel) openUserFormFor(t config.Tenant) (tea.Model, tea.Cmd) {
 	m.formTenantName = t.Name
 	m.formTenantTSG = t.TSGID
 	return m.openForm(formUser, "Add ION user to "+t.Name, phaseAddUser, []formField{
-		newField("ion user", "cisops", false),
+		newField("ion user", "", false),
 		newField("ion password", "", true),
 	})
 }
@@ -308,7 +298,7 @@ func (m tuiModel) openPasswordForm(t config.Tenant, user string) (tea.Model, tea
 	m.formTenantTSG = t.TSGID
 	if user == "" {
 		return m.openForm(formPassword, "ION credentials for "+t.Name, phasePassword, []formField{
-			newField("ion user", "cisops", false),
+			newField("ion user", "", false),
 			newField("ion password", "", true),
 		})
 	}
@@ -418,6 +408,7 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 		m.tenant, m.hasTenant = t, true
 		m.ionUser = ""
 		m.all, m.matches, m.selected = nil, nil, map[string]bool{}
+		m.forgetRows()
 		m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
 		m.form, m.formKind = nil, formNone
 		m.menuCursor = 0
@@ -679,9 +670,12 @@ func (m tuiModel) viewMenu() string {
 	}
 
 	b.WriteString("\n")
-	hint := "↑↓ move · enter select · alt+m/alt+a service account or browser · q/alt+w quit"
+	hint := "↑↓ move · enter select · " + m.legend(scrMenu, "service account or browser", "auth-mode") +
+		" · " + m.legend(scrMenu, "quit", "quit", "quit-closing-sessions")
 	if m.sessions.DetachedCount() > 0 || m.sessions.Count() > 0 {
-		hint = "↑↓ move · enter select · alt+m/alt+a service account or browser · alt+t reattach · q/alt+w quit"
+		hint = "↑↓ move · enter select · " + m.legend(scrMenu, "service account or browser", "auth-mode") +
+			" · " + m.legend(scrMenu, "reattach", "reopen-tab") +
+			" · " + m.legend(scrMenu, "quit", "quit", "quit-closing-sessions")
 	}
 	b.WriteString(ui.Footer(m.status, hint))
 	return b.String()

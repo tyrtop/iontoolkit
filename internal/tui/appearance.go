@@ -154,7 +154,7 @@ func (m tuiModel) themePreview(t ui.Theme) []string {
 		" "+s.Cmd.Render("dump device status")+
 			s.Dim.Render("   3 elements · 1 selected"),
 		" "+s.Warn.Render("ion offline")+
-			s.Dim.Render(" · alt+e export · ")+s.Hot.Render("session closing"),
+			s.Dim.Render(" · "+exportKeyHint+" · ")+s.Hot.Render("session closing"),
 		" "+s.Spinner.Render(m.previewFrame(t))+s.Dim.Render(" reading interfaces")+
 			s.Dim.Render("   spinner: ")+s.Element.Render(spinnerLabel(t))+
 			" "+s.Spinner.Render(m.previewFrame(t)),

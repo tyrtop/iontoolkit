@@ -65,11 +65,19 @@ var flagGroups = []struct {
 	{"Testing", "Running without touching saved state. `--debug` redirects the config root and keeps secrets in memory; `--fixtures` does the same and seeds fake tenants, elements and CLI sessions from a YAML file.", []string{
 		"debug", "fixtures",
 	}},
-	{"Rich data", "The TUI's third element mode reads the portal instead of opening a session. Its panes are defined in YAML: `--views` points at a file instead of `views.yaml` in the config directory, which is also how a `--fixtures` run gets views of its own.", []string{
+	{"Screens", "The screens iontk draws from a file live in `views/` in the config directory, one file per screen, each saying what it is with a `kind:` line -- `list` for the element list's columns, `data` for a rich-data page, `menu` for the main menu. `--views` points at a folder of them, or at a single file of rich-data views, which is also how a `--fixtures` run gets screens of its own. The older single files are still read and the folder wins over them; `--columns` points at one that names the element list's columns. Inside iontk, `alt+e` opens the file the page you are on is drawn from.", []string{
 		"views",
+		"columns",
 	}},
-	{"Logging", "Every run writes a JSON log to `logs/` in the config directory, keeping the last ten. Secrets never reach it: tokens and passwords are logged as a fingerprint — the last four characters and a length. With an explicit level, a headless run gets the same records on stderr as text.", []string{
+	{"Keys", "A key names an action, and the action says what to do. The ones iontk ships are bound already; `keybinds.yaml` in the config directory rebinds any of them, `none` takes a key back, and a screen's own file binds a key for that screen alone. You can write an action in the same file as a sequence of verbs: `do` runs another action, `goto` goes to a place, `set` changes a setting, `status` writes a line. Bindings, menu rows and tutorial pages all name actions, so any of them can run yours. `--keybinds` points somewhere else.\n\nFor an action that has to branch on what a read returned, or loop until something comes back, write Lua instead -- one file per action in `actions/` in the config directory, and `--actions` points elsewhere. A script gets one table and nothing else: no io, no os, no require, no sockets. It asks for work through the same verbs (`ctx.get`, `ctx.status`, `ctx.set`, `ctx.goto`, `ctx.export`, `ctx.budget`), so the rate limit, the retries, the logging and the redaction stay iontk's. A binding does not care which kind of action it names.", []string{
+		"keybinds",
+		"actions",
+	}},
+	{"Logging", "Every run writes a JSON log under `logs/` in the config directory, and the last ten are kept. A token or a password goes in as a fingerprint, the last four characters and a length, which tells two of them apart without carrying either. Ask for a level and a headless run gets the same records on stderr as text, next to the lines it always printed.", []string{
 		"log", "log-level",
+	}},
+	{"Tutorial", "What the TUI offers on a first run, and what `Settings → Tutorial` lists after that. The pages are YAML, one file per tutorial in `tutorials/` in the config directory, and writing one of your own takes the place of the pages iontk ships. `--tutorial` takes a file or a folder and points somewhere else again. It runs against a fake tenant with nothing on the other end of the wire, so a page can teach any key.", []string{
+		"tutorial",
 	}},
 	{"Appearance", "Color schemes are YAML too: `--themes` points at a file whose schemes are added to the built-in ones, or replace one of the same name, instead of `themes.yaml` in the config directory. The same escape hatch as `--views`, for the same reason.", []string{
 		"themes",

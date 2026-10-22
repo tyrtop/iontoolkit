@@ -224,3 +224,71 @@ func TestFavouriteSlotsSurviveARestart(t *testing.T) {
 		t.Errorf("slot 5 after a restart = %+v, %v", f, ok)
 	}
 }
+
+func TestTheFooterOffersTheFavouritesPickerNotTheChords(t *testing.T) {
+	m, _ := favModel(t)
+	m.width, m.termHeight = 160, 30
+	m.height = m.usableHeight()
+
+	got := plain(m.View().Content)
+	if !strings.Contains(got, "alt+f favourites") {
+		t.Errorf("the shell footer does not offer the picker:\n%s", got)
+	}
+	if strings.Contains(got, "alt+1-9 favourite") {
+		t.Errorf("the shell footer still lists the chords:\n%s", got)
+	}
+}
+
+func TestThePickerSaysHowToAddAndWhatWillBeAdded(t *testing.T) {
+	m, conn := favModel(t)
+	m.width, m.termHeight = 160, 30
+	m.height = m.usableHeight()
+
+	conn.feed("store-0003-rtr-01# dump interface status all")
+	s := m.sessions.Active()
+	waitForTUI(t, func() bool { return s.Line() == "dump interface status all" })
+
+	next, _ := m.openFavourites()
+	got := plain(next.(tuiModel).View().Content)
+
+	if !strings.Contains(got, "press 1-9 to add favourite") {
+		t.Errorf("the picker does not say how to add one:\n%s", got)
+	}
+	if !strings.Contains(got, "dump interface status all") {
+		t.Errorf("the picker does not show what it would add:\n%s", got)
+	}
+	if !strings.Contains(got, "alt+1-9 puts one on the line") {
+		t.Errorf("the picker does not say what the chords do:\n%s", got)
+	}
+}
+
+func TestSavingAFavouriteTakesTheLineTheDeviceShows(t *testing.T) {
+	m, conn := favModel(t)
+
+	conn.feed("store-0003-rtr-01# dump interface status all")
+	s := m.sessions.Active()
+	waitForTUI(t, func() bool { return s.Line() == "dump interface status all" })
+
+	next, _ := m.openFavourites()
+	mm, _ := next.(tuiModel).Update(tea.KeyPressMsg(tea.Key{Code: '3', Text: "3"}))
+	m = mm.(tuiModel)
+
+	f, ok := m.cmds.Favourite(3)
+	if !ok {
+		t.Fatalf("slot 3 was not saved: %q", m.status)
+	}
+	if f.Command != "dump interface status all" {
+		t.Errorf("slot 3 holds %q, want the command the device was showing", f.Command)
+	}
+}
+
+func TestThePickerSaysWhenThereIsNothingToAdd(t *testing.T) {
+	m, _ := favModel(t)
+	m.width, m.termHeight = 160, 30
+	m.height = m.usableHeight()
+
+	next, _ := m.openFavourites()
+	if got := plain(next.(tuiModel).View().Content); !strings.Contains(got, "nothing on the line") {
+		t.Errorf("the picker claims it can add an empty line:\n%s", got)
+	}
+}
