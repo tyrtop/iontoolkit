@@ -403,6 +403,9 @@ func Run(ctx context.Context) error {
 	logging.L().Info("tui started", "version", Version, "tenant", Tenant, "config", store.Root)
 
 	model := newTUIModel(ctx, store, cfg).raiseTutorialAsk()
+	if Demo {
+		model = model.openDemo()
+	}
 	defer model.sessions.CloseAll()
 	// bubbletea's own reset is OSC 111, which not every terminal implements
 	defer restoreTermColor(os.Stdout)
@@ -1570,6 +1573,9 @@ func (m tuiModel) pickTargets() []sessionTarget {
 }
 
 func (m tuiModel) onPickEnter() (tea.Model, tea.Cmd) {
+	if m.mode == modeBatch && len(m.selected) == 0 {
+		return m.toggleCurrent(), nil
+	}
 	return m.onPickTargets(m.pickTargets())
 }
 
@@ -1886,6 +1892,9 @@ func (m tuiModel) viewPicking() string {
 		switch m.mode {
 		case modeBatch:
 			act = fmt.Sprintf("enter command on %d", n)
+			if len(m.selected) == 0 {
+				act = "enter select"
+			}
 		case modeData:
 			act = fmt.Sprintf("enter data on %d", n)
 		case modeMacro:

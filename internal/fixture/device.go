@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 	"tyrtop.com/iontk/internal/ionterm"
@@ -15,6 +16,13 @@ func (s *Set) Dialer() ionterm.Dialer { return dialer{s} }
 type dialer struct{ set *Set }
 
 func (d dialer) DialToolkit(ctx context.Context, eid string, cols, rows int) (ionterm.Conn, error) {
+	if el := d.set.element(eid); el != nil {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(el.wait(1)):
+		}
+	}
 	return d.set.dial(eid)
 }
 
@@ -88,6 +96,18 @@ func (c *conn) hangUp() {
 	c.once.Do(func() { close(c.closed) })
 }
 
+func (c *conn) hold(d time.Duration) bool {
+	if d <= 0 {
+		return true
+	}
+	select {
+	case <-c.closed:
+		return false
+	case <-time.After(d):
+		return true
+	}
+}
+
 func (c *conn) send(s string) bool {
 	select {
 	case <-c.closed:
@@ -97,8 +117,15 @@ func (c *conn) send(s string) bool {
 	}
 }
 
-func (c *conn) line() (string, bool) {
+// an ION redraws the line on every keystroke, prompt included
+func (c *conn) line(prompt string) (string, bool) {
 	var b strings.Builder
+	redraw := func(tail string) bool {
+		if prompt == "" {
+			return true
+		}
+		return c.send("\x1b[J\x1b[2K\r" + prompt + b.String() + tail)
+	}
 	for {
 		select {
 		case <-c.closed:
@@ -107,14 +134,23 @@ func (c *conn) line() (string, bool) {
 			for _, ch := range string(in) {
 				switch ch {
 				case '\r', '\n':
+					if !redraw("") || (prompt != "" && !c.send("\r\n")) {
+						return "", false
+					}
 					return b.String(), true
 				case 0x7f, '\b':
 					if s := b.String(); s != "" {
 						b.Reset()
 						b.WriteString(s[:len(s)-1])
+						if !redraw(" \b") {
+							return "", false
+						}
 					}
 				default:
 					b.WriteRune(ch)
+					if !redraw("") {
+						return "", false
+					}
 				}
 			}
 		}
@@ -144,14 +180,14 @@ func (d *device) run(c *conn) {
 		if !c.send("login: ") {
 			return
 		}
-		user, ok := c.line()
+		user, ok := c.line("login: ")
 		if !ok {
 			return
 		}
-		if !c.send(user+"\r\n") || !c.send("Password: ") {
+		if !c.send("Password: ") {
 			return
 		}
-		pass, ok := c.line()
+		pass, ok := c.line("")
 		if !ok {
 			return
 		}
@@ -171,11 +207,8 @@ func (d *device) run(c *conn) {
 	}
 
 	for {
-		cmd, ok := c.line()
+		cmd, ok := c.line(d.prompt() + " ")
 		if !ok {
-			return
-		}
-		if !c.send("\r" + d.prompt() + " " + cmd + "\r\n") {
 			return
 		}
 		cmd = strings.TrimSpace(cmd)
@@ -188,6 +221,9 @@ func (d *device) run(c *conn) {
 		case cmd == "set paging off":
 			d.pagingOff = true
 		default:
+			if !c.hold(d.el.wait(3)) {
+				return
+			}
 			if !d.write(c, d.response(cmd)) {
 				return
 			}

@@ -486,27 +486,41 @@ func TestEnterOnAnEmptySectionDoesNotTrap(t *testing.T) {
 	}
 }
 
-func TestDebugSectionIsReadOnly(t *testing.T) {
+func TestDebugRowsMatchTheirLabels(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection = secDebug
+	m.spinner = ui.NewSpinner("")
 
-	if m.sectionRows() != 0 {
-		t.Errorf("sectionRows() = %d, want 0 — Debug takes no cursor", m.sectionRows())
+	rows := m.sectionContent()
+	if len(rows) < debugRows {
+		t.Fatalf("%d content lines, want at least one per row (%d)", len(rows), debugRows)
 	}
-
-	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if got := mm.(tuiModel).setFocus; got != focusNav {
-		t.Error("Debug should not take content focus")
+	for row := range debugRows {
+		want, ok := debugRowLabels[row]
+		if !ok {
+			t.Fatalf("row %d has no label in debugRowLabels", row)
+		}
+		if got := plain(rows[row]); !strings.HasPrefix(strings.TrimSpace(got), want) {
+			t.Errorf("row %d is %q, want it to start with %q", row, got, want)
+		}
 	}
 
 	got := plain(m.viewSettings())
-	for _, want := range []string{"Config", "Secrets", "Version", "Catalog", "Terminal", "Sessions"} {
+	for _, want := range []string{"Config", "Exports", "Secrets", "Version", "Catalog", "Terminal", "Sessions"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Debug missing %q:\n%s", want, got)
 		}
 	}
-	if !strings.Contains(got, "read only") {
-		t.Error("hint should say the section is read only")
+}
+
+func TestDownloadingTheLogWritesItToExports(t *testing.T) {
+	m := settingsModel(t)
+	m.setSection, m.setFocus, m.setCursor = secDebug, focusContent, logsRow
+
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	got := mm.(tuiModel)
+	if !strings.Contains(got.status, "no log this run") {
+		t.Errorf("status = %q, want it to say there is nothing to write", got.status)
 	}
 }
 

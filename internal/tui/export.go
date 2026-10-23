@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -129,4 +130,28 @@ func pasteCommands(text string) []string {
 		}
 	}
 	return out
+}
+
+func (m tuiModel) onDebugKey(key string) (tea.Model, tea.Cmd) {
+	if key != "enter" {
+		return m, nil
+	}
+	if m.setCursor == logsRow {
+		return m.exportLog()
+	}
+	return m.onTestingKey(key)
+}
+
+func (m tuiModel) exportLog() (tea.Model, tea.Cmd) {
+	path := logging.Path()
+	if !logging.On() || path == "" {
+		m.status = "no log this run"
+		return m, nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+	return m.exportText("the log", "log", "jsonl", string(b))
 }

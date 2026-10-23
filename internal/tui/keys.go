@@ -431,7 +431,7 @@ func quoteKey(key string) string {
 
 func (m tuiModel) keysContent() []string {
 	km := m.binds()
-	out := []string{}
+	out := []string{ui.Label("Keybinds") + m.keybindsLine(), ""}
 	for _, s := range []string{scrAny, scrMenu, scrElements, scrData} {
 		if len(km.bound[s]) == 0 {
 			continue
@@ -467,8 +467,19 @@ func (m tuiModel) keysContent() []string {
 	if m.keysErr != "" {
 		out = append(out, ui.StyleErr.Render(ui.Truncate(m.keysErr, max(20, m.width-4))), "")
 	}
-	out = append(out, ui.StyleDim.Render(shortenPath(KeybindsPath(m.store), max(20, m.width-6))))
 	return out
+}
+
+func (m tuiModel) keybindsLine() string {
+	line := ui.StyleElement.Render(fmt.Sprintf("%d bound", m.binds().count()))
+	path := KeybindsPath(m.store)
+	if path == "" {
+		return line
+	}
+	if _, err := os.Stat(path); err != nil {
+		return line + ui.StyleDim.Render("  enter writes "+shortenPath(path, 40))
+	}
+	return line + ui.StyleDim.Render("  "+shortenPath(path, max(20, m.width-24)))
 }
 
 func screenLabel(screen string) string {

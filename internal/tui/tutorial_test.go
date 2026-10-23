@@ -517,7 +517,7 @@ func TestStartingTheTutorialBorrowsAFakeFleet(t *testing.T) {
 	if m.cfg == realCfg {
 		t.Error("the tutorial is using the real tenant list")
 	}
-	if m.tenant.Name != "Tutorial Co" {
+	if m.tenant.Name != "Acme Co" {
 		t.Errorf("tenant = %q, want the fixture tenant", m.tenant.Name)
 	}
 	if m.flags.IONPassword == "" {
@@ -588,7 +588,7 @@ func TestEvenAFixturesRunGetsTheBlankTutorialWorld(t *testing.T) {
 	if app.Fixture == set {
 		t.Error("the tour ran against the fixtures the run was launched with, not its own blank world")
 	}
-	if m.tenant.Name != "Tutorial Co" {
+	if m.tenant.Name != "Acme Co" {
 		t.Errorf("tenant = %q, want the tutorial's own", m.tenant.Name)
 	}
 	if m.real.fixture != set {

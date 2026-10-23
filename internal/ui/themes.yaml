@@ -1,57 +1,6 @@
-# Color schemes. A theme is a table of roles, not of widgets: nothing in iontk
-# asks for "blue", it asks for the color an element name is drawn in.
-#
-# A themes.yaml in the config root is appended to these, and a scheme of the
-# same name replaces the built-in one; --themes points somewhere else, which is
-# how a --fixtures run gets a scheme of its own. Every field is optional except
-# the name.
-#
-#   ok       something worked, and the ✓ mark
-#   err      something failed, and the ✗ mark
-#   warn     worth noticing but not a failure: an offline ION, a stale tenant
-#   cmd      headings and command text; rendered bold
-#   element   an element, tenant or value the page is about
-#   row      the highlight on the row a list is on; rendered bold
-#   hot      a session about to go
-#   border   a modal's frame
-#   divider  the rule between two panes
-#   bg       the terminal's own background, set while iontk runs and put back
-#            when it exits; unset leaves the terminal as the user has it
-#   fg       the default text color, for anything no role has colored
-#   spinner  the spinner's shape, one of the names iontk ships
-#   spinner_color  what it is drawn in, including in the bubbles widget
-#   tabs     the rotation tabs take their color from; none of them may be a
-#            status color, since a tab is identity rather than state
-#   tab_mode how that rotation is read, which the theme editor's "tab colors"
-#            page sets. One of:
-#              rotate  a color per position in the bar (the default, and
-#                      what iontk has always done)
-#              type    one color for shells, one for rich-data tabs
-#              both    a rotation of its own per kind
-#              shared  one rotation, counted within the kind -- so the first
-#                      shell and the first data tab are the same color
-#   tab_shell, tab_data
-#            the per-kind rotations the type and both modes draw from. Unset
-#            borrows the rotation, offset by kind so the two do not start on
-#            the same color. The element list's tab is always the first
-#            color of the rotation, in every mode
-#   mono     true drops color entirely for bold, faint, italic and reverse
-#
-# bg and fg go out as OSC 11 and 10, which only take a hex: an index written
-# there is resolved to xterm's value for it, not the terminal's own.
-#
-# Every scheme here sets a background except **classic** and **mono**, and
-# those two leave it out on purpose: classic is the default and is the
-# terminal's own sixteen colors, so it must not repaint the terminal of
-# someone who never chose a scheme, and mono's whole premise is no color at
-# all. Everything else carries the background its palette was drawn for -- the
-# blurbs were already describing one.
-#
-# A color is an ANSI index 0-255 or a #rrggbb. An index under 16 is remapped by
-# the terminal's own theme, which is why classic stays there; anything else is
-# emitted as asked and downsampled by the renderer to what the terminal has.
-# "dim" is not in the table: it is the faint attribute, and a scheme that made
-# it a fixed grey would be wrong on half the terminal backgrounds there are.
+# bg and fg go out as OSC 11 and 10, which take a hex only: an index there
+# resolves to xterm's value, not the terminal's own. An index under 16 is
+# remapped by the terminal's own theme.
 
 themes:
   - name: classic
@@ -108,9 +57,7 @@ themes:
     spinner_color: "#b48ead"
     tabs: ["#d8dee9", "#81a1c1", "#88c0d0", "#b48ead", "#5e81ac", "#8fbcbb", "#eceff4"]
 
-  # The six below are after vim's own schemes rather than ports of them: vim
-  # colors syntax groups and iontk colors roles, so what carries over is the
-  # palette and the mood, not a mapping.
+  # after vim's own schemes, not ports of them
   - name: desert
     blurb: wheat and khaki on warm grey, after vim's desert
     ok: "#98fb98"
@@ -156,7 +103,6 @@ themes:
     hot: "#b85c00"
     border: "#a0522d"
     divider: "#9e9e9e"
-    # dark ink needs the light paper to go with it, or this one is unreadable
     bg: "#f2ead3"
     fg: "#303030"
     spinner: points
@@ -214,10 +160,7 @@ themes:
     spinner_color: "#afafd7"
     tabs: ["#bcbcbc", "#afafd7", "#87afaf", "#d7afd7", "#a8a8a8", "#8787af", "#d7d7d7"]
 
-  # catppuccin mocha, lifted from the palette the user's own nvim loads
-  # (lemo-o/nvim -> catppuccin-mocha). Roles follow catppuccin's own use of it:
-  # green/red/yellow for state, blue for the "doing" color, mauve for the
-  # selection, peach for the one that means "about to go".
+  # catppuccin mocha, off the palette the user's nvim loads
   - name: "Ben's Theme"
     blurb: catppuccin mocha, from Ben's nvim
     ok: "#a6e3a1"
@@ -229,7 +172,6 @@ themes:
     hot: "#fab387"
     border: "#f9e2af"
     divider: "#585b70"
-    # mocha's own base and text, so iontk matches the editor next to it
     bg: "#1e1e2e"
     fg: "#cdd6f4"
     spinner: monkey

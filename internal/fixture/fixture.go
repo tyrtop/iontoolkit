@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	"tyrtop.com/iontk/internal/config"
@@ -16,12 +17,16 @@ import (
 type Set struct {
 	Tenants         []Tenant `yaml:"tenants"`
 	UnknownResponse string   `yaml:"unknown_response"`
+	Slow            string   `yaml:"slow"`
+
+	slow time.Duration
 }
 
 type Tenant struct {
 	Name     string    `yaml:"name"`
 	TSGID    string    `yaml:"tsg_id"`
 	Users    []User    `yaml:"users"`
+	Fleet    int       `yaml:"fleet"`
 	Elements []Element `yaml:"elements"`
 }
 
@@ -40,10 +45,13 @@ type Element struct {
 	Connected bool              `yaml:"connected"`
 	HA        bool              `yaml:"ha"`
 	Pages     bool              `yaml:"pages"`
+	Slow      string            `yaml:"slow"`
 	PageLines int               `yaml:"page_lines"`
 	Responses map[string]string `yaml:"responses"`
 
-	tsg string
+	tsg  string
+	slow time.Duration
+	nth  int
 }
 
 const (
@@ -83,12 +91,23 @@ var tutorialYAML []byte
 
 func Tutorial() (*Set, error) { return Parse(tutorialYAML, "tutorial.yaml") }
 
+func BuiltinYAML() string { return string(tutorialYAML) }
+
+const FileName = "fixtures.yaml"
+
 func (s *Set) normalize() error {
 	if len(s.Tenants) == 0 {
 		return fmt.Errorf("no tenants: a fixture with nothing in it would look like a failed sign-in")
 	}
 	if s.UnknownResponse == "" {
 		s.UnknownResponse = defaultUnknown
+	}
+	if s.Slow != "" {
+		d, err := time.ParseDuration(s.Slow)
+		if err != nil || d < 0 {
+			return fmt.Errorf("slow: %q is not a length of time", s.Slow)
+		}
+		s.slow = d
 	}
 
 	seen := map[string]string{}
@@ -111,6 +130,7 @@ func (s *Set) normalize() error {
 				t.Users[j].Password = defaultPassword
 			}
 		}
+		t.Elements = append(t.Elements, fleet(t.Name, t.Fleet)...)
 		for j := range t.Elements {
 			el := &t.Elements[j]
 			if el.Name == "" {
@@ -130,15 +150,70 @@ func (s *Set) normalize() error {
 				el.Software = defaultSoftware
 			}
 			if el.HWID == "" {
-				el.HWID = "FAKE" + syntheticID("hw/"+el.ID, 8)
+				el.HWID = syntheticID("hw/"+el.ID, 16)
 			}
 			if el.PageLines <= 0 {
 				el.PageLines = defaultPageLines
+			}
+			el.nth, el.slow = j, s.slow
+			if el.Slow != "" {
+				d, err := time.ParseDuration(el.Slow)
+				if err != nil || d < 0 {
+					return fmt.Errorf("tenant %s: %s: slow: %q is not a length of time",
+						t.Name, el.Name, el.Slow)
+				}
+				el.slow = d
 			}
 			el.tsg = t.TSGID
 		}
 	}
 	return nil
+}
+
+var fleetModels = []string{"ion 1200", "ion 1200-s", "ion 2000", "ion 3200"}
+
+var fleetSoftware = []string{"6.5.1", "6.4.3", "6.3.4-b2"}
+
+func fleet(tenant string, n int) []Element {
+	if n <= 0 {
+		return nil
+	}
+	short := strings.ToLower(strings.Fields(tenant + " x")[0])
+	if len(short) > 4 {
+		short = short[:4]
+	}
+
+	out := make([]Element, 0, n)
+	for i := range n {
+		site := i/2 + 1
+		el := Element{
+			Name:      fmt.Sprintf("%s-%04d-rtr-%02d", short, site, i%2+1),
+			Site:      fmt.Sprintf("Store %04d", site),
+			Model:     fleetModels[site%len(fleetModels)],
+			Software:  fleetSoftware[i%len(fleetSoftware)],
+			Connected: i%12 != 7,
+			HA:        site%2 == 1,
+		}
+		out = append(out, el)
+	}
+	return out
+}
+
+const (
+	slowJitter = time.Second
+	slowStep   = 500 * time.Millisecond
+	slowSteps  = 5
+	slowStride = 2
+	slowFloor  = 100 * time.Millisecond
+)
+
+func (e Element) wait(part int) time.Duration {
+	if e.slow <= 0 || part <= 0 {
+		return 0
+	}
+	offset := time.Duration((e.nth*slowStride)%slowSteps) * slowStep
+	base := max(e.slow, slowJitter+slowFloor)
+	return (base - slowJitter + offset) / time.Duration(part)
 }
 
 func syntheticID(seed string, digits int) string {
@@ -230,7 +305,7 @@ func (e Element) apiElement() api.Element {
 		State:        state,
 		Role:         "SPOKE",
 		AllowedRoles: []string{"HUB", "SPOKE"},
-		Serial:       "FAKE" + syntheticID("serial/"+e.ID, 10),
+		Serial:       syntheticID("serial/"+e.ID, 12),
 		FIPSMode:     "non_fips",
 	}
 	if e.HA {

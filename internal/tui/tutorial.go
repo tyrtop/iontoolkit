@@ -221,7 +221,7 @@ func (m tuiModel) startFlow(at int) (tea.Model, tea.Cmd) {
 		m.status = flow.name + " has no pages yet"
 		return m, nil
 	}
-	if why := m.tutorialBlocked(); why != "" {
+	if why := m.testingBlocked(); why != "" {
 		m.status = why
 		return m, nil
 	}
@@ -233,14 +233,14 @@ func (m tuiModel) startFlow(at int) (tea.Model, tea.Cmd) {
 	m = m.fitTutorial()
 	logging.L().Info("tutorial started", "tutorial", flow.name, "steps", len(flow.steps))
 
-	m, load := m.enterTutorialWorld()
+	m, load := m.enterTestingWorld()
 	return m, load
 }
 
 func (m tuiModel) stopTutorial() (tuiModel, tea.Cmd) {
 	at, n, name := m.tut.at, len(m.tut.steps), m.tut.name
 	m.tut = tutorialRun{}
-	m = m.leaveTutorialWorld().fitTutorial()
+	m = m.leaveTestingWorld().fitTutorial()
 	m.phase = phaseMenu
 	logging.L().Info("tutorial left", "tutorial", name, "step", at+1, "steps", n)
 	return m, nil

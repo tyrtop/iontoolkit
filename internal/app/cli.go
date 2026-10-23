@@ -18,6 +18,8 @@ import (
 
 var ThemesFile string
 
+var LaunchedFake string
+
 func ThemesPath(st *config.Store) string {
 	if ThemesFile != "" {
 		return ThemesFile

@@ -40,6 +40,16 @@ var generalRowLabels = map[int]string{
 var setSections = []string{"General", "Theme", "Batch", "Tenants", "Users", "Session", "Tutorial", "Keys", "Debug", "Reset"}
 
 const (
+	testingRow = iota
+	logsRow
+	debugRows
+)
+
+var debugRowLabels = map[int]string{
+	testingRow: "Testing Mode", logsRow: "Download Logs",
+}
+
+const (
 	secGeneral = iota
 	secTheme
 	secBatch
@@ -52,8 +62,6 @@ const (
 	secReset
 )
 
-// the Tutorial section is built from whatever is in tutorials/ at the moment
-// it is opened, so a file dropped in shows up without a relaunch
 func (m tuiModel) enteredSection() tuiModel {
 	if m.setSection == secTutorial {
 		return m.readFlows()
@@ -84,9 +92,9 @@ func (m tuiModel) sectionRows() int {
 	case secTutorial:
 		return len(m.flows)
 	case secKeys:
-		return 0
+		return 1
 	case secDebug:
-		return 0
+		return debugRows
 	case secReset:
 		return 2
 	}
@@ -177,6 +185,13 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 			return m.startFlow(m.setCursor)
 		}
 		return m, nil
+	case secKeys:
+		if key == "enter" {
+			return m.openEdit()
+		}
+		return m, nil
+	case secDebug:
+		return m.onDebugKey(key)
 	case secReset:
 		return m.onResetKey(key, armed)
 	}
@@ -561,14 +576,17 @@ func (m tuiModel) sectionContent() []string {
 
 	case secDebug:
 		out = append(out,
+			ui.Label(debugRowLabels[testingRow])+m.testingLine(),
+			ui.Label(debugRowLabels[logsRow])+logLine(),
+			"",
 			ui.Label("Config")+ui.StyleDim.Render(m.store.Root),
+			ui.Label("Exports")+ui.StyleDim.Render(m.store.ExportsDir()),
 			ui.Label("Secrets")+ui.StyleDim.Render(m.store.Secrets.Backend()),
 			ui.Label("Version")+ui.StyleDim.Render(Version),
 			ui.Label("Stats")+ui.StyleDim.Render("alt+i overlays live counters"),
 			ui.Label("Colors")+ui.StyleDim.Render(ui.CurrentTheme().Name+"  "+profileLabel()),
 			ui.Label("Terminal")+ui.StyleDim.Render(termColorLine()),
 			ui.Label("Times")+ui.StyleDim.Render(clock.Name()),
-			ui.Label("Log")+logLine(),
 			"",
 			ui.Label("Tenant")+ui.StyleDim.Render(m.tenant.Name+"  tsg "+m.tenant.TSGID),
 			ui.Label("ION User")+ui.StyleDim.Render(m.ionUser),
@@ -606,8 +624,14 @@ func logLine() string {
 }
 
 func (m tuiModel) sectionHint() string {
-	if m.setSection == secDebug {
-		return "read only · ↑↓ section · esc back"
+	if m.setSection == secDebug && m.setFocus == focusContent {
+		if m.setCursor == logsRow {
+			return "enter download · tab back · esc back"
+		}
+		if m.real.held {
+			return "enter leave testing · " + editKeyHint + " · tab back · esc back"
+		}
+		return "enter testing mode · " + editKeyHint + " · tab back · esc back"
 	}
 	if m.setSection == secReset && m.resetArmed {
 		if m.setCursor == themeRestoreRow {
@@ -622,7 +646,11 @@ func (m tuiModel) sectionHint() string {
 	case secTutorial:
 		return "enter start · " + editKeyHint + " · tab back · esc back"
 	case secKeys:
+		if m.setFocus == focusContent {
+			return "enter edit · tab back · esc back"
+		}
 		return "read only · " + editKeyHint + " · esc back"
+
 	case secGeneral:
 		return "↑↓ row · enter change/refresh/type · space cycle · tab back · esc back"
 	case secTheme:

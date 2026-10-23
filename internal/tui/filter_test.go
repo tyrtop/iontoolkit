@@ -1168,3 +1168,33 @@ func TestAltAAlsoCyclesTheMode(t *testing.T) {
 		t.Errorf("the hint does not offer both:\n%s", out)
 	}
 }
+
+func TestEnterSelectsTheRowInBatchMode(t *testing.T) {
+	m := searchEnterModel(t)
+	m.mode = modeBatch
+
+	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), "enter")
+	got := next.(tuiModel)
+
+	if len(got.selected) != 1 {
+		t.Fatalf("selected = %v, want the row under the cursor ticked", got.selected)
+	}
+	if got.phase != phasePicking {
+		t.Errorf("phase = %v, want to still be on the list", got.phase)
+	}
+	if hint := plain(got.viewPicking()); !strings.Contains(hint, "enter command on 1") {
+		t.Errorf("the footer does not offer the run once something is ticked:\n%s", hint)
+	}
+
+	if targets := got.pickTargets(); len(targets) != 1 {
+		t.Errorf("pickTargets() = %v, want the one that was ticked", targets)
+	}
+}
+
+func TestTheFooterOffersSelectBeforeAnythingIsTicked(t *testing.T) {
+	m := searchEnterModel(t)
+	m.mode = modeBatch
+	if got := plain(m.viewPicking()); !strings.Contains(got, "enter select") {
+		t.Errorf("the footer reads:\n%s", got)
+	}
+}

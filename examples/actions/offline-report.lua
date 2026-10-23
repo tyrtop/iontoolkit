@@ -1,8 +1,3 @@
--- Read the element's status, work out which channels are down, and write the
--- page to exports/. Copy this folder to actions/ in the config directory and
--- bind it: alt+o: offline-report under screens: elements:. A script gets ctx
--- and nothing else -- no io, no os, no require.
-
 return function(ctx)
   local el = ctx.state.element
   if not el then
@@ -21,7 +16,6 @@ return function(ctx)
                         " (" .. ctx.ago(st.last_rebooted_time) .. ")"
   end
 
-  -- what a YAML sequence cannot do: decide what to say from what came back
   local channels, down = 0, {}
   for name, value in pairs(st) do
     if string.find(name, "_connected$") then

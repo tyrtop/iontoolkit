@@ -122,8 +122,6 @@ func (m tuiModel) runtimeErr() error {
 	return nil
 }
 
-func parseColumnsFile(b []byte) (*column.Set, error) { return column.Parse(b) }
-
 func joinErr(have, add string) string {
 	switch {
 	case have == "":

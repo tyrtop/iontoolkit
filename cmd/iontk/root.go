@@ -23,6 +23,7 @@ var (
 	flagOut          string
 	flagTenant       string
 	flagFixtures     string
+	flagDemo         bool
 	flagSearch       string
 	flagRefresh      bool
 	flagNoValidate   bool
@@ -119,6 +120,8 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
 			tui.Tenant = flagTenant
 			tui.Views = flagViews
 			tui.Columns = flagColumns
+			tui.Fixtures = flagFixtures
+			tui.Demo = flagDemo
 			tui.Keybinds = flagKeybinds
 			tui.Scripts = flagActions
 			return tui.Run(cmd.Context())
@@ -155,6 +158,7 @@ func init() {
 	pf.StringVar(&flagTenant, "tenant", "", "saved tenant to run as, by name (overrides the environment)")
 	pf.BoolVar(&app.Debug, "debug", false, "run against a throwaway config with no saved tenants and secrets held only in memory")
 	pf.StringVar(&flagFixtures, "fixtures", "", "YAML file of fake tenants, elements and CLI responses to run against instead of real hardware")
+	pf.BoolVar(&flagDemo, "demo", false, "open on the fake fleet iontk ships (or fixtures.yaml in the config directory), signed in, with the fleet loaded behind the menu — the same fleet Settings → Debug swaps in")
 	pf.StringVar(&flagViews, "views", "", "folder of screen files (or a single file of rich-data views) to use instead of views/ in the config directory")
 	pf.StringVar(&flagColumns, "columns", "", "YAML file naming the element list's columns and their order, instead of views/elements.yaml in the config directory")
 	pf.StringVar(&flagKeybinds, "keybinds", "", "YAML file of key bindings and actions, instead of keybinds.yaml in the config directory")

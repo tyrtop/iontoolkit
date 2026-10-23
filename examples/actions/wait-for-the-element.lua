@@ -1,6 +1,3 @@
--- Poll until the element answers, or until the budget runs out. The sleeping
--- is iontk's: wait:tick("10s") returns false once the budget is spent.
-
 return function(ctx)
   local name = ctx.state.element_name or "the element"
   ctx.status("watching " .. name)

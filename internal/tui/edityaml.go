@@ -11,6 +11,7 @@ import (
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/column"
 	"tyrtop.com/iontk/internal/dataview"
+	"tyrtop.com/iontk/internal/fixture"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/tutorial"
 	"tyrtop.com/iontk/internal/ui"
@@ -27,7 +28,7 @@ type editTarget struct {
 	path  string
 	seed  func(m *tuiModel) string
 	check func(b []byte) error
-	apply func(m *tuiModel) (string, error)
+	apply func(m *tuiModel) (string, tea.Cmd, error)
 }
 
 type yamlEdit struct {
@@ -141,7 +142,7 @@ func (m tuiModel) saveEdit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	mm := m
-	note, err := t.apply(&mm)
+	note, cmd, err := t.apply(&mm)
 	if err != nil {
 		mm.edit.err = err.Error()
 		return mm, nil
@@ -149,7 +150,7 @@ func (m tuiModel) saveEdit() (tea.Model, tea.Cmd) {
 	if note != "" {
 		mm.edit.note = mm.edit.note + " · " + note
 	}
-	return mm, nil
+	return mm, cmd
 }
 
 func (m tuiModel) leaveEdit(status string) (tea.Model, tea.Cmd) {
@@ -209,6 +210,8 @@ func (m tuiModel) editTarget() (editTarget, bool) {
 			return m.themeTarget()
 		case secKeys:
 			return m.keybindsTarget()
+		case secDebug:
+			return m.fixturesTarget()
 		}
 	}
 	return editTarget{}, false
@@ -237,15 +240,15 @@ func (m tuiModel) columnsTarget() editTarget {
 			_, err = buildColumns(set, base)
 			return err
 		},
-		apply: func(m *tuiModel) (string, error) {
+		apply: func(m *tuiModel) (string, tea.Cmd, error) {
 			m.listSpec, m.listFrom, m.columnsErr = nil, "", ""
 			m.loadRuntime(m.store)
 			if err := m.runtimeErr(); err != nil {
-				return "", err
+				return "", nil, err
 			}
 			m.forgetRows()
 			m.rebuildRows()
-			return fmt.Sprintf("%d columns", len(m.listCols)), nil
+			return fmt.Sprintf("%d columns", len(m.listCols)), nil, nil
 		},
 	}
 }
@@ -289,13 +292,13 @@ func (m tuiModel) viewsTarget() (editTarget, bool) {
 			_, err := dataview.ParseOne(b)
 			return err
 		},
-		apply: func(m *tuiModel) (string, error) {
+		apply: func(m *tuiModel) (string, tea.Cmd, error) {
 			m.viewsErr = ""
 			m.loadRuntime(m.store)
 			if err := m.runtimeErr(); err != nil {
-				return "", err
+				return "", nil, err
 			}
-			return fmt.Sprintf("%d views · r refetches the page", len(m.views.Views)), nil
+			return fmt.Sprintf("%d views · r refetches the page", len(m.views.Views)), nil, nil
 		},
 	}, true
 }
@@ -322,14 +325,14 @@ func (m tuiModel) menuTarget() (editTarget, bool) {
 			_, err := parseMenu(b)
 			return err
 		},
-		apply: func(m *tuiModel) (string, error) {
+		apply: func(m *tuiModel) (string, tea.Cmd, error) {
 			m.menuErr = ""
 			m.loadRuntime(m.store)
 			if err := m.runtimeErr(); err != nil {
-				return "", err
+				return "", nil, err
 			}
 			m.menuCursor = min(m.menuCursor, max(0, len(m.menuEntries())-1))
-			return fmt.Sprintf("%d entries", len(m.menuEntries())), nil
+			return fmt.Sprintf("%d entries", len(m.menuEntries())), nil, nil
 		},
 	}, true
 }
@@ -381,12 +384,40 @@ func (m tuiModel) flowTarget() (editTarget, bool) {
 			_, err := tutorial.Parse(b, filepath.Base(path))
 			return err
 		},
-		apply: func(m *tuiModel) (string, error) {
+		apply: func(m *tuiModel) (string, tea.Cmd, error) {
 			*m = m.readFlows()
 			if m.flowsErr != "" {
-				return "", fmt.Errorf("%s", m.flowsErr)
+				return "", nil, fmt.Errorf("%s", m.flowsErr)
 			}
-			return fmt.Sprintf("%d tutorials", len(m.flows)), nil
+			return fmt.Sprintf("%d tutorials", len(m.flows)), nil, nil
+		},
+	}, true
+}
+
+func (m tuiModel) fixturesTarget() (editTarget, bool) {
+	path := FixturesPath(m.store)
+	if path == "" {
+		return editTarget{}, false
+	}
+	return editTarget{
+		what: filepath.Base(path),
+		path: path,
+		seed: func(*tuiModel) string { return fixture.BuiltinYAML() },
+		check: func(b []byte) error {
+			_, err := fixture.Parse(b, filepath.Base(path))
+			return err
+		},
+		apply: func(m *tuiModel) (string, tea.Cmd, error) {
+			set, err := m.fakeFleet()
+			if err != nil {
+				return "", nil, err
+			}
+			if !m.real.held {
+				return fmt.Sprintf("%d tenants", len(set.Tenants)), nil, nil
+			}
+			mm, cmd := m.leaveTestingWorld().enterTestingWorld()
+			*m = mm
+			return fmt.Sprintf("%d tenants · reloaded", len(set.Tenants)), cmd, nil
 		},
 	}, true
 }
@@ -407,13 +438,13 @@ func (m tuiModel) keybindsTarget() (editTarget, bool) {
 			}
 			return km.check()
 		},
-		apply: func(m *tuiModel) (string, error) {
+		apply: func(m *tuiModel) (string, tea.Cmd, error) {
 			m.keysErr = ""
 			m.loadRuntime(m.store)
 			if err := m.runtimeErr(); err != nil {
-				return "", err
+				return "", nil, err
 			}
-			return fmt.Sprintf("%d bindings", m.binds().count()), nil
+			return fmt.Sprintf("%d bindings", m.binds().count()), nil, nil
 		},
 	}, true
 }
@@ -442,14 +473,14 @@ func (m tuiModel) themeTarget() (editTarget, bool) {
 			_, err := ui.ParseThemes(b)
 			return err
 		},
-		apply: func(m *tuiModel) (string, error) {
+		apply: func(m *tuiModel) (string, tea.Cmd, error) {
 			if err := ui.LoadThemes(dir); err != nil {
-				return "", err
+				return "", nil, err
 			}
 			next, _ := ui.ThemeByName(m.cfg.Theme)
-			mm, _ := m.applyTheme(next)
+			mm, cmd := m.applyTheme(next)
 			*m = mm.(tuiModel)
-			return t.Name + " applied", nil
+			return t.Name + " applied", cmd, nil
 		},
 	}, true
 }

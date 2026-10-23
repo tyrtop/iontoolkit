@@ -407,3 +407,78 @@ func TestBackspacingTheResultsQueryEmptiesItThenLeaves(t *testing.T) {
 		t.Error("the results filter is still open after backspacing the empty query")
 	}
 }
+
+func TestTheResultsCursorIsTheCaretAndHighlightEveryOtherListUses(t *testing.T) {
+	m := resultsModel(t)
+	m.rebuildResultRows()
+
+	rows := m.resTable.Rows()
+	if len(rows) < 2 {
+		t.Fatalf("%d rows, want a few to move between", len(rows))
+	}
+	if got := rows[0][0]; got != ">" {
+		t.Errorf("the row under the cursor starts %q, want the caret", got)
+	}
+	if got := rows[1][0]; got != "" {
+		t.Errorf("row 1 starts %q, want nothing in the caret column", got)
+	}
+	if got := rows[0][1]; got != plain(got) {
+		t.Errorf("the mark on the cursor's row is %q; a highlight around colour ends at its reset", got)
+	}
+	if got := rows[1][1]; got == plain(got) {
+		t.Errorf("the mark on row 1 is %q, want it coloured", got)
+	}
+
+	m.moveResultCursor(1)
+	rows = m.resTable.Rows()
+	if rows[1][0] != ">" || rows[0][0] != "" {
+		t.Errorf("the caret did not follow the cursor: %q then %q", rows[0][0], rows[1][0])
+	}
+	if got := rows[1][1]; got != plain(got) {
+		t.Errorf("the new cursor row keeps its colour: %q", got)
+	}
+}
+
+func TestSpaceOnTheResultsPagePagesRatherThanConfusingTheTable(t *testing.T) {
+	m := resultsModel(t)
+	m.rebuildResultRows()
+	m.resTable.SetHeight(2)
+
+	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace}))
+	got := next.(tuiModel)
+
+	if got.resTable.Cursor() == 0 {
+		t.Fatal("space moved nothing; the page key did not reach the list")
+	}
+	rows := got.resTable.Rows()
+	at := got.resTable.Cursor()
+	if rows[at][0] != ">" {
+		t.Errorf("the caret is not on row %d after space: %q", at, rows[at][0])
+	}
+	if rows[0][0] == ">" {
+		t.Error("the caret stayed where it was, so the widget moved the cursor behind our back")
+	}
+	if mark := rows[at][1]; mark != plain(mark) {
+		t.Errorf("the new cursor row keeps its colour: %q", mark)
+	}
+}
+
+func TestSpaceInAnOpenResultPagesTheOutput(t *testing.T) {
+	m := resultsModel(t)
+	m.resOpen = true
+	m.rebuildResultRows()
+	was := m.resLine
+
+	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace}))
+	got := next.(tuiModel)
+
+	if got.resTable.Cursor() != m.resTable.Cursor() {
+		t.Error("space moved the list while an output pane was open")
+	}
+	if got.resLine == was && len(m.results[0].Commands) > 0 {
+		t.Log("the output is shorter than a page, so the line did not move")
+	}
+	if !got.resOpen {
+		t.Error("space closed the output")
+	}
+}

@@ -1,28 +1,5 @@
-# The views rich-data mode offers out of the box, and the worked example of
-# the format. Copy this to views.yaml in the config directory (iontk reports
-# the path on the settings page) and edit; a view whose name matches one here
-# replaces it.
-#
-# fetch:    name -> GET path. Templated, and only /sdwan paths are allowed.
-#           {{ .element_id }}, {{ .site_id }}, {{ .cluster_id }} and
-#           {{ .tenant_id }} come from the element the tab was opened on.
-# sections: rows of label/value, or a table over for_each.
-# for_each: a dotted path into what a fetch returned. A section's own fetch
-#           runs once per row with {{ .item }} in scope, so a table costs one
-#           request per row -- max_items bounds it.
-# when:     the section is dropped when this renders empty or false.
-# compare:  the GUI-vs-CLI check, which "c" runs on an open page. It is the
-#           only part of a view that logs in to the appliance, so nothing here
-#           happens until that keypress. Its own fetch: reads the portal again
-#           at the same moment, commands: are read-only CLI commands (checked
-#           at load), and each row renders both answers and is marked by
-#           whether they agree. One session serves the whole page.
-#
-# Values are Go templates. Helpers: utc and ago for the API's timestamp
-# integers (never divide those by hand -- the unit varies by field), unwrap to
-# take one record out of an items envelope, first, join, count, yesno, dash.
-# For CLI text: kv reads a "Key : value" line, grep keeps the lines holding a
-# string, lines splits them all, field takes the nth column.
+# utc and ago read the API's timestamp integers; never divide one by hand, the
+# unit varies by field.
 
 views:
   - name: Overview
@@ -62,9 +39,7 @@ views:
           - label: Logs
             value: "{{ if .st.logs_live_connected }}up{{ else }}down{{ end }} · {{ dash .st.logs_live_from }}"
 
-      # Only on an element that has one, which is what the element's own record
-      # says. The backlog channels are left out on purpose: they connect,
-      # drain and drop, so "disconnected" is their normal state.
+      # the backlog channels connect, drain and drop, so they read disconnected
       - title: HA
         when: "{{ .el.spoke_ha_config.cluster_id }}"
         rows:
@@ -75,11 +50,7 @@ views:
           - label: Tracking
             value: "{{ count .el.spoke_ha_config.track.interfaces }} interface(s)"
 
-    # What the portal holds about this appliance against what the appliance
-    # says about itself. The portal side is confirmed; the CLI key names are
-    # not -- `dump device status` has not been captured, and a key that is
-    # spelled differently reads as "·", nothing to compare, rather than a
-    # disagreement. Open a shell tab, run the command, and fix the names here.
+    # the CLI key names are guesses: `dump device status` has never been captured
     compare:
       fetch:
         el: /sdwan/v3.2/api/elements/{{ .element_id }}
@@ -99,15 +70,8 @@ views:
   - name: Interfaces
     fetch:
       ifs: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces
-      # The site's circuits, so a port can name the one it carries rather
-      # than printing the id out of site_wan_interface_ids.
       wans: /sdwan/v2.10/api/sites/{{ .site_id }}/waninterfaces
-      # Security zones in two parts, the same way circuits work: the tenant's
-      # zone list has the names, and the element's own bindings say which
-      # interfaces are in which zone. UNVERIFIED against hardware -- no
-      # capture of either body exists, so the field names below are read from
-      # the resource map and the CloudGenix SDK. A name that is wrong prints a
-      # blank cell, not an error, so run it and look at the ZONE column.
+      # zone field names are read off the resource map, never seen on hardware
       zones: /sdwan/v2.2/api/securityzones
       elzones: /sdwan/v2.1/api/sites/{{ .site_id }}/elements/{{ .element_id }}/securityzones
     sections:
@@ -129,40 +93,29 @@ views:
           - header: STATE
             value: "{{ (unwrap .st).operational_state }}{{ with (unwrap .st).extended_state }} ({{ . }}){{ end }}"
             width: 18
-          # From the status, not the record: the interface record has a
-          # mac_address field and it is null on every interface a real element
-          # answered with. A subinterface reports its parent's, and each half
-          # of a bypass pair reports its own.
+          # the record's mac_address is null on every interface hardware answered
           - header: MAC
             value: "{{ dash (unwrap .st).mac_address }}"
             width: 17
           - header: ADDRESS
             value: "{{ dash (first (unwrap .st).ipv4_addresses) }}"
             width: 18
-          # Static or dhcp, from the record rather than the status: it is how
-          # the address was asked for, not what the port came up with.
+          # the record says how the address was asked for, not what came up
           - header: CONFIG
             value: "{{ with .item.ipv4_config }}{{ dash .type }}{{ else }}-{{ end }}"
             width: 7
           - header: LINK
             value: "{{ with (unwrap .st).port }}{{ if .connected }}{{ .speed }}M{{ if .full_duplex }} full{{ end }}{{ else }}no carrier{{ end }}{{ end }}"
             width: 11
-          # Which circuit this port is tied to, by joining the id in
-          # site_wan_interface_ids back to the site's circuit list.
           - header: CIRCUIT
             value: "{{ range .item.site_wan_interface_ids }}{{ with lookup $.wans.items \"id\" . }}{{ .name }} {{ end }}{{ end }}"
             width: 20
-          # The binding holds a list of interface ids, which is what lookup
-          # matches either way round; its zone_id then names the zone.
           - header: ZONE
             value: "{{ with lookup $.elzones.items \"interface_ids\" .item.id }}{{ with lookup $.zones.items \"id\" .zone_id }}{{ .name }}{{ end }}{{ end }}"
-            # Real zone names are sentences: "TSC Store - Network Management"
-            # is 30 characters, and a name cut in half names nothing.
+            # zone names are sentences: "TSC Store - Network Management" is 30
             width: 32
 
   # Circuits are the site's, not the element's, so a hub pair shares them.
-  # This is the other direction of the same join: each circuit says which of
-  # this element's ports carries it.
   - name: Circuits
     fetch:
       wans: /sdwan/v2.10/api/sites/{{ .site_id }}/waninterfaces
@@ -174,8 +127,7 @@ views:
         for_each: wans.items
         empty: this site has no circuits
         fetch:
-          # The circuit's own status, and this element's view of it: a circuit
-          # can be up at the site while the element beside it cannot use it.
+          # a circuit can be up at the site while this element cannot use it
           st: /sdwan/v2.1/api/sites/{{ .site_id }}/waninterfaces/{{ .item.id }}/status
           state: /sdwan/v2.1/api/sites/{{ .site_id }}/elements/{{ .element_id }}/waninterfaces/{{ .item.id }}/state
         columns:
@@ -188,8 +140,7 @@ views:
           - header: NETWORK
             value: "{{ with lookup $.networks.items \"id\" .item.network_id }}{{ .name }}{{ end }}"
             width: 20
-          # ctrl marks the circuit carrying the controller session, which is
-          # the one whose loss takes the element off the portal.
+          # ctrl is the circuit carrying the controller session
           - header: TYPE
             value: "{{ dash .item.type }}{{ if .item.use_for_controller_connections }} ctrl{{ end }}"
             width: 15
@@ -202,8 +153,6 @@ views:
           - header: STATUS
             value: "{{ with .st }}{{ dash .operational_state }}{{ end }}{{ with .state }} · {{ if .operational }}operational{{ else }}not operational{{ end }}{{ if .disabled }} · disabled{{ end }}{{ end }}"
 
-  # Nothing here is reachable on an element that is not in a cluster, so every
-  # section is gated on the element's own record saying it is.
   - name: HA
     fetch:
       el: /sdwan/v3.2/api/elements/{{ .element_id }}
@@ -230,8 +179,8 @@ views:
           - header: STATUS
             value: "{{ .item.status }}"
 
-      # Newest first, as the API sends them. adjustments is the useful part:
-      # it says why the effective priority is not the configured one.
+      # newest first, as the API sends them; adjustments says why the
+      # effective priority is not the configured one
       - title: Switchovers
         when: "{{ .cluster_id }}"
         for_each: cl.switch_over_events
@@ -256,11 +205,7 @@ views:
           - header: WHY
             value: "{{ range .item.adjustments }}-{{ .adjustment }} {{ .kind }} {{ .name }} {{ end }}"
 
-    # HA is the comparison worth having: the controller's view of which member
-    # is active is the thing most likely to be out of date, and the appliance
-    # is the authority on its own state. Gated on the element being clustered,
-    # so an ordinary spoke is never dialled for this. Unverified like the one
-    # above: `dump spoke-ha status` has not been captured either.
+    # `dump spoke-ha status` has never been captured either
     compare:
       when: "{{ .cluster_id }}"
       fetch:

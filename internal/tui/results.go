@@ -17,6 +17,7 @@ func newResultsTable() table.Model {
 	t := table.New(
 		table.WithColumns([]table.Column{
 			{Title: "", Width: 2},
+			{Title: "", Width: 2},
 			{Title: "element", Width: 26},
 			{Title: "model", Width: 11},
 			{Title: "cmds", Width: 5},
@@ -36,6 +37,7 @@ func (m *tuiModel) moveResultCursor(delta int) {
 	n := max(0, min(m.resTable.Cursor()+delta, len(rows)-1))
 	if at := m.resTable.Cursor(); n >= at {
 		m.resTable.MoveDown(n - at)
+		m.rebuildResultRows()
 		return
 	}
 
@@ -46,6 +48,7 @@ func (m *tuiModel) moveResultCursor(delta int) {
 	fresh.SetHeight(m.resTableHeight())
 	fresh.MoveDown(n)
 	m.resTable = fresh
+	m.rebuildResultRows()
 }
 
 func (m tuiModel) resOutputRoom() int {
@@ -143,11 +146,18 @@ func (m *tuiModel) keepResultCursorOn(eid string) {
 
 func (m *tuiModel) rebuildResultRows() {
 	rows := make([]table.Row, 0, len(m.resMatches))
-	for _, i := range m.resMatches {
+	at := m.resTable.Cursor()
+	for n, i := range m.resMatches {
 		r := m.results[i]
+		here := n == at
+
 		mark := ui.MarkCheck.String()
 		if r.Error != "" {
 			mark = ui.MarkCross.String()
+		}
+		caret := ""
+		if here {
+			caret, mark = ">", ui.Plain(mark)
 		}
 		name := r.Name
 		if name == "" {
@@ -158,6 +168,7 @@ func (m *tuiModel) rebuildResultRows() {
 			took = short(m.elapsed[i])
 		}
 		rows = append(rows, table.Row{
+			caret,
 			mark,
 			ui.Truncate(name, 26),
 			ui.Truncate(r.Model, 11),
@@ -166,7 +177,7 @@ func (m *tuiModel) rebuildResultRows() {
 		})
 	}
 	m.resTable.SetRows(rows)
-	m.resTable.SetWidth(min(m.width, 70))
+	m.resTable.SetWidth(min(m.width, 72))
 	m.resTable.SetHeight(m.resTableHeight())
 }
 
@@ -237,7 +248,7 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		}
 		return m, nil
 
-	case "pgup", "pgdown":
+	case "pgup", "pgdown", "space", " ":
 		step := max(1, m.resOutputRoom()-1)
 		if !m.resOpen {
 			step = max(1, m.resTable.Height()-1)
@@ -290,9 +301,7 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		return m, cmd
 	}
 
-	var cmd tea.Cmd
-	m.resTable, cmd = m.resTable.Update(msg)
-	return m, cmd
+	return m, nil
 }
 
 func (m tuiModel) onResultsOutputKey(key string) (tea.Model, tea.Cmd) {

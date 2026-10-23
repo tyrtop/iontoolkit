@@ -62,8 +62,8 @@ var flagGroups = []struct {
 	{"Output", "`--orientation` is read by `table` and `csv` only; the other formats have no rows to sort.", []string{
 		"format", "orientation", "out", "no-progress", "verbose",
 	}},
-	{"Testing", "Running without touching saved state. `--debug` redirects the config root and keeps secrets in memory; `--fixtures` does the same and seeds fake tenants, elements and CLI sessions from a YAML file.", []string{
-		"debug", "fixtures",
+	{"Testing", "Running without touching saved state. `--debug` redirects the config root and keeps secrets in memory; `--fixtures` does the same and seeds fake tenants, elements and CLI sessions from a YAML file. `--demo` is `--fixtures` with the fleet iontk ships: two tenants, a hundred and six elements, HA pairs, a shell that answers everything, and the fleet already loaded when the menu comes up. `Settings → Debug` swaps the same fleet in mid-run, and `alt+e` there edits it.", []string{
+		"debug", "fixtures", "demo",
 	}},
 	{"Screens", "The screens iontk draws from a file live in `views/` in the config directory, one file per screen, each saying what it is with a `kind:` line -- `list` for the element list's columns, `data` for a rich-data page, `menu` for the main menu. `--views` points at a folder of them, or at a single file of rich-data views, which is also how a `--fixtures` run gets screens of its own. The older single files are still read and the folder wins over them; `--columns` points at one that names the element list's columns. Inside iontk, `alt+e` opens the file the page you are on is drawn from.", []string{
 		"views",

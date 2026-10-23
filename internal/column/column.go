@@ -28,7 +28,6 @@ func Builtin() (*Set, error) {
 
 func BuiltinYAML() string { return string(builtinYAML) }
 
-// where the list's own rows come from, taken off the columns that read them
 func (s *Set) Source(name string) string {
 	for _, c := range s.Columns {
 		if !c.Fleet() {
@@ -88,7 +87,6 @@ const (
 	FromSite    = "site"
 )
 
-// what ties a row in an answer back to a row in the list
 const (
 	DefaultKey  = "element_id"
 	FleetKey    = "id"
@@ -99,14 +97,12 @@ const (
 
 func (c Spec) Fetches() bool { return c.Fetch != "" }
 
-// a path with no ids in it answers for the whole fleet in one call
 func (c Spec) PerElement() bool { return c.Fetch != "" && strings.Contains(c.Fetch, "{") }
 
 func (c Spec) Fleet() bool { return c.Fetch != "" && !strings.Contains(c.Fetch, "{") }
 
 func checkPath(p string) error { return tmpl.CheckPath(ids.Replace(p)) }
 
-// the ids iontk fills in are not there yet when the path is checked
 var ids = strings.NewReplacer("{", "", "}", "")
 
 var specKeys = []string{"name", "header", "min", "max", "flex", "mark", "go",

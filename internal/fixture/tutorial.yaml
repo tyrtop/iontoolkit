@@ -1,10 +1,9 @@
-# The fleet the tutorial runs against: one tenant, six elements, an HA pair at
-# Store 0003, and nothing on the other end of the wire. iontk swaps this in
-# when the tutorial starts and puts the real tenant back when it ends, so a
-# page can teach any key without reaching an appliance.
+unknown_response: Fake shell! Testing Mode!
+
+slow: 1500ms
 
 tenants:
-  - name: Tutorial Co
+  - name: Acme Co
     tsg_id: "999000999"
     users:
       - name: admin
@@ -15,78 +14,55 @@ tenants:
         id: "1000000000000000001"
         model: ion 1200
         software: 6.5.1
-        hw_id: FAKE0003A
+        hw_id: "5C260A1F0003"
         site: Store 0003
         connected: true
         ha: true
-        responses:
-          uptime: up 14 days, 6 hours
-          dump device status: |
-            Serial: FAKE0003A
-            Model: ion 1200
-            Version: 6.5.1
-            State: active
-          dump interface status all: |
-            PORT  TYPE     STATE  SPEED
-            1     public   up     1000
-            2     lan      up     1000
-            3     lan      down   -
 
       - name: store-0003-rtr-02
         id: "1000000000000000002"
         model: ion 1200
         software: 6.5.1
-        hw_id: FAKE0003B
+        hw_id: "5C260A1F0004"
         site: Store 0003
         connected: true
         ha: true
-        responses:
-          uptime: up 14 days, 6 hours
-          dump device status: |
-            Serial: FAKE0003B
-            Model: ion 1200
-            Version: 6.5.1
-            State: backup
 
       - name: store-0100-rtr-01
         id: "1000000000000000003"
         model: ion 2000
         software: 6.5.1
-        hw_id: FAKE0100A
+        hw_id: "5C260A1F0100"
         site: Store 0100
         connected: true
-        responses:
-          uptime: up 3 days, 1 hour
-          dump device status: |
-            Serial: FAKE0100A
-            Model: ion 2000
-            Version: 6.5.1
-            State: active
 
       - name: store-0100-rtr-02
         id: "1000000000000000004"
         model: ion 1200-s
         software: 6.4.3
-        hw_id: FAKE0100B
+        hw_id: "5C260A1F0101"
         site: Store 0100
         connected: true
-        responses:
-          uptime: up 57 days, 11 hours
 
       - name: dc-east-rtr-01
         id: "1000000000000000005"
         model: ion 3200
         software: 6.5.1
-        hw_id: FAKEDC01
+        hw_id: "5C260A1F0DC1"
         site: DC East
         connected: true
-        responses:
-          uptime: up 211 days, 4 hours
 
       - name: store-0412-rtr-01
         id: "1000000000000000006"
         model: ion 1200
         software: 6.3.4-b2
-        hw_id: FAKE0412A
+        hw_id: "5C260A1F0412"
         site: Store 0412
         connected: false
+
+  - name: Globex
+    tsg_id: "999000222"
+    users:
+      - name: admin
+        password: ion
+    fleet: 100

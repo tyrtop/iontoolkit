@@ -317,3 +317,27 @@ func TestTheShippedLuaExamplesLoad(t *testing.T) {
 		}
 	}
 }
+
+func TestEnterOnTheKeysRowEditsTheKeybinds(t *testing.T) {
+	m := keysModel(t, "screens:\n  elements:\n    f: filter\n", nil)
+	m.phase, m.setSection, m.setFocus = phaseSettings, secKeys, focusContent
+
+	if got := plain(m.sectionContent()[0]); !strings.Contains(got, "Keybinds") {
+		t.Errorf("the first row is %q, want the one enter acts on", got)
+	}
+	if got := m.sectionHint(); !strings.Contains(got, "enter edit") {
+		t.Errorf("hint = %q, want it to offer the edit", got)
+	}
+
+	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	mm := next.(tuiModel)
+	if mm.phase != phaseEdit {
+		t.Fatalf("enter left phase %v, want the editor", mm.phase)
+	}
+	if got := mm.edit.target.what; got != KeybindsFileName {
+		t.Errorf("the editor opened on %q, want %q", got, KeybindsFileName)
+	}
+	if !strings.Contains(mm.edit.area.Value(), "f: filter") {
+		t.Errorf("the pane holds %q, want the file as it stands", mm.edit.area.Value())
+	}
+}

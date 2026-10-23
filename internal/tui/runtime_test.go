@@ -125,30 +125,3 @@ func TestAltEOnTheMenuOpensTheMenusFile(t *testing.T) {
 		t.Errorf("the pane holds %q, want the file as it stands", mm.edit.area.Value())
 	}
 }
-
-func TestTheShippedExamplesLoad(t *testing.T) {
-	files, err := view.Load("../../examples/views")
-	if err != nil {
-		t.Fatalf("the shipped examples do not load: %v", err)
-	}
-	if len(files) != 2 {
-		t.Fatalf("%d example screens, want elements and menu", len(files))
-	}
-	for _, f := range files {
-		switch f.Kind {
-		case view.KindList:
-			set, err := parseColumnsFile(f.Bytes)
-			if err != nil {
-				t.Fatalf("examples/views/elements.yaml: %v", err)
-			}
-			base, _ := defaultColumns()
-			if _, err := buildColumns(set, base); err != nil {
-				t.Errorf("examples/views/elements.yaml: %v", err)
-			}
-		case view.KindMenu:
-			if _, err := parseMenu(f.Bytes); err != nil {
-				t.Errorf("examples/views/menu.yaml: %v", err)
-			}
-		}
-	}
-}

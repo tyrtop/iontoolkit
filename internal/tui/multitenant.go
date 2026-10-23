@@ -255,7 +255,18 @@ func (m tuiModel) targetsFor(rows []elementRow) []sase.Target {
 		}
 		out = append(out, t)
 	}
-	return out
+	return playback(out)
+}
+
+func playback(targets []sase.Target) []sase.Target {
+	if app.Fixture == nil {
+		return targets
+	}
+	fake := app.Fixture.SessionClient(app.Defaults.PagerOff, app.Defaults.PagerPrompts)
+	for i := range targets {
+		targets[i].Client = fake
+	}
+	return targets
 }
 
 func (m tuiModel) tenantClient(tsg string) *api.Client {
@@ -356,6 +367,11 @@ func (m *tuiModel) computeScope() {
 }
 
 func (m tuiModel) aggregateTenants() []config.Tenant {
+	if app.Fixture != nil {
+		if added := m.cfg.AddedTenants(); len(added) > 0 {
+			return added
+		}
+	}
 	if m.authMode == authTenant {
 		if m.hasTenant {
 			return []config.Tenant{m.tenant}

@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -9,6 +12,7 @@ import (
 	"tyrtop.com/iontk/internal/fixture"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/sase/api"
+	"tyrtop.com/iontk/internal/ui"
 )
 
 type realWorld struct {
@@ -33,20 +37,47 @@ type realWorld struct {
 	cacheState cacheState
 	cacheCount int
 	cacheAt    time.Time
+
+	data       []dataTab
+	dataActive int
+	resumeData []sessionTarget
 }
 
-func (m tuiModel) tutorialBlocked() string {
+func (m tuiModel) testingBlocked() string {
 	if m.sessions.Count() > 0 || m.sessions.DetachedCount() > 0 {
-		return "close the open sessions first — the tutorial swaps in fake elements"
+		return "close the open sessions first — testing mode swaps in fake elements"
 	}
 	if m.phase == phaseRunning {
-		return "wait for the run to finish — the tutorial swaps in fake elements"
+		return "wait for the run to finish — testing mode swaps in fake elements"
 	}
 	return ""
 }
 
-func (m tuiModel) enterTutorialWorld() (tuiModel, tea.Cmd) {
-	set, err := fixture.Tutorial()
+func FixturesPath(st *config.Store) string {
+	if Fixtures != "" {
+		return Fixtures
+	}
+	if st == nil {
+		return ""
+	}
+	return filepath.Join(st.Root, fixture.FileName)
+}
+
+var Fixtures string
+
+func (m tuiModel) fakeFleet() (*fixture.Set, error) {
+	if path := FixturesPath(m.store); path != "" {
+		if b, err := os.ReadFile(path); err == nil {
+			return fixture.Parse(b, filepath.Base(path))
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	return fixture.Tutorial()
+}
+
+func (m tuiModel) enterTestingWorld() (tuiModel, tea.Cmd) {
+	set, err := m.fakeFleet()
 	if err != nil {
 		m.status = err.Error()
 		return m, nil
@@ -71,6 +102,9 @@ func (m tuiModel) enterTutorialWorld() (tuiModel, tea.Cmd) {
 		cacheState: m.cacheState,
 		cacheCount: m.cacheCount,
 		cacheAt:    m.cacheAt,
+		data:       m.data,
+		dataActive: m.dataActive,
+		resumeData: m.resumeData,
 	}
 
 	app.Fixture = set
@@ -102,14 +136,15 @@ func (m tuiModel) enterTutorialWorld() (tuiModel, tea.Cmd) {
 	m.client, m.pool = nil, newClientPool()
 	m.sites, m.selected, m.lastCleared = nil, map[string]bool{}, nil
 	m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
+	m.data, m.dataActive, m.resumeData = nil, 0, nil
 	m.setElements(nil)
 
-	logging.L().Info("tutorial world entered", "tenant", m.tenant.Name, "tsg", m.tenant.TSGID)
+	logging.L().Info("testing world entered", "tenant", m.tenant.Name, "tsg", m.tenant.TSGID)
 	next, cmd := m.refreshActive()
 	return next.(tuiModel), cmd
 }
 
-func (m tuiModel) leaveTutorialWorld() tuiModel {
+func (m tuiModel) leaveTestingWorld() tuiModel {
 	if !m.real.held {
 		return m
 	}
@@ -125,10 +160,65 @@ func (m tuiModel) leaveTutorialWorld() tuiModel {
 	m.flags, m.authMode = held.flags, held.authMode
 	m.sites, m.selected, m.lastCleared = held.sites, held.selected, nil
 	m.cacheState, m.cacheCount, m.cacheAt = held.cacheState, held.cacheCount, held.cacheAt
+	m.data, m.dataActive, m.resumeData = held.data, held.dataActive, held.resumeData
 	m.ha, m.haCluster, m.haQueue, m.haInFlight = nil, nil, nil, nil
 	m.haFailed, m.haErr, m.haTotal, m.haDone, m.haBulk = 0, "", 0, 0, ""
 	m.setElements(held.all)
 
-	logging.L().Info("tutorial world left", "tenant", m.tenant.Name)
+	logging.L().Info("testing world left", "tenant", m.tenant.Name)
+	return m
+}
+
+func (m tuiModel) testingLine() string {
+	switch {
+	case m.real.held:
+		return ui.StyleWarn.Render("on") +
+			ui.StyleDim.Render(fmt.Sprintf("  %s, %d elements", m.tenant.Name, len(m.all)))
+	case app.LaunchedFake != "":
+		return ui.StyleWarn.Render("on") +
+			ui.StyleDim.Render("  this whole run, from "+app.LaunchedFake)
+	}
+	return ui.StyleDim.Render("off")
+}
+
+func (m tuiModel) onTestingKey(key string) (tea.Model, tea.Cmd) {
+	if key != "enter" {
+		return m, nil
+	}
+	if m.tut.on {
+		m.status = "the tutorial is running in the fake fleet already"
+		return m, nil
+	}
+	if !m.real.held && app.LaunchedFake != "" {
+		m.status = "this run was launched on a fake fleet"
+		return m, nil
+	}
+	if m.real.held {
+		next := m.leaveTestingWorld()
+		next.status = "back on " + next.tenant.Name
+		return next, nil
+	}
+	if why := m.testingBlocked(); why != "" {
+		m.status = why
+		return m, nil
+	}
+	next, cmd := m.enterTestingWorld()
+	next.status = "testing mode: nothing here reaches the network"
+	return next, cmd
+}
+
+var Demo bool
+
+func (m tuiModel) openDemo() tuiModel {
+	m.askTutorial = false
+	if len(m.cfg.Tenants) == 0 {
+		m.status = "the fake fleet has no tenants"
+		return m
+	}
+	m.authMode = authTenant
+	m.tenant, m.hasTenant = m.cfg.Tenants[0], true
+	m.ionUser = m.tenant.DefaultUser()
+	m.flags = app.TenantFlags(m.store, m.tenant, m.ionUser)
+	m.phase, m.cacheState = phaseMenu, cacheUpdating
 	return m
 }
