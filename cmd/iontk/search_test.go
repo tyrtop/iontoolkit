@@ -487,7 +487,7 @@ func TestAScriptIsToldWhatToRunRatherThanAsked(t *testing.T) {
 	if strings.Contains(out, "[y/N]") {
 		t.Errorf("a question was put where nothing can answer it:\n%s", out)
 	}
-	if !strings.Contains(out, "iontk login") {
+	if !strings.Contains(out, "iontk auth login") {
 		t.Errorf("the log does not name the way out:\n%s", out)
 	}
 }
@@ -523,7 +523,7 @@ func TestTenantsNeedingACredentialAreNamedWithTheWayOut(t *testing.T) {
 	if len(hits) != 1 {
 		t.Fatalf("matched %d, want the stale cache to still answer", len(hits))
 	}
-	if out := log.String(); !strings.Contains(out, "iontk login") {
+	if out := log.String(); !strings.Contains(out, "iontk auth login") {
 		t.Errorf("the log does not name the way out:\n%s", out)
 	}
 }

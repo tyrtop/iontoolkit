@@ -25,13 +25,13 @@ func refreshTokenExpiring(t *testing.T, exp time.Time) string {
 func authModel(t *testing.T, auth string) tuiModel {
 	t.Helper()
 	m := multiModel(t)
-	m.cfg = &config.Config{Tenants: []config.Tenant{
+	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 		{Name: "Tractor Supply", TSGID: "111", Auth: auth, Added: true},
-	}}
-	m.tenant, m.hasTenant = m.cfg.Tenants[0], true
-	m.authMode = authBrowser
+	}})
+	m.runtime().UseTenant(m.cfg().Tenants[0])
+	m.setAuthMode(authBrowser)
 	if auth != config.AuthBrowser {
-		m.authMode = authTenant
+		m.setAuthMode(authTenant)
 	}
 	return m
 }
@@ -78,7 +78,7 @@ func TestAuthLineColorTracksTheSessionLeft(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := authModel(t, config.AuthBrowser)
-			if err := m.store.Secrets.Set(config.RefreshTokenKey("111"),
+			if err := m.store().Secrets.Set(config.RefreshTokenKey("111"),
 				refreshTokenExpiring(t, time.Now().Add(tt.left))); err != nil {
 				t.Fatalf("seed: %v", err)
 			}
@@ -110,11 +110,11 @@ func TestAuthLineIsRedWhenASignInIsNeeded(t *testing.T) {
 
 	t.Run("credential known dead", func(t *testing.T) {
 		m := authModel(t, config.AuthBrowser)
-		if err := m.store.Secrets.Set(config.RefreshTokenKey("111"),
+		if err := m.store().Secrets.Set(config.RefreshTokenKey("111"),
 			refreshTokenExpiring(t, time.Now().Add(8*time.Hour))); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
-		m.tokenDead = "sign-in expired"
+		m.runtime().TokenDied("sign-in expired", false)
 		if !strings.Contains(m.authLine(), "\x1b[31m") {
 			t.Error("want red once the credential is known dead, whatever the token claims")
 		}
@@ -123,12 +123,12 @@ func TestAuthLineIsRedWhenASignInIsNeeded(t *testing.T) {
 
 func TestSessionLeftPrefersWhatThisRunSaw(t *testing.T) {
 	m := authModel(t, config.AuthBrowser)
-	if err := m.store.Secrets.Set(config.RefreshTokenKey("111"),
+	if err := m.store().Secrets.Set(config.RefreshTokenKey("111"),
 		refreshTokenExpiring(t, time.Now().Add(30*time.Minute))); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	m.ident = saseauth.Identity{TSG: "111", SessionExpires: time.Now().Add(8 * time.Hour)}
+	m.runtime().SetIdentity(saseauth.Identity{TSG: "111", SessionExpires: time.Now().Add(8 * time.Hour)})
 	left, ok := m.sessionLeft()
 	if !ok {
 		t.Fatal("sessionLeft() reported nothing")
@@ -137,7 +137,7 @@ func TestSessionLeftPrefersWhatThisRunSaw(t *testing.T) {
 		t.Errorf("sessionLeft() = %v, want the freshly minted figure", left)
 	}
 
-	m.ident = saseauth.Identity{TSG: "999", SessionExpires: time.Now().Add(8 * time.Hour)}
+	m.runtime().SetIdentity(saseauth.Identity{TSG: "999", SessionExpires: time.Now().Add(8 * time.Hour)})
 	left, ok = m.sessionLeft()
 	if !ok {
 		t.Fatal("sessionLeft() reported nothing")
@@ -183,7 +183,7 @@ func TestTokenRefreshUpdatesTheLineAndDropsTheOldClient(t *testing.T) {
 	m := authModel(t, config.AuthBrowser)
 	m.spinner = ui.NewSpinner("")
 	setTestClient(&m, nil)
-	m.pool.set("111", nil)
+	m.pool().Set("111", nil)
 
 	mm, _ := m.Update(tokenRefreshedMsg{
 		ident: saseauth.Identity{TSG: "111", SessionExpires: time.Now().Add(8 * time.Hour)},
@@ -194,10 +194,10 @@ func TestTokenRefreshUpdatesTheLineAndDropsTheOldClient(t *testing.T) {
 	if got.status != "token refreshed" {
 		t.Errorf("status = %q, want it reported", got.status)
 	}
-	if got.tokenTTL != 899*time.Second {
-		t.Errorf("tokenTTL = %v, want the new lifetime", got.tokenTTL)
+	if got.rt.TokenTTL() != 899*time.Second {
+		t.Errorf("tokenTTL = %v, want the new lifetime", got.rt.TokenTTL())
 	}
-	if got.pool.get("111") != nil {
+	if got.pool().Get("111") != nil {
 		t.Error("the client holding the old token was kept")
 	}
 	if !strings.Contains(got.authLine(), "\x1b[32m") {
@@ -225,11 +225,11 @@ func TestRenderMenuWithCredentialLine(t *testing.T) {
 	m.width, m.height = 90, 30
 	m.spinner = ui.NewSpinner("")
 	seedKnown(t, m, config.KnownTenant{TSGID: "111", Name: "Tractor Supply"})
-	if err := m.store.Secrets.Set(config.RefreshTokenKey("111"),
+	if err := m.store().Secrets.Set(config.RefreshTokenKey("111"),
 		refreshTokenExpiring(t, time.Now().Add(42*time.Minute))); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	m.cacheState, m.cacheCount, m.cacheAt = cacheUpdated, 5613, time.Now()
+	m = withFleet(m, cacheUpdated, 5613, time.Now())
 
 	out := plain(m.viewMenu())
 	for _, want := range []string{"5613 elements cached", "Browser Sign-In", "41m left", "Refresh Browser Token"} {
@@ -242,8 +242,8 @@ func TestRenderMenuWithCredentialLine(t *testing.T) {
 
 func TestServiceAccountLineNamesWhichAccountIsAttached(t *testing.T) {
 	m := authModel(t, config.AuthServiceAccount)
-	m.cfg.Tenants[0].ClientID = "iontk@1234567890.iam.panserviceaccount.com"
-	m.tenant = m.cfg.Tenants[0]
+	m.cfg().Tenants[0].ClientID = "iontk@1234567890.iam.panserviceaccount.com"
+	m.runtime().ReplaceTenant(m.cfg().Tenants[0])
 	m.width = 120
 	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
 		{ID: "1", Name: "s0100-rtr-01"},
@@ -275,7 +275,7 @@ func TestServiceAccountLineNamesWhichAccountIsAttached(t *testing.T) {
 
 func TestServiceAccountLineCountsOnlyItsOwnElements(t *testing.T) {
 	m := authModel(t, config.AuthServiceAccount)
-	m.tenant = m.cfg.Tenants[0]
+	m.runtime().ReplaceTenant(m.cfg().Tenants[0])
 
 	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "a", Name: "one"}})
 	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{
@@ -293,8 +293,8 @@ func TestServiceAccountLineCountsOnlyItsOwnElements(t *testing.T) {
 
 func TestServiceAccountLineBeforeAnythingHasLoaded(t *testing.T) {
 	m := authModel(t, config.AuthServiceAccount)
-	m.tenant = m.cfg.Tenants[0]
-	m.cacheCount = 143
+	m.runtime().ReplaceTenant(m.cfg().Tenants[0])
+	m.runtime().SetFleetCount(143)
 
 	if got := plain(m.authLine()); !strings.Contains(got, "143 elements cached") {
 		t.Errorf("authLine() = %q, want the launch-time cache count", got)
@@ -303,7 +303,7 @@ func TestServiceAccountLineBeforeAnythingHasLoaded(t *testing.T) {
 
 func TestServiceAccountLineSaysWhenNoClientIDWasSaved(t *testing.T) {
 	m := authModel(t, config.AuthServiceAccount)
-	m.tenant = m.cfg.Tenants[0]
+	m.runtime().ReplaceTenant(m.cfg().Tenants[0])
 
 	if got := plain(m.authLine()); !strings.Contains(got, "client id not saved") {
 		t.Errorf("authLine() = %q, want it to say the client id is missing", got)

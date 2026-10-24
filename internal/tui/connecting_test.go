@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"tyrtop.com/iontk/internal/runtime"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/coder/websocket"
@@ -20,13 +21,13 @@ func TestRowStatusMarksTabsAndDials(t *testing.T) {
 		{ID: "dialing", Name: "connecting"},
 		{ID: "idle", Name: "nothing-doing"},
 	})
-	if _, err := m.sessions.Open(t.Context(), stubDialer{}, "open", "has-a-tab", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(t.Context(), stubDialer{}, "open", "has-a-tab", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 	m.markDialing("dialing")
 
 	rows := map[string]string{}
-	for _, el := range m.all {
+	for _, el := range m.rows() {
 		rows[el.ID] = plain(m.rowStatus(el))
 	}
 	if got := rows["open"]; !strings.Contains(got, "●") {
@@ -84,7 +85,7 @@ func TestConnectBarReportsTheRetryAndWhetherTheIONIsOnline(t *testing.T) {
 	m := pickModel(t)
 	setTestClient(&m, liveClient())
 	m.mergeTenantElements("1", "t", []api.Element{{ID: "e1", Name: "rtr", Connected: true}})
-	if _, err := m.sessions.Open(t.Context(), stubDialer{}, "e1", "rtr", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(t.Context(), stubDialer{}, "e1", "rtr", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 	m.noteDial(dialProgressMsg{eid: "e1", attempt: 2, of: 3, err: "dial: connection refused"})
@@ -105,7 +106,7 @@ func TestConnectBarSaysOfflineForAnUnreachableION(t *testing.T) {
 	m := pickModel(t)
 	setTestClient(&m, liveClient())
 	m.mergeTenantElements("1", "t", []api.Element{{ID: "e1", Name: "rtr", Connected: false}})
-	if _, err := m.sessions.Open(t.Context(), stubDialer{}, "e1", "rtr", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(t.Context(), stubDialer{}, "e1", "rtr", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -117,7 +118,7 @@ func TestConnectBarSaysOfflineForAnUnreachableION(t *testing.T) {
 func TestTheConnectBarKeepsItsRow(t *testing.T) {
 	m := pickModel(t)
 	setTestClient(&m, liveClient())
-	if _, err := m.sessions.Open(t.Context(), stubDialer{}, "e1", "rtr", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(t.Context(), stubDialer{}, "e1", "rtr", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -168,7 +169,7 @@ func TestAnsweringYesDialsTheElementAgain(t *testing.T) {
 	if got.askRetry.eid != "" {
 		t.Errorf("askRetry = %+v, want the prompt dismissed", got.askRetry)
 	}
-	if st, ok := got.dialing["e1"]; ok && st.failed {
+	if st, ok := got.dialOf("e1"); ok && st.failed {
 		t.Error("the element is still marked as failed after a retry started")
 	}
 }
@@ -186,7 +187,7 @@ func TestAnsweringNoDismissesThePrompt(t *testing.T) {
 	if got.askRetry.eid != "" {
 		t.Errorf("askRetry = %+v, want the prompt gone", got.askRetry)
 	}
-	if _, ok := got.dialing["e1"]; ok {
+	if _, ok := got.dialOf("e1"); ok {
 		t.Error("the failed dial was left in the list after being dismissed")
 	}
 	if got.phase != phasePicking {
@@ -198,12 +199,12 @@ func TestThePromptOwnsTheKeyboard(t *testing.T) {
 	m := pickModel(t)
 	setTestClient(&m, liveClient())
 	m.askRetry = sessionTarget{eid: "e1", name: "rtr", tsg: "1"}
-	before := len(m.selected)
+	before := m.selectedCount()
 
 	mm, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
 	got := mm.(tuiModel)
-	if len(got.selected) != before {
-		t.Errorf("selected changed from %d to %d behind the prompt", before, len(got.selected))
+	if got.selectedCount() != before {
+		t.Errorf("selected changed from %d to %d behind the prompt", before, got.selectedCount())
 	}
 	if cmd != nil {
 		t.Error("space dialled the element, want only enter and y to answer yes")
@@ -408,10 +409,10 @@ func TestTheConnectBarNamesBothHalves(t *testing.T) {
 				{ID: "1", Name: "S0100-RTR-01", Model: "ion 1200", Connected: tt.connected},
 			})
 			m.phase = phaseSession
-			t.Cleanup(m.sessions.CloseAll)
+			t.Cleanup(m.sessions().CloseAll)
 
 			conn := newRecConn()
-			s, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
+			s, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -420,7 +421,7 @@ func TestTheConnectBarNamesBothHalves(t *testing.T) {
 				waitForTUI(t, s.Answered)
 			}
 			if tt.dialing {
-				m.dialing = map[string]dialState{"1": {attempt: 2, of: 3}}
+				m.runtime().NoteDial(runtime.Dial{EID: "1", Attempt: 2, Of: 3})
 			}
 			if tt.kill {
 				conn.Close(websocket.StatusAbnormalClosure, "torn")
@@ -441,10 +442,10 @@ func TestTheConnectBarSaysUnknownForAnUntrackedElement(t *testing.T) {
 	m := pickModel(t)
 	setTestElements(&m, []api.Element{{ID: "9", Name: "elsewhere"}})
 	m.phase = phaseSession
-	t.Cleanup(m.sessions.CloseAll)
+	t.Cleanup(m.sessions().CloseAll)
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 	if bar := plain(m.connectBar()); !strings.Contains(bar, "ion unknown") {

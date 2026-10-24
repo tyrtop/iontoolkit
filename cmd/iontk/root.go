@@ -4,13 +4,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/tui"
+	"tyrtop.com/iontk/internal/workflow"
 )
 
 var (
@@ -46,11 +49,21 @@ var rootCmd = &cobra.Command{
 	Use:   "iontk [flags]",
 	Short: "API-driven ION CLI management for Prisma SD-WAN",
 	Long: `iontk runs commands on Prisma SD-WAN ION appliances over the SASE API.
+With no command it opens the TUI.
 
-With --cmd it runs in batch mode: a JSON array on stdout, live progress on
-stderr. With --element alone it attaches your terminal to that element's CLI.
---search picks the elements by name, site, model or tenant instead of by ID,
-and prints what it found unless --cmd says what to do with them.
+The commands are iontk's own, the same ones the TUI's keys and menus run:
+iontk data open is data.open there. A command's arguments are its flags, and
+--name - reads that one from the next line of standard input, for a password
+out of the shell's history, and --name @file reads it from a file. A command that writes is a dry run that lists
+what it would send unless --doit is given.
+
+  iontk batch run      commands across elements: a JSON array on stdout,
+                       live progress on stderr
+  iontk session open   your terminal attached to one element's CLI
+  iontk fleet search   the elements a query matches, by name, site, model
+                       or tenant
+  iontk workflow       a workflow: a name in workflows/ in the config
+                       directory, or a path to a workflow's folder
 
 Credentials come from a tenant saved in iontk, or from the environment and a
 .env in the working directory. --tenant picks a saved tenant outright; with no
@@ -66,23 +79,20 @@ Credentials come from a tenant saved in iontk, or from the environment and a
 A saved tenant supplies its own client secret, browser sign-in and device
 login from the keyring, so --cmd needs none of these once one is signed in.`,
 
-	Example: `  iontk --element 1234567890                         interactive shell
-  iontk -e 1234567890 -c "dump interface status 1"   batch, one element
-  iontk -f sites.txt -c "dump device status" -n 25   batch, many elements
-  iontk --search store-0100                          list matching elements
-  iontk --search "s5024 ion 1200" -c uptime          batch, searched elements`,
+	Example: `  iontk session open 1234567890                                interactive shell
+  iontk batch run -e 1234567890 -c "dump interface status 1"   batch, one element
+  iontk batch run -f sites.txt -c "dump device status" -n 25   batch, many elements
+  iontk fleet search store-0100                                list matching elements
+  iontk batch run --search "s5024 ion 1200" -c uptime          batch, searched elements
+  iontk workflow site-report --site S0272                      dry run a workflow
+  iontk workflow site-report --site S0272 --doit               send its writes
+  iontk workflow ./site-report --site S0272                    one not installed`,
 
 	Args:          cobra.NoArgs,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		_ = godotenv.Load()
-		app.ThemesFile = flagThemes
-		if err := loadFixtures(cmd.ErrOrStderr()); err != nil {
-			return err
-		}
-
 		var toStderr io.Writer
 		if app.LogLevelAsked() != "" && !wantsTheTerminal(cmd) {
 			toStderr = cmd.ErrOrStderr()
@@ -102,28 +112,35 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
 		if app.Debug && flagFixtures == "" && flagTenant != "" {
 			return fmt.Errorf("--debug has no saved tenants, so --tenant %s cannot resolve", flagTenant)
 		}
+		was := func(old, now string) {
+			fmt.Fprintf(cmd.ErrOrStderr(), "iontk with %s is deprecated, use `%s`\n", old, now)
+		}
 		switch {
+		case flagSearch != "" && len(flagCommands) == 0:
+			was("--search alone", "iontk fleet search")
+			return runSearch(cmd.Context())
 		case flagSearch != "":
+			was("--search and --cmd", "iontk batch run --search")
 			return runSearch(cmd.Context())
 		case len(flagCommands) > 0:
+			was("--cmd", "iontk batch run")
 			sel, err := flagSelection()
 			if err != nil {
 				return err
 			}
 			return runBatch(cmd.Context(), sel)
 		case flagElement != "":
+			was("--element alone", "iontk session open")
 			return runShell(cmd.Context(), flagElement)
 		case flagElementsPath != "":
-			return fmt.Errorf("--elements-path needs --cmd; use --element for a single interactive session")
+			return fmt.Errorf("--elements-path goes with iontk batch run")
 		default:
 			tui.Version = buildVersion()
 			tui.Tenant = flagTenant
-			tui.Views = flagViews
 			tui.Columns = flagColumns
 			tui.Fixtures = flagFixtures
 			tui.Demo = flagDemo
 			tui.Keybinds = flagKeybinds
-			tui.Scripts = flagActions
 			return tui.Run(cmd.Context())
 		}
 	},
@@ -139,7 +156,7 @@ func init() {
 	pf.BoolVar(&flagNoValidate, "yes", false, "alias for --no-validate")
 	pf.BoolVar(&flagNoLogin, "no-login", false, "never open a browser for --search; report the tenants that need one instead")
 	pf.StringArrayVarP(&flagCommands, "cmd", "c", nil, "command to run; repeatable, or comma separated")
-	pf.IntVarP(&app.Defaults.Concurrency, "concurrency", "n", app.Defaults.Concurrency, "elements worked in parallel")
+	pf.IntVarP(&app.Defaults.Concurrency, "concurrency", "n", app.Defaults.Concurrency, "elements, or runs of a workflow's --inputs, worked in parallel")
 	pf.DurationVar(&app.Defaults.ElementTimeout, "element-timeout", app.Defaults.ElementTimeout, "per-element deadline including the CLI session")
 	pf.DurationVar(&app.Defaults.SessionTimeout, "session-timeout", app.Defaults.SessionTimeout, "deadline for a single login attempt")
 	pf.IntVar(&app.Defaults.DialAttempts, "dial-attempts", app.Defaults.DialAttempts, "times to dial an element before dropping it")
@@ -175,4 +192,44 @@ func init() {
 	inspectCmd.Flags().BoolVar(&flagInspectRaw, "raw", false, "print each response body as it arrived, keyed by URL")
 
 	rootCmd.AddCommand(runCmd, shellCmd, inspectCmd, loginCmd, versionCmd, genFlagDocsCmd)
+	addOwn(rootCmd, "batch run", newBatchRunCmd("run"))
+	addOwn(rootCmd, "session open", newSessionOpenCmd("open"))
+	addOwn(rootCmd, "fleet search", fleetSearchCmd)
+	addOwn(rootCmd, "write", writeCmd)
+}
+
+func prepare(argv []string) error {
+	fs := pflag.NewFlagSet("prepare", pflag.ContinueOnError)
+	fs.ParseErrorsWhitelist.UnknownFlags = true
+	fs.Usage = func() {}
+	fs.AddFlagSet(rootCmd.PersistentFlags())
+	fs.BoolP("help", "h", false, "")
+	_ = fs.Parse(argv)
+
+	_ = godotenv.Load()
+	app.ThemesFile = flagThemes
+	app.ViewsFolder = flagViews
+	app.ActionsFolder = flagActions
+	if err := workflowByPath(fs.Args()); err != nil {
+		return err
+	}
+	return loadFixtures(os.Stderr)
+}
+
+var workflowAliases = map[string]string{}
+
+func workflowByPath(words []string) error {
+	if len(words) < 2 || words[0] != "workflow" {
+		return nil
+	}
+	if p := words[1]; p != "." && p != ".." && !strings.ContainsRune(p, filepath.Separator) {
+		return nil
+	}
+	w, err := workflow.LoadOne(words[1])
+	if err != nil {
+		return fmt.Errorf("workflow %s: %w", words[1], err)
+	}
+	app.WorkflowPaths = append(app.WorkflowPaths, words[1])
+	workflowAliases[w.Name] = words[1]
+	return nil
 }

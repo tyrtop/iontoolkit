@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/script"
 	"tyrtop.com/iontk/internal/view"
 )
@@ -32,8 +33,8 @@ func keysModel(t *testing.T, keybinds string, views map[string]string) tuiModel 
 				t.Fatal(err)
 			}
 		}
-		Views = dir
-		t.Cleanup(func() { Views = "" })
+		app.ViewsFolder = dir
+		t.Cleanup(func() { app.ViewsFolder = "" })
 	}
 	return listModel(t, 3)
 }
@@ -122,10 +123,10 @@ actions:
 	if err := m.runtimeErr(); err != nil {
 		t.Fatalf("the file was refused: %v", err)
 	}
-	m.selected = map[string]bool{"1/1": true}
+	selectOnly(&m, "1/1")
 
 	got := pressOnList(m, "alt+d")
-	if len(got.selected) != 0 {
+	if got.selectedCount() != 0 {
 		t.Error("the sequence did not run the built-in it named")
 	}
 	if got.status != "done" {
@@ -216,8 +217,8 @@ func scriptModel(t *testing.T, keybinds string, files map[string]string) tuiMode
 			t.Fatal(err)
 		}
 	}
-	Scripts = dir
-	t.Cleanup(func() { Scripts = "" })
+	app.ActionsFolder = dir
+	t.Cleanup(func() { app.ActionsFolder = "" })
 	return keysModel(t, keybinds, nil)
 }
 
@@ -235,8 +236,8 @@ end
 	if err := m.runtimeErr(); err != nil {
 		t.Fatalf("the script was refused: %v", err)
 	}
-	if !m.scripts.Has("narrow") {
-		t.Fatalf("actions = %v, want the file's own name", m.scripts.Names())
+	if !m.hasAction("narrow") {
+		t.Fatalf("actions = %v, want the file's own name", m.actionNames())
 	}
 
 	next, cmd := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'o', Mod: tea.ModAlt}), "alt+o")
@@ -286,11 +287,11 @@ func TestASecondPressIsRefusedWhileAScriptRuns(t *testing.T) {
 
 func TestAScriptThatWillNotLoadLeavesTheKeysAlone(t *testing.T) {
 	m := scriptModel(t, "", map[string]string{"broken.lua": "return function(ctx"})
-	if m.scriptsErr == "" {
+	if m.actionsErr() == "" {
 		t.Fatal("a broken script loaded without a word")
 	}
-	if !strings.Contains(m.scriptsErr, "broken.lua") {
-		t.Errorf("scriptsErr = %q, want the file named", m.scriptsErr)
+	if !strings.Contains(m.actionsErr(), "broken.lua") {
+		t.Errorf("actionsErr = %q, want the file named", m.actionsErr())
 	}
 	if m2 := pressOnList(m, "/"); !m2.filterOn {
 		t.Error("the keys iontk ships stopped working")

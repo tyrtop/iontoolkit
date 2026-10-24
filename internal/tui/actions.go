@@ -27,6 +27,9 @@ func builtinActions() []builtinAction {
 	return []builtinAction{
 		{name: "edit-yaml", screen: scrAny, keys: []string{editKey}, run: tuiModel.openEdit},
 		{name: "stats", screen: scrAny, keys: []string{"alt+i"}, run: tuiModel.toggleStats},
+		{name: "command-line", screen: scrMenu, keys: []string{":"}, run: tuiModel.openCmdline},
+		{name: "command-line", screen: scrElements, keys: []string{":"}, run: tuiModel.openCmdline},
+		{name: "command-line", screen: scrData, keys: []string{":"}, run: tuiModel.openCmdline},
 
 		{name: "elements", screen: scrMenu, run: tuiModel.menuElements},
 		{name: "service-accounts", screen: scrMenu, run: tuiModel.menuServiceAccounts},
@@ -93,7 +96,7 @@ func (m tuiModel) runNamed(screen, name string, depth int) (tea.Model, tea.Cmd, 
 		next, cmd := m.runSteps(name, steps, depth)
 		return next, cmd, true
 	}
-	if m.scripts != nil && m.scripts.Has(name) {
+	if m.hasAction(name) {
 		next, cmd := m.startScript(name)
 		return next, cmd, true
 	}
@@ -107,19 +110,23 @@ func (m tuiModel) runNamed(screen, name string, depth int) (tea.Model, tea.Cmd, 
 			return next, cmd, true
 		}
 	}
+	if cmd, args, rest, err := m.runtime().Parse(name); err == nil {
+		next, c := m.execCommand(cmd, args, rest)
+		return next, c, true
+	}
 	return m, nil, false
 }
 
 const actionDepth = 8
 
 func (m tuiModel) menuElements() (tea.Model, tea.Cmd) {
-	if m.mode == modeMacro {
-		m.mode = modeShell
-		if saved, ok := parseMode(m.cfg.DefaultMode); ok {
-			m.mode = saved
+	if m.mode() == modeMacro {
+		mode := modeShell
+		if saved, ok := parseMode(m.cfg().DefaultMode); ok {
+			mode = saved
 		}
+		m.setMode(mode)
 	}
-	m.armedMacro = ""
 	return m.startContinue()
 }
 
@@ -149,14 +156,14 @@ func (m tuiModel) menuSettings() (tea.Model, tea.Cmd) {
 func (m tuiModel) menuQuit() (tea.Model, tea.Cmd) { return m, tea.Quit }
 
 func (m tuiModel) menuQuitClosing() (tea.Model, tea.Cmd) {
-	m.sessions.CloseAll()
+	m.sessions().CloseAll()
 	return m, tea.Quit
 }
 
 func (m tuiModel) cycleAuthMode() (tea.Model, tea.Cmd) {
-	m.authMode = m.authMode.next()
-	m.cfg.AuthMode = m.authMode.String()
-	if err := m.store.SaveConfig(m.cfg); err != nil {
+	m.setAuthMode(m.authMode().next())
+	m.cfg().AuthMode = m.authMode().String()
+	if err := m.store().SaveConfig(m.cfg()); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
@@ -175,74 +182,38 @@ func (m tuiModel) openFilter() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) toggleShowSelected() (tea.Model, tea.Cmd) {
-	if !m.showSelected && len(m.selected) == 0 {
-		m.status = "nothing selected"
-		return m, nil
-	}
-	m.showSelected = !m.showSelected
-	m.status = ""
-	m.applyFilter()
-	m.table.SetCursor(0)
-	return m, nil
+	return m.listCommand("list.show-selected", true), nil
 }
 
 func (m tuiModel) clearSelection() (tea.Model, tea.Cmd) {
-	if len(m.selected) == 0 {
-		m.status = "nothing selected"
-		return m, nil
-	}
-	n := len(m.selected)
-	m.lastCleared = make(map[string]bool, n)
-	for k := range m.selected {
-		m.lastCleared[k] = true
-	}
-	m.lastClearedView = m.showSelected
-
-	m.selected = map[string]bool{}
-	m.showSelected = false
-	m.applyFilter()
-	m.status = fmt.Sprintf("cleared %d selected — alt+z to undo", n)
-	return m, nil
+	return m.listCommand("list.clear", false), nil
 }
 
 func (m tuiModel) undoClear() (tea.Model, tea.Cmd) {
-	if len(m.lastCleared) == 0 {
-		m.status = "nothing to undo"
-		return m, nil
-	}
-	for k := range m.lastCleared {
-		m.selected[k] = true
-	}
-	n := len(m.lastCleared)
-	m.lastCleared = nil
-	m.showSelected = m.lastClearedView
-	m.applyFilter()
-	m.status = fmt.Sprintf("restored %d selected", n)
-	return m, nil
+	return m.listCommand("list.undo-clear", false), nil
 }
 
 func (m tuiModel) tickEveryMatch() (tea.Model, tea.Cmd) {
-	all := true
-	for _, i := range m.matches {
-		if !m.selected[m.all[i].key()] {
-			all = false
-			break
-		}
-	}
-	for _, i := range m.matches {
-		if all {
-			delete(m.selected, m.all[i].key())
-		} else {
-			m.selected[m.all[i].key()] = true
-		}
-	}
+	_ = m.runtime().Run("list.select-matches", nil)
 	m.rebuildRows()
 	return m, nil
 }
 
+func (m tuiModel) listCommand(name string, toTop bool) tuiModel {
+	if err := m.runtime().Run(name, nil); err != nil {
+		m.status = err.Error()
+		return m
+	}
+	m.status = m.rt.Status()
+	m.applyFilter()
+	if toTop {
+		m.moveCursorTo(0)
+	}
+	return m
+}
+
 func (m tuiModel) cycleMode() (tea.Model, tea.Cmd) {
-	m.mode = m.mode.next()
-	m.armedMacro = ""
+	_ = m.runtime().Run("list.mode", nil)
 	m.status = ""
 	return m, nil
 }
@@ -250,7 +221,7 @@ func (m tuiModel) cycleMode() (tea.Model, tea.Cmd) {
 func (m tuiModel) openIONUsers() (tea.Model, tea.Cmd) {
 	m.userCursor = 0
 	m.status = ""
-	m.usersTSG = m.tenant.TSGID
+	m.usersTSG = m.tenant().TSGID
 	if el, ok := m.current(); ok {
 		m.usersTSG = el.TSG
 	}

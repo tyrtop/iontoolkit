@@ -34,20 +34,20 @@ tenants:
 func scrolledPane(t *testing.T) (tuiModel, *fixture.Set) {
 	t.Helper()
 	m, set := fixtureTUIWith(t, longResponseFixture(60))
-	m.cfg.SessionCols, m.cfg.SessionRows = 80, 20
+	m.cfg().SessionCols, m.cfg().SessionRows = 80, 20
 	m.width, m.height = 100, 20
-	t.Cleanup(m.sessions.CloseAll)
+	t.Cleanup(m.sessions().CloseAll)
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openSession(el.ID, el.Name, m.tenant.TSGID)
+	next, cmd := m.openSession(el.ID, el.Name, m.tenant().TSGID)
 	m = next.(tuiModel)
 	runCmd(t, cmd)
 	waitForTUI(t, func() bool {
-		s := m.sessions.Find(el.ID)
+		s := m.sessions().Find(el.ID)
 		return s != nil && strings.Contains(s.Render(), el.Name+"#")
 	})
 
-	s := m.sessions.Find(el.ID)
+	s := m.sessions().Find(el.ID)
 	s.SendText("dump interface status\r")
 	waitForTUI(t, func() bool { return strings.Contains(s.Render(), "L060") })
 	waitForTUI(t, func() bool { return s.Scrollback() > 0 })

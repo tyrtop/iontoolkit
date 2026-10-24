@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"gopkg.in/yaml.v3"
 	"tyrtop.com/iontk/internal/config"
-	"tyrtop.com/iontk/internal/script"
 	"tyrtop.com/iontk/internal/tutorial"
 	"tyrtop.com/iontk/internal/ui"
 	"tyrtop.com/iontk/internal/view"
@@ -43,7 +42,8 @@ func ActionsPath(st *config.Store) string {
 type keymap struct {
 	bound   map[string]map[string]string
 	actions map[string][]actionStep
-	scripts *script.Set
+	lua     func(name string) bool
+	runs    func(line string) bool
 	from    string
 }
 
@@ -136,7 +136,8 @@ func sortedBindings(m map[string]string) []string {
 
 func (m *tuiModel) loadKeys(st *config.Store) {
 	km := defaultKeymap()
-	km.scripts = m.scripts
+	km.lua = m.hasAction
+	km.runs = m.runsCommand
 
 	for _, path := range []string{ActionsPath(st), KeybindsPath(st)} {
 		if path == "" {
@@ -225,7 +226,10 @@ func (km keymap) check() error {
 			if _, ok := km.actions[name]; ok {
 				continue
 			}
-			if km.scripts != nil && km.scripts.Has(name) {
+			if km.lua != nil && km.lua(name) {
+				continue
+			}
+			if km.runs != nil && km.runs(name) {
 				continue
 			}
 			if _, ok := builtinAt(screen, name); !ok {
@@ -235,7 +239,7 @@ func (km keymap) check() error {
 		}
 	}
 	for name, steps := range km.actions {
-		if km.scripts != nil && km.scripts.Has(name) {
+		if km.lua != nil && km.lua(name) {
 			return fmt.Errorf("%q is written twice, once in yaml and once in actions/%s.lua", name, name)
 		}
 		for i, st := range steps {
@@ -254,8 +258,9 @@ func (km keymap) checkStep(name string, at int, st actionStep) error {
 		n++
 		_, yaml := km.actions[st.Do]
 		_, builtin := anyBuiltin(st.Do)
-		lua := km.scripts != nil && km.scripts.Has(st.Do)
-		if !yaml && !builtin && !lua {
+		lua := km.lua != nil && km.lua(st.Do)
+		cmd := km.runs != nil && km.runs(st.Do)
+		if !yaml && !builtin && !lua && !cmd {
 			return fmt.Errorf("%s runs %q, which is not an action", where, st.Do)
 		}
 	}
@@ -457,12 +462,12 @@ func (m tuiModel) keysContent() []string {
 		out = append(out, ui.StyleCmd.Render("YAML Actions"),
 			ui.Label("")+ui.StyleElement.Render(strings.Join(sortedBindings(toSet(names)), ", ")), "")
 	}
-	if m.scripts != nil && len(m.scripts.Names()) > 0 {
+	if names := m.actionNames(); len(names) > 0 {
 		out = append(out, ui.StyleCmd.Render("Lua Actions"),
-			ui.Label("")+ui.StyleElement.Render(strings.Join(m.scripts.Names(), ", ")), "")
+			ui.Label("")+ui.StyleElement.Render(strings.Join(names, ", ")), "")
 	}
-	if m.scriptsErr != "" {
-		out = append(out, ui.StyleErr.Render(ui.Truncate(m.scriptsErr, max(20, m.width-4))), "")
+	if e := m.actionsErr(); e != "" {
+		out = append(out, ui.StyleErr.Render(ui.Truncate(e, max(20, m.width-4))), "")
 	}
 	if m.keysErr != "" {
 		out = append(out, ui.StyleErr.Render(ui.Truncate(m.keysErr, max(20, m.width-4))), "")
@@ -472,7 +477,7 @@ func (m tuiModel) keysContent() []string {
 
 func (m tuiModel) keybindsLine() string {
 	line := ui.StyleElement.Render(fmt.Sprintf("%d bound", m.binds().count()))
-	path := KeybindsPath(m.store)
+	path := KeybindsPath(m.store())
 	if path == "" {
 		return line
 	}

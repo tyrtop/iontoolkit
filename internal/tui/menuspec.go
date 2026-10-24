@@ -18,6 +18,7 @@ var menuActions = []struct {
 	{"sign-in", "Sign In with Browser", actSignIn},
 	{"refresh-token", "Refresh Browser Token", actRefreshToken},
 	{"macros", "Macros", actMacros},
+	{"workflows", "Workflows", actWorkflows},
 	{"settings", "Settings", actSettings},
 	{"quit", "Quit", actQuit},
 }
@@ -54,7 +55,7 @@ func (e *menuEntryS) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-func parseMenu(b []byte) ([]menuEntry, error) {
+func parseMenu(b []byte, runs func(string) bool) ([]menuEntry, error) {
 	var spec menuSpec
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
 	dec.KnownFields(true)
@@ -71,15 +72,23 @@ func parseMenu(b []byte) ([]menuEntry, error) {
 		if e.Name == "" {
 			return nil, fmt.Errorf("entry %d has no name", i+1)
 		}
-		at := menuActionNamed(e.Name)
-		if at < 0 {
-			return nil, fmt.Errorf("entry %q is not one iontk runs (%s)",
-				e.Name, strings.Join(menuActionNames(), ", "))
-		}
 		if seen[e.Name] {
 			return nil, fmt.Errorf("two entries are called %q", e.Name)
 		}
 		seen[e.Name] = true
+		at := menuActionNamed(e.Name)
+		if at < 0 && runs != nil && runs(e.Name) {
+			label := e.Label
+			if label == "" {
+				label = e.Name
+			}
+			out = append(out, menuEntry{label: label, action: actCommand, command: e.Name})
+			continue
+		}
+		if at < 0 {
+			return nil, fmt.Errorf("entry %q is not one iontk runs (%s, or a runtime command: iontk help lists them)",
+				e.Name, strings.Join(menuActionNames(), ", "))
+		}
 
 		label := menuActions[at].label
 		if e.Label != "" {
@@ -125,6 +134,10 @@ func menuSeed(entries []menuEntry) string {
 	b.WriteString("# it; give it a label of your own to change what it says.\n\n")
 	b.WriteString("kind: " + view.KindMenu + "\nentries:\n")
 	for _, e := range entries {
+		if e.action == actCommand {
+			b.WriteString(fmt.Sprintf("  - {name: %q, label: %q}\n", e.command, e.label))
+			continue
+		}
 		for _, a := range menuActions {
 			if a.action == e.action {
 				b.WriteString("  - " + a.name + "\n")

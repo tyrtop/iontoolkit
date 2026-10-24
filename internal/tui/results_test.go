@@ -42,7 +42,7 @@ func TestResultsListsOnlyCompleted(t *testing.T) {
 		t.Errorf("rows = %d, want 3 — the pending element must not appear", got)
 	}
 	for _, i := range m.resMatches {
-		if m.results[i].ElementID == "" {
+		if m.batch().Results[i].ElementID == "" {
 			t.Error("a pending result leaked into the table")
 		}
 	}
@@ -72,7 +72,7 @@ func TestResultsFilterUsesTheSameLogicAsElements(t *testing.T) {
 
 func TestResultsEnterExpandsInlineNotANewTab(t *testing.T) {
 	m := resultsModel(t)
-	before := m.sessions.Count()
+	before := m.sessions().Count()
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	open := mm.(tuiModel)
@@ -80,7 +80,7 @@ func TestResultsEnterExpandsInlineNotANewTab(t *testing.T) {
 	if !open.resOpen {
 		t.Fatal("enter did not expand the row")
 	}
-	if open.sessions.Count() != before {
+	if open.sessions().Count() != before {
 		t.Error("enter opened a session tab; it should expand inline")
 	}
 	if open.phase != phaseResults {
@@ -229,8 +229,8 @@ func TestResultsFormatKeysCycleAndPersist(t *testing.T) {
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'f', Text: "f"}))
 	m = mm.(tuiModel)
-	if m.cfg.BatchFormat != output.FormatJSONL {
-		t.Errorf("BatchFormat = %q, want %q after one cycle from the default", m.cfg.BatchFormat, output.FormatJSONL)
+	if m.cfg().BatchFormat != output.FormatJSONL {
+		t.Errorf("BatchFormat = %q, want %q after one cycle from the default", m.cfg().BatchFormat, output.FormatJSONL)
 	}
 	if !strings.Contains(m.status, "s saves") {
 		t.Errorf("status = %q, want it to say what still has to be pressed", m.status)
@@ -238,11 +238,11 @@ func TestResultsFormatKeysCycleAndPersist(t *testing.T) {
 
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'o', Text: "o"}))
 	m = mm.(tuiModel)
-	if m.cfg.BatchOrient != output.OrientCommand {
-		t.Errorf("BatchOrient = %q, want %q", m.cfg.BatchOrient, output.OrientCommand)
+	if m.cfg().BatchOrient != output.OrientCommand {
+		t.Errorf("BatchOrient = %q, want %q", m.cfg().BatchOrient, output.OrientCommand)
 	}
 
-	saved, err := m.store.Config()
+	saved, err := m.store().Config()
 	if err != nil {
 		t.Fatalf("Config() error = %v", err)
 	}
@@ -261,8 +261,8 @@ func TestResultsFormatKeysStayOutOfTheFilter(t *testing.T) {
 		m = mm.(tuiModel)
 	}
 
-	if m.cfg.BatchFormat != "" || m.cfg.BatchOrient != "" {
-		t.Errorf("typing in the filter changed the save format to %q/%q", m.cfg.BatchFormat, m.cfg.BatchOrient)
+	if m.cfg().BatchFormat != "" || m.cfg().BatchOrient != "" {
+		t.Errorf("typing in the filter changed the save format to %q/%q", m.cfg().BatchFormat, m.cfg().BatchOrient)
 	}
 	if got := m.resFilter.Value(); got != "fos" {
 		t.Errorf("filter = %q, want the letters typed into it", got)
@@ -272,7 +272,7 @@ func TestResultsFormatKeysStayOutOfTheFilter(t *testing.T) {
 func TestResultsSaveKeyWritesTheCurrentFormat(t *testing.T) {
 	dir := t.TempDir()
 	m := resultsModel(t)
-	m.cfg.BatchToFile, m.cfg.BatchDir, m.cfg.BatchFormat = true, dir, output.FormatCSV
+	m.cfg().BatchToFile, m.cfg().BatchDir, m.cfg().BatchFormat = true, dir, output.FormatCSV
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 's', Text: "s"}))
 	m = mm.(tuiModel)
@@ -314,12 +314,12 @@ func TestResultsSaveKeySaysWhenThereIsNoFolder(t *testing.T) {
 func TestResultsHeaderNamesTheSaveFormat(t *testing.T) {
 	m := resultsModel(t)
 
-	m.cfg.BatchFormat, m.cfg.BatchOrient = output.FormatCSV, output.OrientCommand
+	m.cfg().BatchFormat, m.cfg().BatchOrient = output.FormatCSV, output.OrientCommand
 	if got := plain(m.viewResults()); !strings.Contains(got, "csv · command-first") {
 		t.Errorf("results header does not name the format and orientation:\n%s", got)
 	}
 
-	m.cfg.BatchFormat = output.FormatJSON
+	m.cfg().BatchFormat = output.FormatJSON
 	got := plain(m.viewResults())
 	if !strings.Contains(got, "json") {
 		t.Errorf("results header does not name the format:\n%s", got)
@@ -332,23 +332,21 @@ func TestResultsHeaderNamesTheSaveFormat(t *testing.T) {
 func TestTheResultsCursorFollowsItsElementAsResultsArrive(t *testing.T) {
 	m := pickModel(t)
 	m.width, m.height = 100, 30
-	m.ran = []string{"1", "2", "3", "4"}
-	m.results = make([]sase.Result, 4)
-	m.elapsed = make([]time.Duration, 4)
+	m.runtime().BeginBatch(nil, []string{"1", "2", "3", "4"})
 	m.phase = phaseResults
 
 	done := func(i int, name string) {
-		m.results[i] = sase.Result{
+		m.runtime().ApplyBatchEvent(sase.Event{Index: i, Element: name, Done: true, Result: sase.Result{
 			ElementID: fmt.Sprint(i + 1), Name: name, Model: "ion 2000",
 			Commands: []ioncli.CommandOutput{{Command: "dump device status", Output: name + " output"}},
-		}
+		}})
 		m.applyResultFilter()
 	}
 
 	done(3, "S0100-RTR-04")
 	idx, ok := m.currentResult()
-	if !ok || m.results[idx].Name != "S0100-RTR-04" {
-		t.Fatalf("cursor is on %+v, want the only finished element", m.results[idx])
+	if !ok || m.batch().Results[idx].Name != "S0100-RTR-04" {
+		t.Fatalf("cursor is on %+v, want the only finished element", m.batch().Results[idx])
 	}
 
 	done(1, "S0100-RTR-02")
@@ -356,7 +354,7 @@ func TestTheResultsCursorFollowsItsElementAsResultsArrive(t *testing.T) {
 	if !ok {
 		t.Fatal("no result under the cursor")
 	}
-	if got := m.results[idx].Name; got != "S0100-RTR-04" {
+	if got := m.batch().Results[idx].Name; got != "S0100-RTR-04" {
 		t.Errorf("cursor moved to %s, want it to stay on S0100-RTR-04", got)
 	}
 
@@ -368,10 +366,10 @@ func TestTheResultsCursorFollowsItsElementAsResultsArrive(t *testing.T) {
 
 	m.moveResultCursor(-1)
 	before, _ := m.currentResult()
-	name := m.results[before].Name
+	name := m.batch().Results[before].Name
 	done(0, "S0100-RTR-01")
 	after, _ := m.currentResult()
-	if got := m.results[after].Name; got != name {
+	if got := m.batch().Results[after].Name; got != name {
 		t.Errorf("cursor moved from %s to %s when a result arrived", name, got)
 	}
 }
@@ -475,7 +473,7 @@ func TestSpaceInAnOpenResultPagesTheOutput(t *testing.T) {
 	if got.resTable.Cursor() != m.resTable.Cursor() {
 		t.Error("space moved the list while an output pane was open")
 	}
-	if got.resLine == was && len(m.results[0].Commands) > 0 {
+	if got.resLine == was && len(m.batch().Results[0].Commands) > 0 {
 		t.Log("the output is shorter than a page, so the line did not move")
 	}
 	if !got.resOpen {

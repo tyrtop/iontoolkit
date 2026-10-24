@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -25,23 +27,21 @@ func plainDigit(key string) (int, bool) {
 }
 
 func (m tuiModel) useFavourite(slot int) (tea.Model, tea.Cmd) {
-	f, ok := m.cmds.Favourite(slot)
-	if !ok {
+	if _, ok := m.runtime().Favourite(slot); !ok {
 		m.status = fmt.Sprintf("alt+%d is empty — alt+f saves the line you are on", slot)
 		return m, nil
 	}
-
-	note := ""
-	if model := m.activeModel(); model != "" && f.Model != "" && f.Model != model {
-		note = fmt.Sprintf("alt+%d was saved on %s and this is %s — check it before sending", slot, f.Model, model)
+	f, differs, err := m.runtime().UseFavourite(slot)
+	m = m.closeSlash()
+	switch {
+	case errors.Is(err, runtime.ErrLoggingIn):
+		m.status = err.Error()
+	case err != nil:
+		m.status = "not read-only: " + f.Command
+	case differs != "":
+		m.status = fmt.Sprintf("alt+%d was %s — check it before sending", slot, differs)
 	}
-
-	next, cmd := m.insertCommand(f.Command)
-	nm := next.(tuiModel)
-	if nm.status == "" {
-		nm.status = note
-	}
-	return nm, cmd
+	return m, nil
 }
 
 func (m tuiModel) openFavourites() (tea.Model, tea.Cmd) {
@@ -72,7 +72,7 @@ func (m tuiModel) onFavouriteKey(key string) (tea.Model, tea.Cmd) {
 	case "a":
 		return m.openFavouriteForm(m.favCursor)
 	case exportKey:
-		f, ok := m.cmds.Favourite(m.favCursor)
+		f, ok := m.runtime().Favourite(m.favCursor)
 		if !ok {
 			m.status = fmt.Sprintf("alt+%d is empty", m.favCursor)
 			return m, nil
@@ -93,36 +93,36 @@ func (m tuiModel) onFavouriteKey(key string) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) saveFavourite(slot int) (tea.Model, tea.Cmd) {
 	line := ""
-	if s := m.sessions.Active(); s != nil {
+	if s := m.sessions().Active(); s != nil {
 		line = strings.TrimSpace(s.Line())
 	}
 	if line == "" {
 		m.status = "nothing on the line to save — a adds one by hand"
 		return m, nil
 	}
-	if err := m.cmds.SetFavourite(slot, line, m.activeModel()); err != nil {
+	if err := m.runtime().SetFavourite(slot, line, m.activeModel()); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
 	m.favPick = false
 	m.status = fmt.Sprintf("alt+%d is now %s", slot, line)
-	return m, saveCommands(m.store, m.cmds)
+	return m, m.saveCommands()
 }
 
 func (m tuiModel) clearFavourite(slot int) (tea.Model, tea.Cmd) {
-	if !m.cmds.ClearFavourite(slot) {
+	if !m.runtime().ClearFavourite(slot) {
 		m.status = fmt.Sprintf("alt+%d is already empty", slot)
 		return m, nil
 	}
 	m.status = fmt.Sprintf("alt+%d cleared", slot)
-	return m, saveCommands(m.store, m.cmds)
+	return m, m.saveCommands()
 }
 
 func (m tuiModel) openFavouriteForm(slot int) (tea.Model, tea.Cmd) {
 	cmd := newField("command", "dump device status", false)
-	if f, ok := m.cmds.Favourite(slot); ok {
+	if f, ok := m.runtime().Favourite(slot); ok {
 		cmd.input.SetValue(f.Command)
-	} else if s := m.sessions.Active(); s != nil {
+	} else if s := m.sessions().Active(); s != nil {
 		cmd.input.SetValue(strings.TrimSpace(s.Line()))
 	}
 	at := newField("slot", "1-9", false)
@@ -140,19 +140,19 @@ func (m tuiModel) submitFavourite() (tea.Model, tea.Cmd) {
 		m.status = "slot is a number from 1 to " + strconv.Itoa(config.FavouriteSlots)
 		return m, nil
 	}
-	if err := m.cmds.SetFavourite(slot, command, m.activeModel()); err != nil {
+	if err := m.runtime().SetFavourite(slot, command, m.activeModel()); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
 	m.form, m.formKind = nil, formNone
 	m.phase = m.formReturn
 	m.status = fmt.Sprintf("alt+%d is now %s", slot, command)
-	return m, saveCommands(m.store, m.cmds)
+	return m, m.saveCommands()
 }
 
 func (m tuiModel) overlayFavourites(content string) string {
 	line := ""
-	if s := m.sessions.Active(); s != nil {
+	if s := m.sessions().Active(); s != nil {
 		line = strings.TrimSpace(s.Line())
 	}
 
@@ -168,7 +168,7 @@ func (m tuiModel) overlayFavourites(content string) string {
 		}
 		row := cursor + ui.StyleDim.Render(strconv.Itoa(slot)+" ")
 
-		f, ok := m.cmds.Favourite(slot)
+		f, ok := m.runtime().Favourite(slot)
 		if !ok {
 			lines = append(lines, row+ui.StyleDim.Render("empty"))
 			continue

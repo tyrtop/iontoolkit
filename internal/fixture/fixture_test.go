@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"tyrtop.com/iontk/internal/config"
 )
 
 const demo = `
@@ -260,4 +261,35 @@ func abs(d time.Duration) time.Duration {
 		return -d
 	}
 	return d
+}
+
+func TestEveryFakeTenantIsItsOwnServiceAccount(t *testing.T) {
+	set, err := Tutorial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := set.SavedTenants()
+	if len(saved) != 2 {
+		t.Fatalf("%d service accounts, want one per tenant", len(saved))
+	}
+
+	seen := map[string]bool{}
+	for _, ct := range saved {
+		if ct.Auth != config.AuthServiceAccount || !ct.Added {
+			t.Errorf("%s is %+v, want an added service account", ct.Name, ct)
+		}
+		if seen[ct.ClientID] {
+			t.Errorf("%s shares a client id with another account: %s", ct.Name, ct.ClientID)
+		}
+		seen[ct.ClientID] = true
+		if !strings.Contains(ct.ClientID, ct.TSGID) {
+			t.Errorf("%s has client id %q, want its own tsg in it", ct.Name, ct.ClientID)
+		}
+	}
+	if got := saved[0].ClientID; got != "acme-co@999000999.iam.panserviceaccount.com" {
+		t.Errorf("Acme Co's client id is %q", got)
+	}
+	if got := saved[1].ClientID; got != "globex@999000222.iam.panserviceaccount.com" {
+		t.Errorf("Globex's client id is %q", got)
+	}
 }

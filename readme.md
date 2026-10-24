@@ -62,24 +62,24 @@ SCM_TOKEN should be used only when a service account is not available.
 
 ## Interactive mode
 
-Omitting `-cmd` flag drops the user into an interactive shell. `Ctrl-]` disconnects.
+`iontk session open` attaches your terminal to one element's CLI. `Ctrl-]` disconnects.
 
 ```
-iontk -element 1234567890
+iontk session open 1234567890
 ```
 
 ## Batch mode
 
-With `-cmd`, the tool logs into the element, runs the commands in order, and then returns only the ordered output as JSON. 
+`iontk batch run` logs into the element, runs the commands in order, and then returns only the ordered output as JSON. 
 
 ```
-iontk -element 1234567890 -cmd "dump interface status 1, dump vpn summary"
+iontk batch run --element 1234567890 --cmd "dump interface status 1, dump vpn summary"
 ```
 
 To run across multiple elements, provide a .txt file with one element per line. Lines beginning with the `#` symbol will be skipped. 
 
 ```
-iontk -elements-path sites.txt -cmd "dump interface status 1, dump device status" -concurrency 25
+iontk batch run --elements-path sites.txt --cmd "dump interface status 1, dump device status" --concurrency 25
 ```
 
 Results go to stdout as a JSON array, one object per element, carrying the element metadata and a `commands` array of command and output pairs. Elements that failed carry an `error` instead. Errors are also written to stderr. 

@@ -72,3 +72,39 @@ func TestAnUnservedEndpointSaysSoRatherThanHanging(t *testing.T) {
 		t.Errorf("status = %d for an endpoint fixture mode does not serve, want 404", resp.StatusCode)
 	}
 }
+
+func TestAnInterfaceEditIsKeptAndEverythingElseIsRefused(t *testing.T) {
+	s := load(t, demo)
+	c := fixtureClient(s, s.Tenants[0].TSGID)
+	el := s.Tenants[0].Elements[0]
+	ifs := el.apiInterfaces()
+	site := el.siteID()
+	list := "/sdwan/v4.21/api/sites/" + site + "/elements/" + el.ID + "/interfaces"
+	one := list + "/" + ifs[0].ID
+
+	if _, err := c.Send(t.Context(), http.MethodPut, one, []byte(`{"id":"`+ifs[0].ID+`","name":"1","description":"uplink","mtu":1500}`)); err != nil {
+		t.Fatalf("PUT error = %v", err)
+	}
+	if _, err := c.Send(t.Context(), http.MethodPatch, one, []byte(`{"mtu":9000}`)); err != nil {
+		t.Fatalf("PATCH error = %v", err)
+	}
+
+	b, err := c.GetJSON(t.Context(), list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	if !strings.Contains(got, `"description":"uplink"`) || !strings.Contains(got, `"mtu":9000`) {
+		t.Errorf("list after the edits = %s", got)
+	}
+
+	for _, tt := range []struct{ method, path string }{
+		{http.MethodDelete, one},
+		{http.MethodPut, "/sdwan/v2.0/api/elements/" + el.ID},
+		{http.MethodPut, list + "/nosuch"},
+	} {
+		if _, err := c.Send(t.Context(), tt.method, tt.path, []byte(`{}`)); err == nil {
+			t.Errorf("%s %s was taken", tt.method, tt.path)
+		}
+	}
+}

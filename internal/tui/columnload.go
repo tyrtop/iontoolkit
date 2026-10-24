@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"tyrtop.com/iontk/internal/runtime"
 
 	"tyrtop.com/iontk/internal/column"
 	"tyrtop.com/iontk/internal/config"
@@ -33,6 +34,7 @@ func (m *tuiModel) loadColumns(st *config.Store) {
 		return
 	}
 	if set == nil {
+		m.runtime().SetColumns(builtinSpecs())
 		return
 	}
 	base, _ := defaultColumns()
@@ -41,8 +43,10 @@ func (m *tuiModel) loadColumns(st *config.Store) {
 		m.columnsErr = err.Error()
 		return
 	}
-	m.listSpec, m.listSpecs = cols, set.Columns
-	m.listPaths = listPathsOf(set)
+	m.listSpec = cols
+	m.runtime().SetColumns(set.Columns)
+	p := listPathsOf(set)
+	m.runtime().SetListPaths(runtime.ListPaths{Elements: p[column.ElementsSrc], Sites: p[column.SitesSrc]})
 }
 
 func buildColumns(set *column.Set, base []elementColumn) ([]elementColumn, error) {
@@ -270,7 +274,7 @@ func loneField(text string) (string, bool) {
 var elementValues = map[string]func(*tuiModel, elementRow) any{
 	"id":               func(_ *tuiModel, el elementRow) any { return el.ID },
 	"name":             func(_ *tuiModel, el elementRow) any { return el.Name },
-	"label":            func(_ *tuiModel, el elementRow) any { return el.label() },
+	"label":            func(_ *tuiModel, el elementRow) any { return el.Label() },
 	"model_name":       func(_ *tuiModel, el elementRow) any { return el.Model },
 	"serial_number":    func(_ *tuiModel, el elementRow) any { return el.Serial },
 	"software_version": func(_ *tuiModel, el elementRow) any { return el.Software },
@@ -351,8 +355,8 @@ type rowContext struct {
 }
 
 func (m *tuiModel) rowContext(el elementRow, from string, flat bool) map[string]any {
-	if m.rowCtx.key != el.key() {
-		m.rowCtx = rowContext{key: el.key()}
+	if m.rowCtx.key != el.Key() {
+		m.rowCtx = rowContext{key: el.Key()}
 	}
 	if from == column.FromSite {
 		if m.rowCtx.site == nil {
@@ -373,7 +377,7 @@ func (m *tuiModel) rowContext(el elementRow, from string, flat bool) map[string]
 	if m.rowCtx.element == nil {
 		ctx := elementContext(el)
 		ctx["site_name"] = m.siteName(el)
-		ctx["label"] = el.label()
+		ctx["label"] = el.Label()
 		ctx["tenant"] = el.Tenant
 		ctx["tsg"] = el.TSG
 		m.rowCtx.element = ctx
@@ -389,4 +393,12 @@ func elementContext(el elementRow) map[string]any {
 	ctx["tenant"] = el.Tenant
 	ctx["tsg"] = el.TSG
 	return ctx
+}
+
+func builtinSpecs() []column.Spec {
+	set, err := column.Builtin()
+	if err != nil || set == nil {
+		return nil
+	}
+	return set.Columns
 }

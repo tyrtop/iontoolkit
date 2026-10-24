@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/runtime"
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/config"
@@ -30,8 +31,8 @@ func settingsModel(t *testing.T) tuiModel {
 	}
 
 	m := newTUIModel(context.Background(), st, cfg)
-	m.tenant, m.hasTenant = cfg.Tenants[0], true
-	m.ionUser = "readonly"
+	m.runtime().UseTenant(cfg.Tenants[0])
+	m.runtime().SetIONUser("readonly")
 	m.phase = phaseSettings
 	m.width, m.height = 100, 30
 	return m
@@ -115,11 +116,11 @@ func TestSettingsGeneralTogglesWriteGuard(t *testing.T) {
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = mm.(tuiModel)
-	if !m.cfg.AllowWrites {
+	if !m.cfg().AllowWrites {
 		t.Error("enter did not toggle the write guard")
 	}
 
-	saved, err := m.store.Config()
+	saved, err := m.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,15 +138,15 @@ func TestSettingsSessionGeometryAdjusts(t *testing.T) {
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '+', Text: "+"}))
 	m = mm.(tuiModel)
 	cols, _ := m.sessionGeometry()
-	if cols != defaultSessionCols+10 {
-		t.Errorf("cols = %d, want %d", cols, defaultSessionCols+10)
+	if cols != runtime.DefaultSessionCols+10 {
+		t.Errorf("cols = %d, want %d", cols, runtime.DefaultSessionCols+10)
 	}
 
 	m.setCursor = 1
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: '-', Text: "-"}))
 	_, rows := mm.(tuiModel).sessionGeometry()
-	if rows != defaultSessionRows-10 {
-		t.Errorf("rows = %d, want %d", rows, defaultSessionRows-10)
+	if rows != runtime.DefaultSessionRows-10 {
+		t.Errorf("rows = %d, want %d", rows, runtime.DefaultSessionRows-10)
 	}
 }
 
@@ -174,7 +175,7 @@ func TestEditPasswordFromSettingsUsers(t *testing.T) {
 	if done.phase != phaseSettings {
 		t.Errorf("phase = %v, want to return to settings", done.phase)
 	}
-	got, err := done.store.Secrets.Get(config.IONPassKey("1", "readonly"))
+	got, err := done.store().Secrets.Get(config.IONPassKey("1", "readonly"))
 	if err != nil || got != "brandnew" {
 		t.Errorf("stored password = %q %v, want brandnew", got, err)
 	}
@@ -201,7 +202,7 @@ func TestEditPasswordFromElementsReturnsToElements(t *testing.T) {
 	if done.phase != phasePicking {
 		t.Errorf("phase = %v, want to drop back into elements", done.phase)
 	}
-	if got, _ := done.store.Secrets.Get(config.IONPassKey("1", "ops")); got != "pw2" {
+	if got, _ := done.store().Secrets.Get(config.IONPassKey("1", "ops")); got != "pw2" {
 		t.Errorf("password = %q, want pw2", got)
 	}
 }
@@ -226,7 +227,7 @@ func TestAddUserFromElementsReturnsToElements(t *testing.T) {
 	if done.phase != phasePicking {
 		t.Errorf("phase = %v, want to drop back into elements", done.phase)
 	}
-	if !done.tenant.HasUser("netadmin") {
+	if !done.tenant().HasUser("netadmin") {
 		t.Error("user was not added")
 	}
 }
@@ -306,7 +307,7 @@ func TestSettingsUsersPaneKeepsTheWholeRow(t *testing.T) {
 
 func TestSettingsUsersSectionOpensForATenantWithNoUsers(t *testing.T) {
 	m := settingsModel(t)
-	m.tenant = m.cfg.Tenants[1]
+	m.runtime().ReplaceTenant(m.cfg().Tenants[1])
 	m.setSection = secUsers
 	m.setFocus = focusNav
 
@@ -345,10 +346,10 @@ func TestDefaultUserSwitchesRepeatedlyInSettings(t *testing.T) {
 		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
 		m = mm.(tuiModel)
 
-		if got := m.tenant.DefaultUser(); got != step.want {
-			t.Errorf("cursor %d: model default = %q, want %q (users=%+v)", step.cursor, got, step.want, m.tenant.Users)
+		if got := m.tenant().DefaultUser(); got != step.want {
+			t.Errorf("cursor %d: model default = %q, want %q (users=%+v)", step.cursor, got, step.want, m.tenant().Users)
 		}
-		saved, err := m.store.Config()
+		saved, err := m.store().Config()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -376,8 +377,8 @@ func TestDefaultUserSwitchesRepeatedlyInUserPanel(t *testing.T) {
 		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
 		m = mm.(tuiModel)
 
-		if got := m.tenant.DefaultUser(); got != step.want {
-			t.Errorf("cursor %d: default = %q, want %q (users=%+v)", step.cursor, got, step.want, m.tenant.Users)
+		if got := m.tenant().DefaultUser(); got != step.want {
+			t.Errorf("cursor %d: default = %q, want %q (users=%+v)", step.cursor, got, step.want, m.tenant().Users)
 		}
 	}
 }
@@ -397,16 +398,16 @@ func TestDefaultUserSwitchViaNavigationKeys(t *testing.T) {
 	m = press(m, tea.Key{Code: tea.KeyDown})
 	t.Logf("after down: setCursor=%d focus=%d rows=%d", m.setCursor, m.setFocus, m.sectionRows())
 	m = press(m, tea.Key{Code: 'd', Text: "d"})
-	t.Logf("after d: default=%q active=%q", m.tenant.DefaultUser(), m.ionUser)
-	if got := m.tenant.DefaultUser(); got != "ops" {
+	t.Logf("after d: default=%q active=%q", m.tenant().DefaultUser(), m.ionUser())
+	if got := m.tenant().DefaultUser(); got != "ops" {
 		t.Errorf("default = %q, want ops", got)
 	}
 
 	m = press(m, tea.Key{Code: tea.KeyUp})
 	t.Logf("after up: setCursor=%d", m.setCursor)
 	m = press(m, tea.Key{Code: 'd', Text: "d"})
-	t.Logf("after d: default=%q", m.tenant.DefaultUser())
-	if got := m.tenant.DefaultUser(); got != "readonly" {
+	t.Logf("after d: default=%q", m.tenant().DefaultUser())
+	if got := m.tenant().DefaultUser(); got != "readonly" {
 		t.Errorf("second switch default = %q, want readonly", got)
 	}
 }
@@ -426,8 +427,8 @@ func TestUserPanelStaysOpenForRepeatedSwitches(t *testing.T) {
 		if m.phase != phaseUsers {
 			t.Fatalf("enter left the panel (phase %v); you could only switch once per visit", m.phase)
 		}
-		if m.ionUser != step.want {
-			t.Errorf("ionUser = %q, want %q", m.ionUser, step.want)
+		if m.ionUser() != step.want {
+			t.Errorf("ionUser = %q, want %q", m.ionUser(), step.want)
 		}
 	}
 
@@ -467,7 +468,7 @@ func TestEnterInContentStillActs(t *testing.T) {
 	m.setCursor = guardRow
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if !mm.(tuiModel).cfg.AllowWrites {
+	if !mm.(tuiModel).cfg().AllowWrites {
 		t.Error("enter in the content pane must still perform the row action")
 	}
 }
@@ -545,7 +546,7 @@ func TestEditTenantRenameMovesSecretsAndConfig(t *testing.T) {
 	m.setFocus = focusContent
 	m.setCursor = 0
 
-	if err := m.store.Secrets.Set(config.ClientSecretKey("1"), "sa-secret"); err != nil {
+	if err := m.store().Secrets.Set(config.ClientSecretKey("1"), "sa-secret"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -563,7 +564,7 @@ func TestEditTenantRenameMovesSecretsAndConfig(t *testing.T) {
 	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	done := mm.(tuiModel)
 
-	saved, err := done.store.Config()
+	saved, err := done.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -584,13 +585,13 @@ func TestEditTenantRenameMovesSecretsAndConfig(t *testing.T) {
 		t.Errorf("LastTenant = %q, want the new name", saved.LastTenant)
 	}
 
-	if got, _ := done.store.Secrets.Get(config.ClientSecretKey("99")); got != "sa-secret" {
+	if got, _ := done.store().Secrets.Get(config.ClientSecretKey("99")); got != "sa-secret" {
 		t.Errorf("client secret did not move to the new tsg: %q", got)
 	}
-	if _, err := done.store.Secrets.Get(config.ClientSecretKey("1")); err == nil {
+	if _, err := done.store().Secrets.Get(config.ClientSecretKey("1")); err == nil {
 		t.Error("old client secret key left behind")
 	}
-	if got, _ := done.store.Secrets.Get(config.IONPassKey("99", "readonly")); got != "old" {
+	if got, _ := done.store().Secrets.Get(config.IONPassKey("99", "readonly")); got != "old" {
 		t.Errorf("ion password did not move to the new tsg: %q", got)
 	}
 }
@@ -614,16 +615,16 @@ func TestEditUserRenameKeepsDefaultAndMovesPassword(t *testing.T) {
 	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	done := mm.(tuiModel)
 
-	if done.tenant.DefaultUser() != "ro" {
-		t.Errorf("DefaultUser() = %q, want the renamed user to stay default", done.tenant.DefaultUser())
+	if done.tenant().DefaultUser() != "ro" {
+		t.Errorf("DefaultUser() = %q, want the renamed user to stay default", done.tenant().DefaultUser())
 	}
-	if done.tenant.HasUser("readonly") {
+	if done.tenant().HasUser("readonly") {
 		t.Error("old user name survived")
 	}
-	if got, _ := done.store.Secrets.Get(config.IONPassKey("1", "ro")); got != "old" {
+	if got, _ := done.store().Secrets.Get(config.IONPassKey("1", "ro")); got != "old" {
 		t.Errorf("password did not follow the rename: %q", got)
 	}
-	if _, err := done.store.Secrets.Get(config.IONPassKey("1", "readonly")); err == nil {
+	if _, err := done.store().Secrets.Get(config.IONPassKey("1", "readonly")); err == nil {
 		t.Error("old password key left behind")
 	}
 }
@@ -716,7 +717,7 @@ func TestTheResetSectionsTwoRowsArmSeparately(t *testing.T) {
 	if !strings.Contains(m.status, "shipped schemes are back") {
 		t.Errorf("status = %q, want the restore to have run", m.status)
 	}
-	if len(m.cfg.Tenants) == 0 {
+	if len(m.cfg().Tenants) == 0 {
 		t.Error("restoring the themes took the tenants with it")
 	}
 
@@ -728,7 +729,7 @@ func TestTheResetSectionsTwoRowsArmSeparately(t *testing.T) {
 	if !strings.Contains(m.status, "cancel") {
 		t.Errorf("status = %q, want the reset cancelled", m.status)
 	}
-	if len(m.cfg.Tenants) == 0 {
+	if len(m.cfg().Tenants) == 0 {
 		t.Error("a cancelled reset still wiped the tenants")
 	}
 }

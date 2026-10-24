@@ -91,7 +91,7 @@ func (m *tuiModel) columns() []elementColumn {
 
 func (m *tuiModel) fleetWhen() map[string]any {
 	return map[string]any{
-		"elements":  len(m.all),
+		"elements":  len(m.rows()),
 		"tenants":   m.tenantCount,
 		"serials":   m.showSerialColumn(),
 		"clustered": m.showHAColumn(),
@@ -172,7 +172,7 @@ type rowCells struct {
 }
 
 func (m *tuiModel) rowCells(cols []elementColumn, el elementRow) rowCells {
-	key := el.key()
+	key := el.Key()
 	rc, ok := m.listCache[key]
 	if !ok {
 		rc = rowCells{text: make([]string, len(cols)), width: make([]int, len(cols))}

@@ -38,16 +38,10 @@ func (m tuiModel) cycleZone() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) applyZone(spec string) (tuiModel, bool) {
-	if err := clock.Valid(spec); err != nil {
+	if err := m.runtime().Set("zone", spec); err != nil {
 		m.status = err.Error()
 		return m, false
 	}
-	m.cfg.Zone = spec
-	if err := m.store.SaveConfig(m.cfg); err != nil {
-		m.status = err.Error()
-		return m, false
-	}
-	_ = clock.Use(spec)
 	if !strings.EqualFold(spec, clock.UTC) && !strings.EqualFold(spec, clock.Local) {
 		m.typedZone = spec
 	}
@@ -235,8 +229,7 @@ func (m tuiModel) onThemeKey(key string) (tea.Model, tea.Cmd) {
 		return m.openNewThemeForm()
 	}
 
-	m.cfg.Theme = t.Name
-	if err := m.store.SaveConfig(m.cfg); err != nil {
+	if err := m.runtime().Set("theme", t.Name); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
@@ -295,7 +288,7 @@ func (m tuiModel) submitNewTheme() (tea.Model, tea.Cmd) {
 	t := ui.CurrentTheme()
 	t.Name, t.Blurb = name, "copied from "+ui.CurrentTheme().Name
 	t.Tabs = slices.Clone(t.Tabs)
-	if err := ui.SaveUserTheme(app.ThemesPath(m.store), t); err != nil {
+	if err := ui.SaveUserTheme(app.ThemesPath(m.store()), t); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
@@ -335,16 +328,16 @@ func (m tuiModel) previewFrame(t ui.Theme) string {
 func (m tuiModel) deleteWord(t ui.Theme) string {
 	_, shipped := ui.BuiltinTheme(t.Name)
 	switch {
-	case ui.IsUserTheme(app.ThemesPath(m.store), t.Name) && shipped:
+	case ui.IsUserTheme(app.ThemesPath(m.store()), t.Name) && shipped:
 		return "drop your changes to"
-	case ui.IsUserTheme(app.ThemesPath(m.store), t.Name):
+	case ui.IsUserTheme(app.ThemesPath(m.store()), t.Name):
 		return "delete"
 	}
 	return "hide"
 }
 
 func (m tuiModel) deleteTheme(t ui.Theme) (tea.Model, tea.Cmd) {
-	path := app.ThemesPath(m.store)
+	path := app.ThemesPath(m.store())
 	report := ""
 
 	if ui.IsUserTheme(path, t.Name) {
@@ -358,22 +351,22 @@ func (m tuiModel) deleteTheme(t ui.Theme) (tea.Model, tea.Cmd) {
 			report = t.Name + " is gone"
 		}
 	} else {
-		m.cfg.HiddenThemes = append(slices.Clone(m.cfg.HiddenThemes), t.Name)
-		ui.HideThemes(m.cfg.HiddenThemes)
+		m.cfg().HiddenThemes = append(slices.Clone(m.cfg().HiddenThemes), t.Name)
+		ui.HideThemes(m.cfg().HiddenThemes)
 		report = t.Name + " is hidden · settings → Reset brings it back"
 	}
 
-	if _, still := ui.ThemeByName(m.cfg.Theme); !still || ui.IsHidden(m.cfg.Theme) {
-		m.cfg.Theme = ui.Default().Name
-		report += ", so " + m.cfg.Theme + " is in use"
+	if _, still := ui.ThemeByName(m.cfg().Theme); !still || ui.IsHidden(m.cfg().Theme) {
+		m.cfg().Theme = ui.Default().Name
+		report += ", so " + m.cfg().Theme + " is in use"
 	}
-	if err := m.store.SaveConfig(m.cfg); err != nil {
+	if err := m.store().SaveConfig(m.cfg()); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
 
 	m.setCursor = min(m.setCursor, max(0, m.sectionRows()-1))
-	now, _ := ui.ThemeByName(m.cfg.Theme)
+	now, _ := ui.ThemeByName(m.cfg().Theme)
 	next, cmd := m.applyTheme(now)
 	nm := next.(tuiModel)
 	nm.status = report
@@ -381,23 +374,23 @@ func (m tuiModel) deleteTheme(t ui.Theme) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) restoreShippedThemes() (tea.Model, tea.Cmd) {
-	n, err := ui.RemoveOverrides(app.ThemesPath(m.store))
+	n, err := ui.RemoveOverrides(app.ThemesPath(m.store()))
 	if err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
-	hidden := len(m.cfg.HiddenThemes)
-	m.cfg.HiddenThemes = nil
+	hidden := len(m.cfg().HiddenThemes)
+	m.cfg().HiddenThemes = nil
 	ui.HideThemes(nil)
-	if err := m.store.SaveConfig(m.cfg); err != nil {
+	if err := m.store().SaveConfig(m.cfg()); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
 
-	now, ok := ui.ThemeByName(m.cfg.Theme)
+	now, ok := ui.ThemeByName(m.cfg().Theme)
 	if !ok {
-		m.cfg.Theme = now.Name
-		_ = m.store.SaveConfig(m.cfg)
+		m.cfg().Theme = now.Name
+		_ = m.store().SaveConfig(m.cfg())
 	}
 	next, cmd := m.applyTheme(now)
 	nm := next.(tuiModel)

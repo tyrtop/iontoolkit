@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -31,7 +32,7 @@ func TestHAStatesAreFilledIntoTheList(t *testing.T) {
 		t.Fatalf("%d clusters to read for a pair sharing one, want 1", w.clusters())
 	}
 
-	cmd := loadHA(t.Context(), m.pool.get(m.tenant.TSGID), m.tenant.TSGID, w.pairs)
+	cmd := loadHA(t.Context(), m.runtime(), m.tenant().TSGID, w.pairs)
 	if cmd == nil {
 		t.Fatal("nothing queued for a tenant with a cluster")
 	}
@@ -63,7 +64,7 @@ func TestTheHAColumnStaysOffAListWithoutClusters(t *testing.T) {
 	if m.showHAColumn() {
 		t.Error("the HA column is on a list with no clusters in it")
 	}
-	if cmd := loadHA(t.Context(), m.pool.get(m.tenant.TSGID), m.tenant.TSGID, nil); cmd != nil {
+	if cmd := loadHA(t.Context(), m.runtime(), m.tenant().TSGID, nil); cmd != nil {
 		t.Error("something was queued for a tenant with no clusters")
 	}
 }
@@ -90,7 +91,7 @@ func TestHAClustersAreCountedOncePerCluster(t *testing.T) {
 
 func rowFor(t *testing.T, m tuiModel, eid string) elementRow {
 	t.Helper()
-	for _, r := range m.all {
+	for _, r := range m.rows() {
 		if r.ID == eid {
 			return r
 		}
@@ -100,8 +101,8 @@ func rowFor(t *testing.T, m tuiModel, eid string) elementRow {
 }
 
 func elementsOf(m tuiModel) []api.Element {
-	out := make([]api.Element, 0, len(m.all))
-	for _, r := range m.all {
+	out := make([]api.Element, 0, len(m.rows()))
+	for _, r := range m.rows() {
 		out = append(out, r.Element)
 	}
 	return out
@@ -128,7 +129,7 @@ func TestEveryClusterResolvesNotJustTheFirstBatch(t *testing.T) {
 		t.Fatalf("%d clusters, want one per site (%d)", len(pairs), sites)
 	}
 
-	cmd := loadHA(t.Context(), m.pool.get(m.tenant.TSGID), m.tenant.TSGID, pairs)
+	cmd := loadHA(t.Context(), m.runtime(), m.tenant().TSGID, pairs)
 	passes := 0
 	for {
 		passes++
@@ -153,7 +154,7 @@ func TestEveryClusterResolvesNotJustTheFirstBatch(t *testing.T) {
 		t.Fatalf("%d pass for %d clusters, want the batches to chain", passes, sites)
 	}
 
-	for _, r := range m.all {
+	for _, r := range m.rows() {
 		got := plain(m.haCell(r))
 		if got != "active" && got != "standby" {
 			t.Errorf("%s reads %q after the whole sweep, want a state", r.Name, got)
@@ -168,7 +169,7 @@ func TestARefusingClusterIsReportedNotSwallowed(t *testing.T) {
 
 	first := rowFor(t, m, set.Tenants[0].Elements[0].ID)
 	next, _ := m.Update(haStatesMsg{
-		tsg:    m.tenant.TSGID,
+		tsg:    m.tenant().TSGID,
 		failed: map[string]string{first.ClusterID(): "403 Forbidden"},
 	})
 	m = next.(tuiModel)
@@ -188,7 +189,7 @@ func TestAnAnsweredClusterThatNamesNobodyReadsUnknown(t *testing.T) {
 
 	first := rowFor(t, m, set.Tenants[0].Elements[0].ID)
 	next, _ := m.Update(haStatesMsg{
-		tsg:      m.tenant.TSGID,
+		tsg:      m.tenant().TSGID,
 		answered: []string{first.ClusterID()},
 	})
 	m = next.(tuiModel)
@@ -207,7 +208,7 @@ func TestAnElementWithNoSiteSaysItCannotBeAsked(t *testing.T) {
 		ID:      "9",
 		Name:    "no-site-rtr-01",
 		SpokeHA: &api.SpokeHA{ClusterID: "c9"},
-	}, TSG: m.tenant.TSGID}
+	}, TSG: m.tenant().TSGID}
 
 	if got := plain(m.haCell(r)); got != "ha?" {
 		t.Errorf("cell = %q for an element with no site, want it to admit it cannot be read", got)
@@ -221,8 +222,8 @@ func TestTheAggregateQueryFillsTheWholeColumnAtOnce(t *testing.T) {
 	m.rebuildRows()
 
 	w := haClusters(elementsOf(m))
-	m.haTotal = w.clusters()
-	cmd := loadHABulk(t.Context(), m.pool.get(m.tenant.TSGID), m.tenant.TSGID, w)
+	m.runtime().SetHAProgress(w.clusters(), 0, time.Time{})
+	cmd := loadHABulk(t.Context(), m.runtime(), m.tenant().TSGID, w)
 	if cmd == nil {
 		t.Fatal("nothing queued for a tenant with clusters")
 	}
@@ -239,7 +240,7 @@ func TestTheAggregateQueryFillsTheWholeColumnAtOnce(t *testing.T) {
 
 	next, _ := m.Update(msg)
 	m = next.(tuiModel)
-	for _, r := range m.all {
+	for _, r := range m.rows() {
 		if got := plain(m.haCell(r)); got != "active" && got != "standby" {
 			t.Errorf("%s reads %q after the aggregate, want a state", r.Name, got)
 		}
@@ -255,7 +256,7 @@ func TestARefusedAggregateFallsBackToThePerClusterSweep(t *testing.T) {
 	m.rebuildRows()
 
 	next, cmd := m.Update(haStatesMsg{
-		tsg:  m.tenant.TSGID,
+		tsg:  m.tenant().TSGID,
 		bulk: "status 403 Forbidden",
 		rest: haClusters(elementsOf(m)).pairs,
 	})
@@ -284,15 +285,15 @@ func TestCachedHAIsShownWithAnAsteriskUntilItIsRefreshed(t *testing.T) {
 	m.rebuildRows()
 
 	first := rowFor(t, m, set.Tenants[0].Elements[0].ID)
-	m.haCached = map[string]string{first.key(): haActive}
+	m.runtime().SetCachedHA(map[string]string{first.Key(): haActive})
 
 	if got := plain(m.haCell(first)); got != "active*" {
 		t.Errorf("cell = %q, want the cached state marked", got)
 	}
 
 	next, _ := m.Update(haStatesMsg{
-		tsg:      m.tenant.TSGID,
-		states:   map[string]string{first.key(): haStandby},
+		tsg:      m.tenant().TSGID,
+		states:   map[string]string{first.Key(): haStandby},
 		answered: []string{first.ClusterID()},
 	})
 	m = next.(tuiModel)
@@ -303,16 +304,16 @@ func TestCachedHAIsShownWithAnAsteriskUntilItIsRefreshed(t *testing.T) {
 
 func TestASweepIsSavedForTheNextLaunch(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
-	tsg := m.tenant.TSGID
+	tsg := m.tenant().TSGID
 	eid := set.Tenants[0].Elements[0].ID
 
-	cmd := saveHA(m.store, tsg, map[string]string{tsg + "/" + eid: haActive})
+	cmd := saveHA(m.runtime(), tsg, map[string]string{tsg + "/" + eid: haActive})
 	if cmd == nil {
 		t.Fatal("nothing was queued to save the sweep")
 	}
 	cmd()
 
-	c, err := m.store.Cache(tsg)
+	c, err := m.store().Cache(tsg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,29 +339,29 @@ func TestTheAggregateAsksAboutTheVisibleRowsFirst(t *testing.T) {
 		t.Fatalf("%d clustered elements, want the fleet", len(w.elements))
 	}
 
-	ordered := m.visibleFirst(m.tenant.TSGID, w.elements)
-	top := m.all[m.matches[0]].ID
+	ordered := m.visibleFirst(m.tenant().TSGID, w.elements)
+	top := m.rows()[m.matched()[0]].ID
 	if ordered[0] != top {
 		t.Errorf("first id asked about = %s, want the row under the cursor (%s)", ordered[0], top)
 	}
 
-	m.moveCursorTo(len(m.matches) - 1)
-	ordered = m.visibleFirst(m.tenant.TSGID, w.elements)
-	bottom := m.all[m.matches[len(m.matches)-1]].ID
+	m.moveCursorTo(len(m.matched()) - 1)
+	ordered = m.visibleFirst(m.tenant().TSGID, w.elements)
+	bottom := m.rows()[m.matched()[len(m.matched())-1]].ID
 	if ordered[0] != bottom {
 		t.Errorf("first id asked about = %s, want the row the cursor moved to (%s)", ordered[0], bottom)
 	}
 
 	m.filter.SetValue("store-0007")
 	m.applyFilter()
-	if len(m.matches) == 0 || len(m.matches) == len(m.all) {
-		t.Fatalf("%d matches, want the query to have narrowed the list", len(m.matches))
+	if len(m.matched()) == 0 || len(m.matched()) == len(m.rows()) {
+		t.Fatalf("%d matches, want the query to have narrowed the list", len(m.matched()))
 	}
 	wanted := map[string]bool{}
-	for _, i := range m.matches {
-		wanted[m.all[i].ID] = true
+	for _, i := range m.matched() {
+		wanted[m.rows()[i].ID] = true
 	}
-	ordered = m.visibleFirst(m.tenant.TSGID, w.elements)
+	ordered = m.visibleFirst(m.tenant().TSGID, w.elements)
 	for i := range len(wanted) {
 		if !wanted[ordered[i]] {
 			t.Errorf("id %d asked about (%s) is not one of the searched rows", i, ordered[i])
@@ -376,7 +377,7 @@ func TestASearchAsksForItsRowsWithoutWaitingForTheFill(t *testing.T) {
 
 	w := haClusters(elementsOf(m))
 	next, cmd := m.Update(haStatesMsg{
-		tsg:          m.tenant.TSGID,
+		tsg:          m.tenant().TSGID,
 		bulk:         "used",
 		states:       map[string]string{},
 		restElements: w.elements,
@@ -385,23 +386,23 @@ func TestASearchAsksForItsRowsWithoutWaitingForTheFill(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("the fill queued nothing to continue with")
 	}
-	if len(m.haQueue[m.tenant.TSGID]) == 0 {
+	if len(m.runtime().Queued(m.tenant().TSGID)) == 0 {
 		t.Fatal("the rest of the fleet was not queued")
 	}
 
 	m.filter.SetValue("store-0012")
 	m.applyFilter()
-	if len(m.matches) == 0 {
+	if len(m.matched()) == 0 {
 		t.Fatal("the query matched nothing")
 	}
-	wanted := m.haWanted()[m.tenant.TSGID]
+	wanted := m.haWanted()[m.tenant().TSGID]
 	if len(wanted) == 0 {
 		t.Fatal("nothing was wanted for the searched rows")
 	}
 	for _, id := range wanted {
 		var found bool
-		for _, i := range m.matches {
-			if m.all[i].ID == id {
+		for _, i := range m.matched() {
+			if m.rows()[i].ID == id {
 				found = true
 			}
 		}
@@ -424,8 +425,8 @@ func TestASearchAsksForItsRowsWithoutWaitingForTheFill(t *testing.T) {
 	}
 	next, _ = m.Update(msg)
 	m = next.(tuiModel)
-	for _, i := range m.matches {
-		r := m.all[i]
+	for _, i := range m.matched() {
+		r := m.rows()[i]
 		if r.ClusterID() == "" {
 			continue
 		}
@@ -437,7 +438,7 @@ func TestASearchAsksForItsRowsWithoutWaitingForTheFill(t *testing.T) {
 
 func TestEachChunkIsCachedAsItLands(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
-	tsg := m.tenant.TSGID
+	tsg := m.tenant().TSGID
 	eid := set.Tenants[0].Elements[0].ID
 
 	_, cmd := m.Update(haStatesMsg{
@@ -457,7 +458,7 @@ func TestEachChunkIsCachedAsItLands(t *testing.T) {
 		}
 	}
 
-	c, err := m.store.Cache(tsg)
+	c, err := m.store().Cache(tsg)
 	if err != nil || c == nil {
 		t.Fatalf("cache = %v, %v", c, err)
 	}

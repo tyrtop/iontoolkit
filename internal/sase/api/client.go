@@ -17,8 +17,11 @@ const browserUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, li
 type Client struct {
 	client   *http.Client
 	wsClient *http.Client
-	limiter  *rate.Limiter
-	verbose  bool
+
+	writerOnce sync.Once
+	writer     *http.Client
+	limiter    *rate.Limiter
+	verbose    bool
 
 	tokenMu        sync.RWMutex
 	token          string
@@ -163,4 +166,25 @@ func NewTokenSourceClient(ctx context.Context, client, wsClient *http.Client, sr
 	}
 	go s.refreshLoop(ctx, ttl, margin)
 	return s, nil
+}
+
+// the cloudgenix SDK gives every call 240s
+const WriteTimeout = 240 * time.Second
+
+type patientKey struct{}
+
+func Patient(ctx context.Context) context.Context { return context.WithValue(ctx, patientKey{}, true) }
+
+func patient(ctx context.Context) bool { v, _ := ctx.Value(patientKey{}).(bool); return v }
+
+func (s *Client) httpFor(write bool) *http.Client {
+	if !write || s.client.Timeout == 0 || s.client.Timeout >= WriteTimeout {
+		return s.client
+	}
+	s.writerOnce.Do(func() {
+		w := *s.client
+		w.Timeout = WriteTimeout
+		s.writer = &w
+	})
+	return s.writer
 }

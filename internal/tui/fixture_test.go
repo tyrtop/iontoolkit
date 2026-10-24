@@ -60,12 +60,11 @@ func fixtureTUIWith(t *testing.T, yaml string) (tuiModel, *fixture.Set) {
 
 	m := newTUIModel(t.Context(), st, cfg)
 	m.width, m.height = 100, 30
-	if !m.hasTenant {
+	if !m.hasTenant() {
 		t.Fatal("the seeded fixture tenant did not resolve, so the list would never load")
 	}
 
-	flags := app.TenantFlags(st, m.tenant, m.ionUser)
-	msg := loadTenant(t.Context(), flags, m.tenant, m.pool, st, m.listPaths)()
+	msg := fetchTenant(t.Context(), m.runtime(), m.tenant())()
 	next, _ := m.Update(msg)
 	return next.(tuiModel), set
 }
@@ -75,8 +74,8 @@ func TestFixtureModeFillsTheElementList(t *testing.T) {
 	m.phase = phasePicking
 	m.rebuildRows()
 
-	if len(m.all) != 2 {
-		t.Fatalf("got %d elements, want 2: %+v", len(m.all), m.all)
+	if len(m.rows()) != 2 {
+		t.Fatalf("got %d elements, want 2: %+v", len(m.rows()), m.rows())
 	}
 	got := plain(m.viewPicking())
 	for _, want := range []string{"store-0003-rtr-01", "ion 1200", "connected"} {
@@ -87,7 +86,7 @@ func TestFixtureModeFillsTheElementList(t *testing.T) {
 	if !strings.Contains(got, "Store 0003") {
 		t.Errorf("site name unresolved:\n%s", got)
 	}
-	if strings.Contains(got, m.all[0].SiteID) {
+	if strings.Contains(got, m.rows()[0].SiteID) {
 		t.Errorf("a raw site id is on screen:\n%s", got)
 	}
 }
@@ -95,9 +94,9 @@ func TestFixtureModeFillsTheElementList(t *testing.T) {
 func TestFixtureModeOpensASessionThroughTheRealPane(t *testing.T) {
 	m, set := fixtureTUI(t)
 	el := set.Tenants[0].Elements[0]
-	t.Cleanup(m.sessions.CloseAll)
+	t.Cleanup(m.sessions().CloseAll)
 
-	next, cmd := m.openSession(el.ID, el.Name, m.tenant.TSGID)
+	next, cmd := m.openSession(el.ID, el.Name, m.tenant().TSGID)
 	m = next.(tuiModel)
 	if cmd == nil {
 		t.Fatal("openSession queued nothing")
@@ -105,11 +104,11 @@ func TestFixtureModeOpensASessionThroughTheRealPane(t *testing.T) {
 	runCmd(t, cmd)
 
 	waitForTUI(t, func() bool {
-		s := m.sessions.Find(el.ID)
+		s := m.sessions().Find(el.ID)
 		return s != nil && strings.Contains(s.Render(), el.Name+"#")
 	})
 
-	s := m.sessions.Find(el.ID)
+	s := m.sessions().Find(el.ID)
 	if s == nil {
 		t.Fatal("no session was opened")
 	}

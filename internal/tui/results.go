@@ -86,7 +86,7 @@ func newResultsFilter() textinput.Model {
 
 func (m tuiModel) completedCount() int {
 	n := 0
-	for _, r := range m.results {
+	for _, r := range m.batch().Results {
 		if r.ElementID != "" {
 			n++
 		}
@@ -101,7 +101,7 @@ func (m *tuiModel) applyResultFilter() {
 	m.resMatches = m.resMatches[:0]
 
 	var names []string
-	for i, r := range m.results {
+	for i, r := range m.batch().Results {
 		if r.ElementID == "" {
 			continue
 		}
@@ -125,7 +125,7 @@ func (m *tuiModel) applyResultFilter() {
 
 func (m tuiModel) cursorResultID() string {
 	if idx, ok := m.currentResult(); ok {
-		return m.results[idx].ElementID
+		return m.batch().Results[idx].ElementID
 	}
 	return ""
 }
@@ -133,7 +133,7 @@ func (m tuiModel) cursorResultID() string {
 func (m *tuiModel) keepResultCursorOn(eid string) {
 	if eid != "" {
 		for row, i := range m.resMatches {
-			if m.results[i].ElementID == eid {
+			if m.batch().Results[i].ElementID == eid {
 				m.resTable.SetCursor(row)
 				return
 			}
@@ -148,7 +148,7 @@ func (m *tuiModel) rebuildResultRows() {
 	rows := make([]table.Row, 0, len(m.resMatches))
 	at := m.resTable.Cursor()
 	for n, i := range m.resMatches {
-		r := m.results[i]
+		r := m.batch().Results[i]
 		here := n == at
 
 		mark := ui.MarkCheck.String()
@@ -164,8 +164,8 @@ func (m *tuiModel) rebuildResultRows() {
 			name = r.ElementID
 		}
 		took := "-"
-		if i < len(m.elapsed) && m.elapsed[i] > 0 {
-			took = short(m.elapsed[i])
+		if i < len(m.batch().Elapsed) && m.batch().Elapsed[i] > 0 {
+			took = short(m.batch().Elapsed[i])
 		}
 		rows = append(rows, table.Row{
 			caret,
@@ -313,13 +313,11 @@ func (m tuiModel) onResultsOutputKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	switch key {
-	case "f":
-		m.cfg.BatchFormat = output.NextFormat(m.batchFormat())
-	case "o":
-		m.cfg.BatchOrient = output.NextOrientation(m.batchOrient())
+	name := "batch_format"
+	if key == "o" {
+		name = "batch_orient"
 	}
-	if err := m.store.SaveConfig(m.cfg); err != nil {
+	if err := m.runtime().Set(name, "next"); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
@@ -336,7 +334,7 @@ func (m tuiModel) onResultsOutputKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) resultDetail(idx int) []string {
-	r := m.results[idx]
+	r := m.batch().Results[idx]
 	var lines []string
 
 	if r.Error != "" {
@@ -363,9 +361,9 @@ func (m tuiModel) viewResults() string {
 
 	done := m.completedCount()
 	header := ui.StyleCmd.Render("results") +
-		ui.StyleDim.Render(fmt.Sprintf("   %d/%d done", done, len(m.ran)))
-	if m.failed > 0 {
-		header += ui.StyleErr.Render(fmt.Sprintf("  %d failed", m.failed))
+		ui.StyleDim.Render(fmt.Sprintf("   %d/%d done", done, len(m.batch().IDs)))
+	if m.batch().Failed > 0 {
+		header += ui.StyleErr.Render(fmt.Sprintf("  %d failed", m.batch().Failed))
 	}
 	tag := m.batchFormat()
 	if output.Tabular(m.batchFormat()) {
@@ -391,7 +389,7 @@ func (m tuiModel) viewResults() string {
 	}
 
 	if idx, ok := m.currentResult(); ok && m.resOpen {
-		r := m.results[idx]
+		r := m.batch().Results[idx]
 		name := r.Name
 		if name == "" {
 			name = r.ElementID
@@ -439,12 +437,7 @@ func (m tuiModel) viewResults() string {
 }
 
 func (m tuiModel) seedResultsForTest(rs []sase.Result, el []time.Duration) tuiModel {
-	m.ran = make([]string, len(rs))
-	for i, r := range rs {
-		m.ran[i] = r.ElementID
-	}
-	m.results = rs
-	m.elapsed = el
+	m.runtime().LoadBatch(nil, rs, el)
 	m.phase = phaseResults
 	m.applyResultFilter()
 	return m

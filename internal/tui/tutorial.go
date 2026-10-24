@@ -134,7 +134,7 @@ var tutorialScript = func(st *config.Store) ([]tutorialFlow, error) {
 }
 
 func (m tuiModel) readFlows() tuiModel {
-	flows, err := tutorialScript(m.store)
+	flows, err := tutorialScript(m.store())
 	m.flows, m.flowsErr = flows, ""
 	if err != nil {
 		m.flowsErr = err.Error()
@@ -393,7 +393,7 @@ func overlayUnder(content, box string, height int) string {
 }
 
 func (m tuiModel) raiseTutorialAsk() tuiModel {
-	if m.cfg == nil || m.cfg.TutorialSeen {
+	if m.cfg() == nil || m.cfg().TutorialSeen {
 		return m
 	}
 	m.askTutorial = true
@@ -437,12 +437,12 @@ func (m tuiModel) onTutorialAskKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) rememberTutorialAsked() tuiModel {
-	if m.cfg == nil || m.cfg.TutorialSeen {
+	if m.cfg() == nil || m.cfg().TutorialSeen {
 		return m
 	}
-	m.cfg.TutorialSeen = true
-	if m.store != nil {
-		if err := m.store.SaveConfig(m.cfg); err != nil {
+	m.cfg().TutorialSeen = true
+	if m.store() != nil {
+		if err := m.store().SaveConfig(m.cfg()); err != nil {
 			m.status = err.Error()
 		}
 	}

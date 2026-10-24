@@ -51,7 +51,7 @@ func TestMovingOnTheDiscAppliesTheColorWithoutSavingIt(t *testing.T) {
 			got, m.themeDraft.OK)
 	}
 
-	path := filepath.Join(app.ThemesPath(m.store), ui.ThemeFileName("nord"))
+	path := filepath.Join(app.ThemesPath(m.store()), ui.ThemeFileName("nord"))
 	if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), m.themeDraft.OK) {
 		t.Errorf("%s already holds %q before enter:\n%s", path, m.themeDraft.OK, b)
 	}

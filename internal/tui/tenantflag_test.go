@@ -23,15 +23,15 @@ func TestTenantFlagOpensOnThatTenant(t *testing.T) {
 	Tenant = "acme co"
 
 	m := newTUIModel(context.Background(), st, cfg)
-	if !m.hasTenant {
+	if !m.hasTenant() {
 		t.Fatal("hasTenant = false, want --tenant to resolve")
 	}
-	if m.tenant.Name != "Acme Co" {
-		t.Errorf("tenant = %q, want --tenant to win over last_tenant %q", m.tenant.Name, cfg.LastTenant)
+	if m.tenant().Name != "Acme Co" {
+		t.Errorf("tenant = %q, want --tenant to win over last_tenant %q", m.tenant().Name, cfg.LastTenant)
 	}
 
 	Tenant = ""
-	if got := newTUIModel(context.Background(), st, cfg); got.tenant.Name != "Globex" {
-		t.Errorf("tenant = %q, want the last tenant used with no --tenant", got.tenant.Name)
+	if got := newTUIModel(context.Background(), st, cfg); got.tenant().Name != "Globex" {
+		t.Errorf("tenant = %q, want the last tenant used with no --tenant", got.tenant().Name)
 	}
 }

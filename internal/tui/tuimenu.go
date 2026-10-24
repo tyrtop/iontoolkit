@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,54 +25,58 @@ const (
 	actMacros
 	actSettings
 	actQuit
+	actWorkflows
+	actCommand
 )
 
 type menuEntry struct {
-	label  string
-	action menuAction
+	label   string
+	action  menuAction
+	command string
 }
 
 func (m tuiModel) menuEntries() []menuEntry {
 	var e []menuEntry
-	if m.cfg == nil {
-		return []menuEntry{{"Quit", actQuit}}
+	if m.cfg() == nil {
+		return []menuEntry{{label: "Quit", action: actQuit}}
 	}
 	if m.menuSpec != nil {
 		return m.menuSpec
 	}
 
-	e = append(e, menuEntry{"Elements", actElements})
+	e = append(e, menuEntry{label: "Elements", action: actElements})
 
 	switch {
-	case m.authMode == authTenant:
-		e = append(e, menuEntry{"Service Accounts", actSwitch})
+	case m.authMode() == authTenant:
+		e = append(e, menuEntry{label: "Service Accounts", action: actSwitch})
 	case m.signedIn():
 		e = append(e,
-			menuEntry{"Browser Tenants", actSignIn},
-			menuEntry{"Refresh Browser Token", actRefreshToken},
+			menuEntry{label: "Browser Tenants", action: actSignIn},
+			menuEntry{label: "Refresh Browser Token", action: actRefreshToken},
 		)
 	default:
-		e = append(e, menuEntry{"Sign In with Browser", actSignIn})
+		e = append(e, menuEntry{label: "Sign In with Browser", action: actSignIn})
 	}
 
 	e = append(e,
-		menuEntry{"Macros", actMacros},
-		menuEntry{"Settings", actSettings},
-		menuEntry{"Quit", actQuit},
+		menuEntry{label: "Macros", action: actMacros},
+		menuEntry{label: "Workflows", action: actWorkflows},
+		menuEntry{label: "Settings", action: actSettings},
+		menuEntry{label: "Quit", action: actQuit},
 	)
 	return e
 }
 
 func (m tuiModel) cacheLine() string {
-	if !m.hasTenant {
+	if !m.hasTenant() {
 		return ui.StyleDim.Render("no tenant configured")
 	}
-	switch m.cacheState {
+	switch m.cacheState() {
 	case cacheUpdating:
-		if m.cacheCount == 0 {
+		if m.cacheCount() == 0 {
 			return ui.StyleWarn.Render("fetching elements")
 		}
-		return ui.StyleWarn.Render(fmt.Sprintf("%d elements cached (updating)", m.cacheCount))
+		return ui.StyleWarn.Render(fmt.Sprintf("%d elements cached (updating)", m.cacheCount()))
 	case cacheFailed:
 		return ui.StyleErr.Render("element refresh failed")
 	case cacheNone:
@@ -81,22 +84,22 @@ func (m tuiModel) cacheLine() string {
 	}
 
 	d := m.cacheAgeNow()
-	if m.cacheState == cacheUpdated && d < cacheFresh {
-		line := ui.StyleOK.Render(fmt.Sprintf("%d elements cached (updated)", m.cacheCount))
+	if m.cacheState() == cacheUpdated && d < cacheFresh {
+		line := ui.StyleOK.Render(fmt.Sprintf("%d elements cached (updated)", m.cacheCount()))
 		if d >= time.Second {
 			line += ui.StyleDim.Render("  " + ui.Age(d) + " ago")
 		}
 		return line
 	}
-	return ui.StyleDim.Render(fmt.Sprintf("%d elements cached", m.cacheCount)) +
+	return ui.StyleDim.Render(fmt.Sprintf("%d elements cached", m.cacheCount())) +
 		ui.StyleDim.Render("  "+ui.Age(d)+" ago")
 }
 
 func (m tuiModel) cacheAgeNow() time.Duration {
-	if m.cacheAt.IsZero() {
+	if m.cacheAt().IsZero() {
 		return 0
 	}
-	return time.Since(m.cacheAt)
+	return time.Since(m.cacheAt())
 }
 
 func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
@@ -118,14 +121,16 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch entries[m.menuCursor].action {
+		case actCommand:
+			return m.execLine(entries[m.menuCursor].command)
 		case actElements:
-			if m.mode == modeMacro {
-				m.mode = modeShell
-				if saved, ok := parseMode(m.cfg.DefaultMode); ok {
-					m.mode = saved
+			if m.mode() == modeMacro {
+				mode := modeShell
+				if saved, ok := parseMode(m.cfg().DefaultMode); ok {
+					mode = saved
 				}
+				m.setMode(mode)
 			}
-			m.armedMacro = ""
 			return m.startContinue()
 		case actSwitch:
 			m.switchCursor = 0
@@ -144,6 +149,8 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 			return m.startDiscover()
 		case actMacros:
 			return m.openMacros()
+		case actWorkflows:
+			return m.openWorkflows()
 		case actSettings:
 			m.setCursor = 0
 			m.phase = phaseSettings
@@ -157,28 +164,28 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) startContinue() (tea.Model, tea.Cmd) {
 	m.status = m.columnsErr
-	m.cacheState = cacheUpdating
+	m.setCacheState(cacheUpdating)
 
 	m.loadFromCache()
-	if len(m.all) > 0 {
+	if len(m.rows()) > 0 {
 		m.phase = phasePicking
 	} else {
 		m.phase = phaseLoading
 	}
 
-	f := app.TenantFlags(m.store, m.tenant, m.ionUser)
+	f := app.TenantFlags(m.store(), m.tenant(), m.ionUser())
 	if err := f.ValidateCreds(); err != nil {
 		m.status = err.Error()
-		m.cacheState = cacheFailed
+		m.setCacheState(cacheFailed)
 		m.phase = phaseMenu
 		return m, nil
 	}
 	m.flags = f
 	if f.IONUsername != "" {
-		m.ionUser = f.IONUsername
+		m.runtime().SetIONUser(f.IONUsername)
 	}
 
-	return m, tea.Batch(m.spinner.Tick, connect(m.ctx, m.store, f))
+	return m, tea.Batch(m.spinner.Tick, connect(m.ctx, m.store(), f))
 }
 
 func (m tuiModel) onSwitchKey(key string) (tea.Model, tea.Cmd) {
@@ -201,7 +208,7 @@ func (m tuiModel) onSwitchKey(key string) (tea.Model, tea.Cmd) {
 	case "u":
 		return m.undoForgetAccount()
 	case "alt+r":
-		if m.authMode == authTenant {
+		if m.authMode() == authTenant {
 			m.status = "service accounts are added in settings, not discovered"
 			return m, nil
 		}
@@ -209,7 +216,7 @@ func (m tuiModel) onSwitchKey(key string) (tea.Model, tea.Cmd) {
 	case "enter":
 		c, ok := m.switchAt(m.switchCursor)
 		if !ok {
-			if m.authMode == authTenant {
+			if m.authMode() == authTenant {
 				return m.openTenantForm(config.AuthServiceAccount)
 			}
 			return m, nil
@@ -222,7 +229,7 @@ func (m tuiModel) onSwitchKey(key string) (tea.Model, tea.Cmd) {
 		m = next
 		m.menuCursor = 0
 		m.phase = phaseMenu
-		if m.cacheState == cacheUpdating {
+		if m.cacheState() == cacheUpdating {
 			return m.refreshNow()
 		}
 		return m, nil
@@ -281,7 +288,7 @@ func (m tuiModel) openUserFormFor(t config.Tenant) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) openEditPasswordForm(user string) (tea.Model, tea.Cmd) {
-	return m.openEditPasswordFormFor(m.tenant, user)
+	return m.openEditPasswordFormFor(m.tenant(), user)
 }
 
 func (m tuiModel) openEditPasswordFormFor(t config.Tenant, user string) (tea.Model, tea.Cmd) {
@@ -376,8 +383,7 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 			m.status = err.Error()
 			return m, nil
 		}
-		m.cfg.BatchDir = dir
-		if err := m.store.SaveConfig(m.cfg); err != nil {
+		if err := m.runtime().Set("batch_dir", dir); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
@@ -387,171 +393,42 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case formTenant:
-		name, tsg := m.formValue(0), m.formValue(1)
-		if name == "" || tsg == "" {
-			m.status = "name and tsg id are required"
-			return m, nil
-		}
-		t := config.Tenant{Name: name, TSGID: tsg, ClientID: m.formValue(2), Auth: m.formAuth}
-		m.cfg.Upsert(t)
-		m.cfg.LastTenant = name
-		if err := m.store.SaveConfig(m.cfg); err != nil {
+		t := config.Tenant{Name: m.formValue(0), TSGID: m.formValue(1), ClientID: m.formValue(2), Auth: m.formAuth}
+		if err := m.runtime().AddTenant(t, m.formValue(3)); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
-		if secret := m.formValue(3); secret != "" {
-			if err := m.store.Secrets.Set(config.ClientSecretKey(tsg), secret); err != nil {
-				m.status = err.Error()
-				return m, nil
-			}
-		}
-		m.tenant, m.hasTenant = t, true
-		m.ionUser = ""
-		m.all, m.matches, m.selected = nil, nil, map[string]bool{}
 		m.forgetRows()
-		m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
 		m.form, m.formKind = nil, formNone
 		m.menuCursor = 0
 		m.phase = phaseMenu
 		return m, nil
 
 	case formUser:
-		user, pass := m.formValue(0), m.formValue(1)
-		if user == "" {
-			m.status = "ion user is required"
-			return m, nil
-		}
-		t, ok := m.cfg.Tenant(m.formTenantName)
-		if !ok {
-			if m.formTenantTSG == "" {
-				m.status = "tenant " + m.formTenantName + " is gone"
-				return m, nil
-			}
-			t = config.Tenant{Name: m.formTenantName, TSGID: m.formTenantTSG, Auth: config.AuthBrowser}
-		}
-		if t.TSGID == "" {
-			t.TSGID = m.formTenantTSG
-		}
-		t.Added = true
-		t.AddUser(user, t.DefaultUser() == "")
-		m.cfg.Upsert(t)
-		if err := m.store.SaveConfig(m.cfg); err != nil {
+		if _, err := m.runtime().AddUser(m.formTenantName, m.formTenantTSG, m.formValue(0), m.formValue(1)); err != nil {
 			m.status = err.Error()
 			return m, nil
-		}
-		if pass != "" {
-			if err := m.store.Secrets.Set(config.IONPassKey(t.TSGID, user), pass); err != nil {
-				m.status = err.Error()
-				return m, nil
-			}
-		}
-		if m.runAsFor(t.TSGID) == "" || len(t.Users) == 1 {
-			m.setRunAs(t.TSGID, user)
-		}
-		if m.tenant.Name == t.Name {
-			m.tenant = t
-			if m.ionUser == "" {
-				m.ionUser = t.DefaultUser()
-			}
 		}
 		m.form, m.formKind = nil, formNone
 		m.phase = m.formReturn
 		return m, nil
 
 	case formEditTenant:
-		name, tsg := m.formValue(0), m.formValue(1)
-		if name == "" || tsg == "" {
-			m.status = "name and tsg id are required"
-			return m, nil
-		}
-		old, ok := m.cfg.Tenant(m.formTenantName)
-		if !ok {
-			m.status = "tenant " + m.formTenantName + " is gone"
-			return m, nil
-		}
-
-		updated := old
-		updated.Name, updated.TSGID, updated.ClientID = name, tsg, m.formValue(2)
-
-		if tsg != m.formOldTSG {
-			if v, err := m.store.Secrets.Get(config.ClientSecretKey(m.formOldTSG)); err == nil && v != "" {
-				_ = m.store.Secrets.Set(config.ClientSecretKey(tsg), v)
-				_ = m.store.Secrets.Delete(config.ClientSecretKey(m.formOldTSG))
-			}
-			if v, err := m.store.Secrets.Get(config.RefreshTokenKey(m.formOldTSG)); err == nil && v != "" {
-				_ = m.store.Secrets.Set(config.RefreshTokenKey(tsg), v)
-				_ = m.store.Secrets.Delete(config.RefreshTokenKey(m.formOldTSG))
-			}
-			for _, u := range old.Users {
-				if v, err := m.store.Secrets.Get(config.IONPassKey(m.formOldTSG, u.Name)); err == nil && v != "" {
-					_ = m.store.Secrets.Set(config.IONPassKey(tsg, u.Name), v)
-					_ = m.store.Secrets.Delete(config.IONPassKey(m.formOldTSG, u.Name))
-				}
-			}
-			_ = m.store.DropCache(m.formOldTSG)
-		}
-		if secret := m.formValue(3); secret != "" {
-			if err := m.store.Secrets.Set(config.ClientSecretKey(tsg), secret); err != nil {
-				m.status = err.Error()
-				return m, nil
-			}
-		}
-
-		wasLast := m.cfg.LastTenant == m.formTenantName
-		if name != m.formTenantName {
-			m.cfg.Remove(m.formTenantName)
-		}
-		m.cfg.Upsert(updated)
-		if wasLast {
-			m.cfg.LastTenant = name
-		}
-		if err := m.store.SaveConfig(m.cfg); err != nil {
+		t, err := m.runtime().EditTenant(m.formTenantName, m.formValue(0), m.formValue(1), m.formValue(2), m.formValue(3))
+		if err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
-		if m.tenant.Name == m.formTenantName {
-			m.tenant = updated
-		}
 		m.form, m.formKind = nil, formNone
-		m.status = "saved " + name
+		m.status = "saved " + t.Name
 		m.phase = m.formReturn
 		return m, nil
 
 	case formEditUser:
 		name := m.formValue(0)
-		if name == "" {
-			m.status = "ion user is required"
-			return m, nil
-		}
-		t, ok := m.cfg.Tenant(m.formTenantName)
-		if !ok {
-			m.status = "tenant " + m.formTenantName + " is gone"
-			return m, nil
-		}
-
-		wasDefault := t.DefaultUser() == m.formUserName
-		if name != m.formUserName {
-			m.moveUserSecret(t.TSGID, m.formUserName, name)
-			t.RemoveUser(m.formUserName)
-			t.AddUser(name, wasDefault)
-		}
-		if pass := m.formValue(1); pass != "" {
-			if err := m.store.Secrets.Set(config.IONPassKey(t.TSGID, name), pass); err != nil {
-				m.status = err.Error()
-				return m, nil
-			}
-		}
-
-		m.cfg.Upsert(t)
-		if err := m.store.SaveConfig(m.cfg); err != nil {
+		if err := m.runtime().EditUser(m.formTenantName, m.formUserName, name, m.formValue(1)); err != nil {
 			m.status = err.Error()
 			return m, nil
-		}
-		if m.tenant.Name == t.Name {
-			m.tenant = t
-		}
-		if m.ionUser == m.formUserName {
-			m.ionUser = name
 		}
 		m.form, m.formKind = nil, formNone
 		m.status = "saved " + name
@@ -576,34 +453,22 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 			m.status = "enter a number"
 			return m, nil
 		}
-		cols, rows := m.sessionGeometry()
-		if m.formGeoRow == 0 {
-			cols = min(400, max(40, n))
-		} else {
-			rows = min(200, max(10, n))
+		name, v := "session_cols", min(400, max(40, n))
+		if m.formGeoRow != 0 {
+			name, v = "session_rows", min(200, max(10, n))
 		}
-		m.cfg.SessionCols, m.cfg.SessionRows = cols, rows
-		if err := m.store.SaveConfig(m.cfg); err != nil {
+		if err := m.runtime().Set(name, strconv.Itoa(v)); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
+		cols, rows := m.sessionGeometry()
 		m.form, m.formKind = nil, formNone
 		m.status = fmt.Sprintf("buffer is now %dx%d", cols, rows)
 		m.phase = m.formReturn
 		return m, nil
 
 	case formEditPass:
-		pass := m.formValue(0)
-		if pass == "" {
-			m.status = "password is required"
-			return m, nil
-		}
-		t, ok := m.cfg.Tenant(m.formTenantName)
-		if !ok {
-			m.status = "tenant " + m.formTenantName + " is gone"
-			return m, nil
-		}
-		if err := m.store.Secrets.Set(config.IONPassKey(t.TSGID, m.formUserName), pass); err != nil {
+		if err := m.runtime().SetPassword(m.formTenantName, m.formUserName, m.formValue(0)); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
@@ -617,30 +482,9 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 		if len(m.form) == 2 {
 			user, pass = m.formValue(0), m.formValue(1)
 		}
-		if user == "" || pass == "" {
-			m.status = "user and password are required"
-			return m, nil
-		}
-
-		t, ok := m.cfg.Tenant(m.formTenantName)
-		if !ok {
-			t = config.Tenant{Name: m.formTenantName, TSGID: m.formTenantTSG, Auth: config.AuthBrowser, Added: true}
-		}
-		if t.TSGID == "" {
-			t.TSGID = m.formTenantTSG
-		}
-		if err := m.store.Secrets.Set(config.IONPassKey(t.TSGID, user), pass); err != nil {
+		if _, err := m.runtime().SaveLogin(m.formTenantName, m.formTenantTSG, user, pass); err != nil {
 			m.status = err.Error()
 			return m, nil
-		}
-		t.AddUser(user, t.DefaultUser() == "")
-		m.cfg.Upsert(t)
-		if err := m.store.SaveConfig(m.cfg); err != nil {
-			m.status = err.Error()
-			return m, nil
-		}
-		if t.Name == m.tenant.Name {
-			m.tenant, m.ionUser = t, user
 		}
 		m.form, m.formKind = nil, formNone
 		m.formUserName = ""
@@ -672,7 +516,7 @@ func (m tuiModel) viewMenu() string {
 	b.WriteString("\n")
 	hint := "↑↓ move · enter select · " + m.legend(scrMenu, "service account or browser", "auth-mode") +
 		" · " + m.legend(scrMenu, "quit", "quit", "quit-closing-sessions")
-	if m.sessions.DetachedCount() > 0 || m.sessions.Count() > 0 {
+	if m.sessions().DetachedCount() > 0 || m.sessions().Count() > 0 {
 		hint = "↑↓ move · enter select · " + m.legend(scrMenu, "service account or browser", "auth-mode") +
 			" · " + m.legend(scrMenu, "reattach", "reopen-tab") +
 			" · " + m.legend(scrMenu, "quit", "quit", "quit-closing-sessions")
@@ -682,7 +526,7 @@ func (m tuiModel) viewMenu() string {
 }
 
 func (m tuiModel) reopenFromMenu() (tea.Model, tea.Cmd) {
-	if len(m.all) == 0 {
+	if len(m.rows()) == 0 {
 		m.loadFromCache()
 	}
 	return m.reopenLastTab()
@@ -694,7 +538,7 @@ func (m tuiModel) viewSwitch() string {
 
 	choices := m.switchChoices()
 	noun := "tenant"
-	if m.authMode == authTenant {
+	if m.authMode() == authTenant {
 		noun = "service account"
 	}
 	count := fmt.Sprintf("%d %s", len(choices), noun)
@@ -703,15 +547,15 @@ func (m tuiModel) viewSwitch() string {
 	}
 	b.WriteString(ui.StyleCmd.Render(count) + "\n")
 
-	if m.authMode == authTenant {
+	if m.authMode() == authTenant {
 		b.WriteString(ui.StyleDim.Render("one tenant each") + "\n")
-	} else if c, err := m.store.TenantCache(); err == nil && c != nil && c.Account != "" {
+	} else if c, err := m.store().TenantCache(); err == nil && c != nil && c.Account != "" {
 		b.WriteString(ui.StyleDim.Render("from "+c.Account+", listed "+ui.Age(c.Age())+" ago") + "\n")
 	}
 	b.WriteString("\n")
 
 	row := 0
-	if m.authMode == authTenant {
+	if m.authMode() == authTenant {
 		const newRow = "+ New"
 		cursor := "  "
 		if m.switchCursor == 0 {
@@ -721,14 +565,14 @@ func (m tuiModel) viewSwitch() string {
 		row = 1
 	}
 
-	if len(choices) == 0 && m.authMode != authTenant {
+	if len(choices) == 0 && m.authMode() != authTenant {
 		b.WriteString("  " + ui.StyleDim.Render("none yet — add an account from the menu") + "\n")
 	}
 	for i, c := range choices {
 		cursor := "  "
 		marker := ""
 		switch {
-		case c.tsg == m.tenant.TSGID && m.hasTenant:
+		case c.tsg == m.tenant().TSGID && m.hasTenant():
 			marker = ui.StyleOK.Render("  (current)")
 			if !c.saved {
 				marker += ui.StyleDim.Render(" from the environment")
@@ -748,7 +592,7 @@ func (m tuiModel) viewSwitch() string {
 
 	b.WriteString("\n")
 	hint := "↑↓ move · enter use · alt+r re-list · esc back"
-	if m.authMode == authTenant {
+	if m.authMode() == authTenant {
 		hint = "↑↓ move · enter use · x forget · u undo · esc back"
 	}
 	b.WriteString(ui.Footer(m.status, hint))
@@ -788,7 +632,7 @@ func (m tuiModel) viewForm() string {
 }
 
 func (m tuiModel) plaintextWarning() string {
-	if m.store == nil || !config.Plaintext(m.store.Secrets) {
+	if m.store() == nil || !config.Plaintext(m.store().Secrets) {
 		return ""
 	}
 	masked := false
@@ -805,8 +649,8 @@ func (m tuiModel) plaintextWarning() string {
 }
 
 func (m tuiModel) tenantIndex() int {
-	for i, t := range m.cfg.Tenants {
-		if t.Name == m.tenant.Name {
+	for i, t := range m.cfg().Tenants {
+		if t.Name == m.tenant().Name {
 			return i
 		}
 	}
@@ -834,39 +678,21 @@ func (m tuiModel) onUsersKey(key string) (tea.Model, tea.Cmd) {
 	case "d":
 		if m.userCursor < len(users) {
 			name := users[m.userCursor].Name
-			t.AddUser(name, true)
-			m.cfg.Upsert(t)
-			if err := m.store.SaveConfig(m.cfg); err != nil {
+			if err := m.runtime().SetDefaultUser(t.Name, name); err != nil {
 				m.status = err.Error()
 				return m, nil
-			}
-			m.setRunAs(t.TSGID, name)
-			if t.Name == m.tenant.Name {
-				m.tenant, m.ionUser = t, name
 			}
 			m.status = name + " is the default for " + t.Name
 		}
 	case "x":
 		if m.userCursor < len(users) {
 			name := users[m.userCursor].Name
-			if t.RemoveUser(name) {
-				_ = m.store.Secrets.Delete(config.IONPassKey(t.TSGID, name))
-				m.cfg.Upsert(t)
-				if err := m.store.SaveConfig(m.cfg); err != nil {
-					m.status = err.Error()
-					return m, nil
-				}
-				if m.runAs[t.TSGID] == name {
-					m.setRunAs(t.TSGID, t.DefaultUser())
-				}
-				if t.Name == m.tenant.Name {
-					m.tenant = t
-					if m.ionUser == name {
-						m.ionUser = t.DefaultUser()
-					}
-				}
-				m.userCursor = max(0, min(m.userCursor, len(t.Users)-1))
+			left, err := m.runtime().RemoveUser(t.Name, name)
+			if err != nil {
+				m.status = err.Error()
+				return m, nil
 			}
+			m.userCursor = max(0, min(m.userCursor, len(left.Users)-1))
 		}
 	case "p":
 		if m.userCursor < len(users) {
@@ -876,9 +702,9 @@ func (m tuiModel) onUsersKey(key string) (tea.Model, tea.Cmd) {
 	case "enter":
 		if m.userCursor < len(users) {
 			name := users[m.userCursor].Name
-			m.setRunAs(t.TSGID, name)
-			if t.Name == m.tenant.Name {
-				m.ionUser = name
+			if err := m.runtime().RunAsUser(t.Name, name); err != nil {
+				m.status = err.Error()
+				return m, nil
 			}
 			m.status = "running as " + name + " on " + t.Name
 		}
@@ -915,7 +741,7 @@ func (m tuiModel) viewUsers() string {
 			tags += ui.StyleOK.Render("  (active)")
 		}
 		stored := ui.StyleWarn.Render("  no password")
-		if v, err := m.store.Secrets.Get(config.IONPassKey(t.TSGID, u.Name)); err == nil && v != "" {
+		if m.runtime().HasPassword(t.TSGID, u.Name) {
 			stored = ui.StyleDim.Render("  saved")
 		}
 		b.WriteString(cursor + ui.StyleElement.Render(u.Name) + tags + stored + "\n")
@@ -950,7 +776,7 @@ func (m tuiModel) openEditTenantForm(t config.Tenant) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) openEditUserForm(user string) (tea.Model, tea.Cmd) {
-	m.formTenantName = m.tenant.Name
+	m.formTenantName = m.tenant().Name
 	m.formUserName = user
 
 	name := newField("ion user", "", false)
@@ -973,25 +799,15 @@ func (m tuiModel) openGeometryForm(row, cols, rows int) (tea.Model, tea.Cmd) {
 	return m.openForm(formGeometry, "Set "+title, phaseAddUser, []formField{f})
 }
 
-func (m tuiModel) moveUserSecret(tsg, from, to string) {
-	if from == to {
-		return
-	}
-	if v, err := m.store.Secrets.Get(config.IONPassKey(tsg, from)); err == nil && v != "" {
-		_ = m.store.Secrets.Set(config.IONPassKey(tsg, to), v)
-		_ = m.store.Secrets.Delete(config.IONPassKey(tsg, from))
-	}
-}
-
 func (m tuiModel) startSignInAuto() (tea.Model, tea.Cmd) {
-	why := m.tenantIssues[m.tenant.TSGID]
-	if !m.browserAuthDone || why == "" {
+	why := m.tenantIssues()[m.tenant().TSGID]
+	if !m.runtime().BrowserSignedIn() || why == "" {
 		return m.startSignIn()
 	}
-	logging.L().Info("automatic sign-in refused", "tsg", m.tenant.TSGID, "why", why)
+	logging.L().Info("automatic sign-in refused", "tsg", m.tenant().TSGID, "why", why)
 	m.signInResume = false
-	m.cacheState = cacheFailed
-	m.status = m.tenantName(m.tenant.TSGID) + ": " + why +
+	m.setCacheState(cacheFailed)
+	m.status = m.tenantName(m.tenant().TSGID) + ": " + why +
 		" — already signed in, so another browser sign-in will not help"
 	if m.phase == phaseLoading || m.phase == phaseSignIn {
 		m.phase = phaseMenu
@@ -1000,23 +816,23 @@ func (m tuiModel) startSignInAuto() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) startSignIn() (tea.Model, tea.Cmd) {
-	if !m.hasTenant {
+	if !m.hasTenant() {
 		m.status = "no tenant to sign in to"
 		m.phase = phaseMenu
 		return m, nil
 	}
-	f := app.TenantFlags(m.store, m.tenant, m.ionUser)
+	f := app.TenantFlags(m.store(), m.tenant(), m.ionUser())
 	m.flags = f
 	m.status = ""
 	m.phase = phaseSignIn
-	return m, tea.Batch(m.spinner.Tick, signIn(m.ctx, f, m.store))
+	return m, tea.Batch(m.spinner.Tick, signIn(m.ctx, f, m.store()))
 }
 
 func (m tuiModel) viewSignIn() string {
 	var b strings.Builder
 	b.WriteString(ui.Banner(m.width, m.height))
 	b.WriteString(fmt.Sprintf("  %s waiting for browser\n\n", m.spinner.View()))
-	b.WriteString("  " + ui.StyleDim.Render("finish signing in to "+m.tenant.Name+" in the browser window") + "\n")
+	b.WriteString("  " + ui.StyleDim.Render("finish signing in to "+m.tenant().Name+" in the browser window") + "\n")
 	b.WriteString("\n")
 	b.WriteString(ui.Footer(m.status, "esc stop waiting"))
 	return b.String()
@@ -1025,24 +841,25 @@ func (m tuiModel) viewSignIn() string {
 func (m tuiModel) viewSignedIn() string {
 	var b strings.Builder
 	b.WriteString(ui.Banner(m.width, m.height))
-	b.WriteString(ui.StyleOK.Render(ui.MarkCheck.String()+" signed in to "+m.tenant.Name) + "\n\n")
+	b.WriteString(ui.StyleOK.Render(ui.MarkCheck.String()+" signed in to "+m.tenant().Name) + "\n\n")
 
 	row := func(k, v string) {
 		b.WriteString("  " + ui.Label(k) + v + "\n")
 	}
 
-	row("account", ui.StyleElement.Render(m.ident.Display()))
-	row("tenant", m.tenant.TSGID)
-	if m.profile.Region != "" {
-		row("region", m.profile.Region)
+	ident, profile := m.runtime().Identity(), m.runtime().Profile()
+	row("account", ui.StyleElement.Render(ident.Display()))
+	row("tenant", m.tenant().TSGID)
+	if profile.Region != "" {
+		row("region", profile.Region)
 	}
-	if len(m.profile.Roles) > 0 {
-		row("roles", strings.Join(m.profile.Roles, ", "))
+	if len(profile.Roles) > 0 {
+		row("roles", strings.Join(profile.Roles, ", "))
 	}
-	if m.tokenTTL > 0 {
-		row("api token", ui.StyleDim.Render("renews every "+ui.Age(m.tokenTTL)))
+	if ttl := m.runtime().TokenTTL(); ttl > 0 {
+		row("api token", ui.StyleDim.Render("renews every "+ui.Age(ttl)))
 	}
-	if left, ok := m.ident.SessionLeft(); ok {
+	if left, ok := ident.SessionLeft(); ok {
 		if left <= 0 {
 			row("sign-in", ui.StyleErr.Render("expired"))
 		} else {
@@ -1058,7 +875,7 @@ func (m tuiModel) viewSignedIn() string {
 	}
 
 	b.WriteString("\n")
-	switch m.cacheState {
+	switch m.cacheState() {
 	case cacheUpdating:
 		b.WriteString("  " + m.spinner.View() + " " + ui.StyleDim.Render("fetching elements") + "\n")
 	default:
@@ -1071,14 +888,14 @@ func (m tuiModel) viewSignedIn() string {
 }
 
 func (m tuiModel) armOrForgetAccount(armed string) (tea.Model, tea.Cmd) {
-	if m.authMode != authTenant {
+	if m.authMode() != authTenant {
 		return m, nil
 	}
 	c, ok := m.switchAt(m.switchCursor)
 	if !ok {
 		return m, nil
 	}
-	t, saved := m.cfg.Tenant(c.name)
+	t, saved := m.cfg().Tenant(c.name)
 	if !saved {
 		m.status = c.name + " has no saved record to forget"
 		return m, nil
@@ -1090,14 +907,9 @@ func (m tuiModel) armOrForgetAccount(armed string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if err := forgetTenant(m.store, m.cfg, t); err != nil {
+	if err := m.runtime().RemoveTenant(t.Name); err != nil {
 		m.status = err.Error()
 		return m, nil
-	}
-	m.switchUndo = append(slices.Clone(m.switchUndo), t)
-	if m.tenant.Name == t.Name {
-		m.tenant, m.hasTenant = app.ResolveTenant(m.cfg, "")
-		m.ionUser = m.tenant.DefaultUser()
 	}
 	m.switchCursor = max(0, min(m.switchCursor, m.switchRows()-1))
 	m.status = "forgot " + t.Name + " · u puts the record back, not the secret"
@@ -1105,16 +917,8 @@ func (m tuiModel) armOrForgetAccount(armed string) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) undoForgetAccount() (tea.Model, tea.Cmd) {
-	if len(m.switchUndo) == 0 {
-		m.status = "nothing to undo"
-		return m, nil
-	}
-	last := len(m.switchUndo) - 1
-	t := m.switchUndo[last]
-	m.switchUndo = slices.Clone(m.switchUndo[:last])
-
-	m.cfg.Upsert(t)
-	if err := m.store.SaveConfig(m.cfg); err != nil {
+	t, err := m.runtime().UndoRemoveTenant()
+	if err != nil {
 		m.status = err.Error()
 		return m, nil
 	}

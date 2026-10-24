@@ -19,37 +19,28 @@ const (
 )
 
 func (m tuiModel) sessionLeft() (time.Duration, bool) {
-	if !m.hasTenant || m.authMode != authBrowser {
+	if !m.hasTenant() || m.authMode() != authBrowser {
 		return 0, false
 	}
-	if left, ok := m.ident.SessionLeft(); ok && m.ident.TSG == m.tenant.TSGID {
-		return left, true
+	if id := m.runtime().Identity(); id.TSG == m.tenant().TSGID {
+		if left, ok := id.SessionLeft(); ok {
+			return left, true
+		}
 	}
-	if m.store == nil {
-		return 0, false
-	}
-	stored, err := m.store.Secrets.Get(config.RefreshTokenKey(m.tenant.TSGID))
-	if err != nil || stored == "" {
-		return 0, false
-	}
-	exp, ok := saseauth.SessionExpiry(stored)
-	if !ok {
-		return 0, false
-	}
-	return time.Until(exp), true
+	return app.SessionLeft(m.store(), m.tenant().TSGID)
 }
 
 func (m tuiModel) authLine() string {
-	if !m.hasTenant {
+	if !m.hasTenant() {
 		return ui.StyleDim.Render("no tenant selected")
 	}
-	if m.authMode == authTenant {
+	if m.authMode() == authTenant {
 		return m.serviceAccountLine()
 	}
 
 	label := authBrowser.Label()
 
-	if m.tokenDead != "" {
+	if m.runtime().TokenDead() != "" {
 		return ui.StyleErr.Render(label + " · sign-in needed")
 	}
 
@@ -68,7 +59,7 @@ func (m tuiModel) authLine() string {
 }
 
 func (m tuiModel) serviceAccountLine() string {
-	who := m.tenant.ClientID
+	who := m.tenant().ClientID
 	if who == "" {
 		who = "client id not saved"
 	}
@@ -78,12 +69,12 @@ func (m tuiModel) serviceAccountLine() string {
 	if n == 1 {
 		count = "1 element cached"
 	}
-	if total := len(m.all); total > n {
+	if total := len(m.rows()); total > n {
 		count = fmt.Sprintf("%d of %d elements cached", n, total)
 	}
 
 	head := authTenant.Label() + " · "
-	name := ui.Truncate(m.tenant.Name, 24)
+	name := ui.Truncate(m.tenant().Name, 24)
 	tail := " · " + count
 
 	if m.width > 0 {
@@ -95,12 +86,12 @@ func (m tuiModel) serviceAccountLine() string {
 }
 
 func (m tuiModel) tenantElementCount() int {
-	if len(m.all) == 0 {
-		return m.cacheCount
+	if len(m.rows()) == 0 {
+		return m.cacheCount()
 	}
 	n := 0
-	for _, r := range m.all {
-		if r.TSG == m.tenant.TSGID {
+	for _, r := range m.rows() {
+		if r.TSG == m.tenant().TSGID {
 			n++
 		}
 	}
@@ -125,23 +116,23 @@ func refreshToken(ctx context.Context, f app.Flags, st *config.Store) tea.Cmd {
 }
 
 func (m tuiModel) startTokenRefresh() (tea.Model, tea.Cmd) {
-	if !m.hasTenant {
+	if !m.hasTenant() {
 		m.status = "no tenant selected"
 		return m, nil
 	}
-	f := app.TenantFlags(m.store, m.tenant, m.ionUser)
+	f := app.TenantFlags(m.store(), m.tenant(), m.ionUser())
 	m.flags = f
 	m.status = "refreshing token"
-	return m, tea.Batch(m.spinner.Tick, refreshToken(m.ctx, f, m.store))
+	return m, tea.Batch(m.spinner.Tick, refreshToken(m.ctx, f, m.store()))
 }
 
 func (m tuiModel) signedIn() bool {
-	if c, err := m.store.TenantCache(); err == nil && c != nil && len(c.Tenants) > 0 {
+	if c, err := m.store().TenantCache(); err == nil && c != nil && len(c.Tenants) > 0 {
 		return true
 	}
-	if !m.hasTenant || m.store == nil {
+	if !m.hasTenant() || m.store() == nil {
 		return false
 	}
-	v, err := m.store.Secrets.Get(config.RefreshTokenKey(m.tenant.TSGID))
+	v, err := m.store().Secrets.Get(config.RefreshTokenKey(m.tenant().TSGID))
 	return err == nil && v != ""
 }

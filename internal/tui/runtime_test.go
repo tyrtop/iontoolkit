@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/view"
 )
 
@@ -20,8 +21,8 @@ func runtimeModel(t *testing.T, files map[string]string) tuiModel {
 			t.Fatal(err)
 		}
 	}
-	Views = dir
-	t.Cleanup(func() { Views = "" })
+	app.ViewsFolder = dir
+	t.Cleanup(func() { app.ViewsFolder = "" })
 	return listModel(t, 3)
 }
 
@@ -44,7 +45,7 @@ func TestTheFolderDrawsTheListTheMenuAndTheViews(t *testing.T) {
 		t.Errorf("menu = %+v, want the two entries menu.yaml names, the last relabelled", entries)
 	}
 
-	v, ok := m.views.View("Overview")
+	v, ok := m.runtime().Views().View("Overview")
 	if !ok {
 		t.Fatal("the folder's Overview did not reach the view set")
 	}
@@ -70,8 +71,8 @@ func TestTheFolderWinsOverTheSingleFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	Columns, Views = filepath.Join(root, "columns.yaml"), dir
-	t.Cleanup(func() { Columns, Views = "", "" })
+	Columns, app.ViewsFolder = filepath.Join(root, "columns.yaml"), dir
+	t.Cleanup(func() { Columns, app.ViewsFolder = "", "" })
 
 	m := listModel(t, 2)
 	if got := columnNames(&m); strings.Join(got, " ") != colCaret+" "+colName+" "+colModel {

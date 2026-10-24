@@ -68,8 +68,8 @@ func TestExportingAnOpenResultWritesItsOutput(t *testing.T) {
 	if filepath.Ext(where) != ".txt" {
 		t.Errorf("export landed at %q, want a .txt", where)
 	}
-	if !strings.Contains(where, m.store.ExportsDir()) {
-		t.Errorf("export landed at %q, want it under %q", where, m.store.ExportsDir())
+	if !strings.Contains(where, m.store().ExportsDir()) {
+		t.Errorf("export landed at %q, want it under %q", where, m.store().ExportsDir())
 	}
 }
 
@@ -96,7 +96,9 @@ func TestExportingTheResultsPageWritesTheRunAsJSON(t *testing.T) {
 func TestARunTooBigForAClipboardIsExportedWhole(t *testing.T) {
 	m := resultsModel(t)
 	big := strings.Repeat("x", 200<<10)
-	m.results[0].Commands[0].Output = big
+	rs := m.batch().Results
+	rs[0].Commands[0].Output = big
+	m.runtime().LoadBatch(nil, rs, m.batch().Elapsed)
 
 	next, cmd := m.exportRunJSON()
 	got, _ := exported(t, next.(tuiModel), cmd)
@@ -109,7 +111,7 @@ func TestExportingAShellKeepsTheWholeBuffer(t *testing.T) {
 	m, conn := favModel(t)
 	conn.feed("S0100-RTR-01# dump device status\r\nSerial: 1234\r\n")
 
-	s := m.sessions.Active()
+	s := m.sessions().Active()
 	waitForTUI(t, func() bool { return strings.Contains(s.Buffer(), "Serial: 1234") })
 
 	m, cmd := pressSessionKey(t, m, altKey('y'))
@@ -158,7 +160,7 @@ func TestAnEmptyPageExportsNothing(t *testing.T) {
 	if !strings.Contains(next.status, "nothing to export") {
 		t.Errorf("status = %q, want it to say there was nothing", next.status)
 	}
-	if entries, _ := os.ReadDir(next.store.ExportsDir()); len(entries) != 0 {
+	if entries, _ := os.ReadDir(next.store().ExportsDir()); len(entries) != 0 {
 		t.Errorf("exports/ holds %d files, want none", len(entries))
 	}
 }
@@ -181,7 +183,7 @@ func TestAltYIsTheExportKeyAndTheFootersSayIt(t *testing.T) {
 
 func TestExportingAFavouriteSlotWritesItsCommand(t *testing.T) {
 	m, _ := favModel(t)
-	if err := m.cmds.SetFavourite(3, "dump interface status all", "ion 1200"); err != nil {
+	if err := m.runtime().SetFavourite(3, "dump interface status all", "ion 1200"); err != nil {
 		t.Fatal(err)
 	}
 	m.favPick, m.favCursor = true, 3
@@ -245,11 +247,11 @@ func TestPastingCommandsIntoTheMacroFormFillsALinePerCommand(t *testing.T) {
 func TestExportingADataPaneWritesTheWholePagePlain(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
 	mm, cmd := m.Update(tea.KeyPressMsg(altKey('y')))

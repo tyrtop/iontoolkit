@@ -7,7 +7,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/sase/api"
 )
@@ -25,10 +24,10 @@ func historyModel(t *testing.T) tuiModel {
 func TestEnterInAShellCountsWhatWasTyped(t *testing.T) {
 	m := historyModel(t)
 	m.phase = phaseSession
-	t.Cleanup(m.sessions.CloseAll)
+	t.Cleanup(m.sessions().CloseAll)
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -36,7 +35,7 @@ func TestEnterInAShellCountsWhatWasTyped(t *testing.T) {
 	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = next.(tuiModel)
 
-	got := m.cmds.Ranked("ion 1200")
+	got := m.runtime().Ranked("ion 1200", "")
 	if len(got) != 1 {
 		t.Fatalf("history = %+v, want the line that was sent", got)
 	}
@@ -51,7 +50,7 @@ func TestEnterInAShellCountsWhatWasTyped(t *testing.T) {
 		t.Fatal("enter queued no save")
 	}
 	runSave(t, cmd)
-	saved, err := m.store.Commands()
+	saved, err := m.store().Commands()
 	if err != nil {
 		t.Fatalf("Commands() error = %v", err)
 	}
@@ -63,15 +62,15 @@ func TestEnterInAShellCountsWhatWasTyped(t *testing.T) {
 func TestEnterOnAnEmptyLineCountsNothing(t *testing.T) {
 	m := historyModel(t)
 	m.phase = phaseSession
-	t.Cleanup(m.sessions.CloseAll)
+	t.Cleanup(m.sessions().CloseAll)
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
 	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if got := next.(tuiModel).cmds.History; len(got) != 0 {
+	if got := next.(tuiModel).rt.History(); len(got) != 0 {
 		t.Errorf("history = %+v, want nothing recorded", got)
 	}
 	if cmd != nil {
@@ -91,13 +90,13 @@ func TestABatchRunCountsOncePerModel(t *testing.T) {
 		t.Fatal("recordRun queued no save")
 	}
 
-	if len(m.cmds.History) != 4 {
-		t.Fatalf("history = %+v, want two commands on each of two models", m.cmds.History)
+	if len(m.runtime().History()) != 4 {
+		t.Fatalf("history = %+v, want two commands on each of two models", m.runtime().History())
 	}
 	for _, model := range []string{"ion 1200", "ion 3200"} {
 		for _, want := range []string{"uptime", "dump device status"} {
 			found := false
-			for _, u := range m.cmds.History {
+			for _, u := range m.runtime().History() {
 				if u.Command == want && u.Model == model {
 					found = true
 					if u.Uses != 1 {
@@ -115,20 +114,18 @@ func TestABatchRunCountsOncePerModel(t *testing.T) {
 func TestFrequentCommandsAreRankedForThisModel(t *testing.T) {
 	m := historyModel(t)
 	m.phase = phaseSession
-	t.Cleanup(m.sessions.CloseAll)
+	t.Cleanup(m.sessions().CloseAll)
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
-	now := time.Now()
-	m.cmds = &config.CommandStore{}
-	m.cmds.Record("dump device status", "ion 1200", now)
-	m.cmds.Record("dump device status", "ion 1200", now)
-	m.cmds.Record("ping 10.0.0.1", "ion 1200", now)
+	m.runtime().RecordUse("ion 1200", "dump device status")
+	m.runtime().RecordUse("ion 1200", "dump device status")
+	m.runtime().RecordUse("ion 1200", "ping 10.0.0.1")
 	for i := 0; i < 5; i++ {
-		m.cmds.Record("dump interface status 8", "ion 3200", now)
+		m.runtime().RecordUse("ion 3200", "dump interface status 8")
 	}
 
 	next, _ := m.openSlash()
@@ -180,17 +177,16 @@ func TestFrequentCommandsAreRankedForThisModel(t *testing.T) {
 func TestCtrlDForgetsAHistoryEntry(t *testing.T) {
 	m := historyModel(t)
 	m.phase = phaseSession
-	t.Cleanup(m.sessions.CloseAll)
+	t.Cleanup(m.sessions().CloseAll)
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
-	m.cmds = &config.CommandStore{}
-	m.cmds.Record("dmup device status", "ion 1200", time.Now())
-	m.cmds.Record("dump device status", "ion 1200", time.Now())
-	if err := m.store.SaveCommands(m.cmds); err != nil {
+	m.runtime().RecordUse("ion 1200", "dmup device status")
+	m.runtime().RecordUse("ion 1200", "dump device status")
+	if err := m.runtime().SaveCommands(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -201,8 +197,8 @@ func TestCtrlDForgetsAHistoryEntry(t *testing.T) {
 
 	next, cmd := m.onSlashKey(tea.KeyPressMsg(tea.Key{Code: 'd', Mod: tea.ModCtrl}), "ctrl+d")
 	m = next.(tuiModel)
-	if len(m.cmds.History) != 1 || m.cmds.History[0].Command != "dump device status" {
-		t.Errorf("history = %+v, want only the typo gone", m.cmds.History)
+	if len(m.runtime().History()) != 1 || m.runtime().History()[0].Command != "dump device status" {
+		t.Errorf("history = %+v, want only the typo gone", m.runtime().History())
 	}
 	if !strings.Contains(m.status, "forgot") {
 		t.Errorf("status = %q, want it to say what went", m.status)
@@ -215,7 +211,7 @@ func TestCtrlDForgetsAHistoryEntry(t *testing.T) {
 		t.Fatal("ctrl+d queued no save")
 	}
 	runSave(t, cmd)
-	saved, err := m.store.Commands()
+	saved, err := m.store().Commands()
 	if err != nil {
 		t.Fatal(err)
 	}

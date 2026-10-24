@@ -43,10 +43,10 @@ var flagGroups = []struct {
 	intro string
 	flags []string
 }{
-	{"Targets", "Which elements to act on. Exactly one is required outside the TUI. `--search` runs the TUI's filter over the working set of tenants, narrowed by `--tenant` or `--tsg`.", []string{
+	{"Targets", "Which elements `iontk batch run` and `iontk write` act on; exactly one is required. `--search` runs the TUI's filter over the working set of tenants, narrowed by `--tenant` or `--tsg`.", []string{
 		"element", "elements-path", "search", "refresh", "no-validate", "yes", "no-login",
 	}},
-	{"Commands", "What to run. With none of these, iontk opens an interactive session.", []string{
+	{"Commands", "What `iontk batch run` runs on each element, and whether it may run commands that are not read-only.", []string{
 		"cmd", "allow-writes",
 	}},
 	{"Credentials", "`--tenant` reads a saved tenant's credentials from the keyring; with no `--tenant`, the environment wins over the last tenant used. See [Environment](#environment).", []string{
@@ -69,7 +69,7 @@ var flagGroups = []struct {
 		"views",
 		"columns",
 	}},
-	{"Keys", "A key names an action, and the action says what to do. The ones iontk ships are bound already; `keybinds.yaml` in the config directory rebinds any of them, `none` takes a key back, and a screen's own file binds a key for that screen alone. You can write an action in the same file as a sequence of verbs: `do` runs another action, `goto` goes to a place, `set` changes a setting, `status` writes a line. Bindings, menu rows and tutorial pages all name actions, so any of them can run yours. `--keybinds` points somewhere else.\n\nFor an action that has to branch on what a read returned, or loop until something comes back, write Lua instead -- one file per action in `actions/` in the config directory, and `--actions` points elsewhere. A script gets one table and nothing else: no io, no os, no require, no sockets. It asks for work through the same verbs (`ctx.get`, `ctx.status`, `ctx.set`, `ctx.goto`, `ctx.export`, `ctx.budget`), so the rate limit, the retries, the logging and the redaction stay iontk's. A binding does not care which kind of action it names.", []string{
+	{"Keys", "A key names an action, and the action says what to do. The ones iontk ships are bound already; `keybinds.yaml` in the config directory rebinds any of them, `none` takes a key back, and a screen's own file binds a key for that screen alone. You can write an action in the same file as a sequence of verbs: `do` runs another action, `goto` goes to a place, `set` changes a setting, `status` writes a line. Bindings, menu rows and tutorial pages all name actions, so any of them can run yours. `--keybinds` points somewhere else.\n\nFor an action that has to branch on what a read returned, or loop until something comes back, write Lua instead -- one file per action in `actions/` in the config directory, and `--actions` points elsewhere. A script gets one table and nothing else: no io, no os, no require, no sockets. It asks for work through the same verbs (`ctx.run` for any of iontk's commands, `ctx.status`, `ctx.set`, `ctx.goto`, `ctx.export`, `ctx.budget`), so the rate limit, the retries, the logging and the redaction stay iontk's. A binding does not care which kind of action it names.", []string{
 		"keybinds",
 		"actions",
 	}},
@@ -134,7 +134,7 @@ func writeFlagDocs(w io.Writer, root *cobra.Command) error {
 
 	b.WriteString("\n## Subcommands\n\n| Command | Purpose |\n|---|---|\n")
 	for _, c := range root.Commands() {
-		if c.Hidden || c.Name() == "help" || c.Name() == "completion" {
+		if c.Hidden || c.Deprecated != "" || c.Name() == "help" || c.Name() == "completion" {
 			continue
 		}
 		fmt.Fprintf(&b, "| `iontk %s` | %s |\n", c.Name(), c.Short)
@@ -170,7 +170,7 @@ func groupFlags(root *cobra.Command) (map[string][]*pflag.Flag, error) {
 	out := map[string][]*pflag.Flag{}
 	var ungrouped []string
 
-	root.PersistentFlags().VisitAll(func(f *pflag.Flag) {
+	visit := func(f *pflag.Flag) {
 		switch {
 		case f.Deprecated != "":
 			out["Deprecated"] = append(out["Deprecated"], f)
@@ -179,7 +179,9 @@ func groupFlags(root *cobra.Command) (map[string][]*pflag.Flag, error) {
 		default:
 			ungrouped = append(ungrouped, f.Name)
 		}
-	})
+	}
+	root.PersistentFlags().VisitAll(visit)
+	root.LocalNonPersistentFlags().VisitAll(visit)
 
 	if len(ungrouped) > 0 {
 		sort.Strings(ungrouped)

@@ -2,35 +2,25 @@ package tui
 
 import (
 	"strconv"
-	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/config"
-	"tyrtop.com/iontk/internal/ioncmd"
 )
 
 type commandsSavedMsg struct{ err string }
 
-func (m *tuiModel) countUse(command, model string) {
-	if m.cmds == nil {
-		m.cmds = &config.CommandStore{}
-	}
-	m.cmds.Record(command, model, time.Now())
-}
-
 func (m *tuiModel) recordUse(command, model string) tea.Cmd {
-	m.countUse(command, model)
-	return saveCommands(m.store, m.cmds)
+	m.runtime().RecordUse(model, command)
+	return m.saveCommands()
 }
 
-func saveCommands(st *config.Store, c *config.CommandStore) tea.Cmd {
-	if st == nil || c == nil {
+func (m tuiModel) saveCommands() tea.Cmd {
+	rt := m.runtime()
+	if rt.Store() == nil {
 		return nil
 	}
-	snapshot := *c
 	return func() tea.Msg {
-		if err := st.SaveCommands(&snapshot); err != nil {
+		if err := rt.SaveCommands(); err != nil {
 			return commandsSavedMsg{err: err.Error()}
 		}
 		return commandsSavedMsg{}
@@ -44,15 +34,10 @@ func (m tuiModel) onCommandsSaved(msg commandsSavedMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m tuiModel) modelOf(tsg, eid string) string {
-	if el, ok := m.elementByKey(tsg + "/" + eid); ok {
-		return el.Model
-	}
-	return ""
-}
+func (m tuiModel) modelOf(tsg, eid string) string { return m.runtime().ModelOf(tsg, eid) }
 
 func (m *tuiModel) recordSessionLine() tea.Cmd {
-	s := m.sessions.Active()
+	s := m.sessions().Active()
 	if s == nil {
 		return nil
 	}
@@ -70,43 +55,16 @@ func (m *tuiModel) recordRun(cmds []string, rows []elementRow) tea.Cmd {
 			continue
 		}
 		seen[r.Model] = true
-		for _, c := range cmds {
-			m.countUse(c, r.Model)
-		}
+		m.runtime().RecordUse(r.Model, cmds...)
 	}
-	return saveCommands(m.store, m.cmds)
+	return m.saveCommands()
 }
 
-func (m tuiModel) activeModel() string {
-	s := m.sessions.Active()
-	if s == nil {
-		return ""
-	}
-	return m.modelOf(m.tsgForElement(s.ElementID), s.ElementID)
-}
+func (m tuiModel) activeModel() string { return m.runtime().SessionModel() }
 
 func (m tuiModel) setFreq(q string) tuiModel {
 	model := m.activeModel()
-	ranked := m.cmds.Ranked(model)
-
-	if q = strings.TrimSpace(q); q != "" {
-		cmds := make([]string, 0, len(ranked))
-		for _, u := range ranked {
-			cmds = append(cmds, u.Command)
-		}
-		keep := map[string]bool{}
-		for _, hit := range ioncmd.Fuzzy(cmds, q) {
-			keep[hit] = true
-		}
-		kept := ranked[:0:0]
-		for _, u := range ranked {
-			if keep[u.Command] {
-				kept = append(kept, u)
-			}
-		}
-		ranked = kept
-	}
-
+	ranked := m.runtime().Ranked(model, q)
 	m.freq = ranked
 	m.slashItems = make([]string, 0, len(ranked))
 	for _, u := range ranked {
@@ -138,10 +96,10 @@ func (m tuiModel) forgetFreq() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if !m.cmds.Forget(use.Command, use.Model) {
+	if !m.runtime().ForgetUse(use.Command, use.Model) {
 		return m, nil
 	}
-	save := saveCommands(m.store, m.cmds)
+	save := m.saveCommands()
 	m = m.setFreq(m.slashInput.Value())
 	m.status = "forgot " + use.Command
 	return m, save

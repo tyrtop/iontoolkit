@@ -22,10 +22,11 @@ func fleetModel(b *testing.B, n int) tuiModel {
 		})
 	}
 	setTestElements(&m, els)
-	m.sites = map[string]string{}
+	sites := map[string]string{}
 	for i := range n / 2 {
-		m.sites["1/"+fmt.Sprint(i)] = fmt.Sprintf("Store %04d", i)
+		sites["1/"+fmt.Sprint(i)] = fmt.Sprintf("Store %04d", i)
 	}
+	m.runtime().MergeSites(sites)
 	m.phase = phasePicking
 	m.width, m.height = 160, 40
 	m.rebuildRows()
@@ -66,6 +67,6 @@ func benchModel(b *testing.B) tuiModel {
 		Name: "Acme Co", TSGID: "1", Users: []config.IONUser{{Name: "u", Default: true}},
 	}}}
 	m := newTUIModel(context.Background(), st, cfg)
-	m.tenant, m.hasTenant = cfg.Tenants[0], true
+	m.runtime().UseTenant(cfg.Tenants[0])
 	return m
 }

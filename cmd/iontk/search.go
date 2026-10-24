@@ -12,14 +12,13 @@ import (
 	"strings"
 	"sync"
 	"text/tabwriter"
-	"time"
 
+	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
-	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/output"
-	"tyrtop.com/iontk/internal/sase"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/saseauth"
 	"tyrtop.com/iontk/internal/search"
@@ -162,20 +161,18 @@ func tenantNames(ts []config.Tenant) string {
 
 type fleet struct {
 	store       *config.Store
+	rt          *runtime.Runtime
 	log         io.Writer
 	progress    bool
 	interactive bool
 	in          io.Reader
-
-	mu      sync.Mutex
-	clients map[string]*api.Client
 }
 
 func newFleet(st *config.Store, in io.Reader, log io.Writer, progress, interactive bool) *fleet {
-	return &fleet{
-		store: st, in: in, log: log, progress: progress, interactive: interactive,
-		clients: map[string]*api.Client{},
-	}
+	cfg, _ := st.Config()
+	rt := app.NewRuntime(st, cfg)
+	runAsFromEnv(rt)
+	return &fleet{store: st, rt: rt, in: in, log: log, progress: progress, interactive: interactive}
 }
 
 type loaded struct {
@@ -272,7 +269,7 @@ func (fl *fleet) load(ctx context.Context, tenants []config.Tenant) []loaded {
 
 func (fl *fleet) renew(ctx context.Context, needed []config.Tenant) bool {
 	if !fl.interactive {
-		fmt.Fprintf(fl.log, "%s need a credential — run `iontk login`, or this on a terminal\n",
+		fmt.Fprintf(fl.log, "%s need a credential — run `iontk auth login`, or this on a terminal\n",
 			tenantNames(needed))
 		return false
 	}
@@ -311,92 +308,8 @@ func (fl *fleet) report(events <-chan tui.TenantLoad) {
 }
 
 func (fl *fleet) elements(ctx context.Context, t config.Tenant) loaded {
-	out := loaded{tenant: t}
-	cached, cerr := fl.store.Cache(t.TSGID)
-	if cerr != nil {
-		cached = nil
-	}
-	if !flagRefresh && cached.Usable() && !cached.Stale(config.CacheFresh) {
-		out.els, out.sites = cached.Elements, search.SiteMap(cached.Sites)
-		out.note = fmt.Sprintf("from the cache, %s old", age(cached.Age()))
-		return out
-	}
-
-	els, sites, err := fl.fetch(ctx, t, cached)
-	if err != nil {
-		if cached.Usable() {
-			out.els, out.sites = cached.Elements, search.SiteMap(cached.Sites)
-			out.note = fmt.Sprintf("from a stale cache %s old (%s)", age(cached.Age()), app.ShortAuthError(err))
-			out.stale = err
-			return out
-		}
-		out.err = err
-		return out
-	}
-	out.els, out.sites, out.note = els, sites, "refreshed"
-	return out
-}
-
-func (fl *fleet) fetch(ctx context.Context, t config.Tenant, cached *config.ElementCache) ([]api.Element, search.SiteMap, error) {
-	c, err := fl.client(ctx, t)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	els, err := c.ListElements(ctx)
-	if err != nil {
-		logging.L().Warn("element list failed", "tsg", t.TSGID, "tenant", t.Name, "err", err)
-		return nil, nil, err
-	}
-
-	sites := search.SiteMap{}
-	ss, siteErr := c.ListSites(ctx)
-	logging.L().Info("elements loaded", "tsg", t.TSGID, "tenant", t.Name,
-		"elements", len(els), "sites", len(ss), "site_err", siteErr)
-	for _, s := range ss {
-		sites[t.TSGID+"/"+s.ID] = s.Name
-	}
-	if siteErr != nil && cached != nil {
-		sites = search.SiteMap(cached.Sites)
-	}
-
-	_ = fl.store.SaveCache(&config.ElementCache{
-		TSGID: t.TSGID, FetchedAt: time.Now(), Elements: els, Sites: sites,
-	})
-	return els, sites, nil
-}
-
-func (fl *fleet) client(ctx context.Context, t config.Tenant) (*api.Client, error) {
-	fl.mu.Lock()
-	defer fl.mu.Unlock()
-	if c, ok := fl.clients[t.TSGID]; ok {
-		return c, nil
-	}
-	f := fl.flags(t)
-	if err := f.ValidateCreds(); err != nil {
-		return nil, err
-	}
-	c, err := app.NewClient(ctx, fl.store, f, io.Discard)
-	if err != nil {
-		return nil, err
-	}
-	fl.clients[t.TSGID] = c
-	return c, nil
-}
-
-func (fl *fleet) flags(t config.Tenant) app.Flags {
-	return app.TenantFlags(fl.store, t, os.Getenv("ION_USER"))
-}
-
-func age(d time.Duration) string {
-	switch {
-	case d < time.Minute:
-		return "under a minute"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	default:
-		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
-	}
+	l := fl.rt.LoadTenant(ctx, t, flagRefresh)
+	return loaded{tenant: t, els: l.Elements, sites: search.SiteMap(l.Sites), note: l.Note, err: l.Err, stale: l.Stale}
 }
 
 func printHits(w io.Writer, hits []hit, format string) error {
@@ -521,26 +434,37 @@ func plural(n int, word string) string {
 }
 
 func (fl *fleet) selection(ctx context.Context, hits []hit) (selection, error) {
-	sel := selection{elements: make([]string, 0, len(hits))}
+	sel := selection{rt: fl.rt, elements: make([]string, 0, len(hits))}
 	seen := map[string]bool{}
-
 	for _, h := range hits {
-		c, err := fl.client(ctx, h.tenant)
-		if err != nil {
-			return selection{}, fmt.Errorf("tenant %s: %w", h.tenant.Name, err)
-		}
 		if !seen[h.tenant.TSGID] {
 			seen[h.tenant.TSGID] = true
-			sel.clients = append(sel.clients, c)
+			if _, err := fl.rt.Connect(ctx, h.tenant); err != nil {
+				return selection{}, fmt.Errorf("tenant %s: %w", h.tenant.Name, err)
+			}
 		}
-		f := fl.flags(h.tenant)
 		sel.elements = append(sel.elements, h.element.ID)
-		sel.targets = append(sel.targets, sase.Target{
-			ElementID: h.element.ID,
-			Client:    c,
-			User:      f.IONUsername,
-			Pass:      f.IONPassword,
-		})
+		sel.rows = append(sel.rows, runtime.Element{Element: h.element, TSG: h.tenant.TSGID, Tenant: h.tenant.Name})
 	}
 	return sel, nil
+}
+
+var fleetSearchCmd = &cobra.Command{
+	Use:   "search <query>",
+	Short: "List the elements a query matches, across the working set of tenants",
+	Long: `Runs the TUI's filter over the elements of every tenant in the working
+set, narrowed by --tenant or --tsg, and prints what matched. The query's
+words must all match the name, site, model, software, tenant or state.
+
+iontk batch run --search runs commands on what a query matches instead.`,
+	Example: `  iontk fleet search store-0100
+  iontk fleet search "s5024 ion 1200" --format json`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(flagCommands) > 0 {
+			return fmt.Errorf("fleet search only lists; iontk batch run --search %q runs commands on what it finds", args[0])
+		}
+		flagSearch = args[0]
+		return runSearch(cmd.Context())
+	},
 }

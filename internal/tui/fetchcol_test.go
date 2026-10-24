@@ -129,8 +129,8 @@ func TestAQueryTheTenantRefusesFallsBackToOnePerElement(t *testing.T) {
 	if got := plain(columnCell(t, &m, 1, "uptime")); got != "up 1" {
 		t.Errorf("row 1 = %q, want the value the fallback read", got)
 	}
-	if m.fetchBulk["uptime"] == "" || m.fetchBulk["uptime"] == "used" {
-		t.Errorf("fetchBulk = %q, want the reason the query was refused", m.fetchBulk["uptime"])
+	if m.runtime().CellsBulk("uptime") == "" || m.runtime().CellsBulk("uptime") == "used" {
+		t.Errorf("fetchBulk = %q, want the reason the query was refused", m.runtime().CellsBulk("uptime"))
 	}
 }
 
@@ -168,8 +168,8 @@ func TestAnElementTheCallRefusedReadsAsAQuestion(t *testing.T) {
 	if got := columnCell(t, &m, 1, "uptime"); got != ui.StyleWarn.Render("?") {
 		t.Errorf("the question is %q, want it warn-coloured", got)
 	}
-	if !strings.Contains(m.fetchErr["uptime"], "404") {
-		t.Errorf("fetchErr = %q, want the reason kept", m.fetchErr["uptime"])
+	if !strings.Contains(m.runtime().CellsErr("uptime"), "404") {
+		t.Errorf("fetchErr = %q, want the reason kept", m.runtime().CellsErr("uptime"))
 	}
 }
 
@@ -211,7 +211,7 @@ func TestTheRestOfTheFleetWaitsForATick(t *testing.T) {
 
 	next, cmd := m.onFetchedCells(msg)
 	m = next.(tuiModel)
-	if len(m.fetchQueue[fetchKey("uptime", "1")]) != 60 {
+	if len(m.runtime().CellsQueued("uptime", "1")) != 60 {
 		t.Error("the rest of the fleet was not queued")
 	}
 	if cmd == nil {
@@ -248,7 +248,7 @@ func TestACursorMoveAsksForTheRowsItLandedOn(t *testing.T) {
 	if cmd := m.askVisibleCells(); cmd == nil {
 		t.Fatal("nothing was asked for the rows on screen")
 	}
-	if !m.fetchOut[fetchKey("uptime", "1")] {
+	if !m.runtime().CellsOut("uptime", "1") {
 		t.Error("the column is not marked as in flight, so a second move would ask twice")
 	}
 	if cmd := m.askVisibleCells(); cmd != nil {
@@ -275,10 +275,8 @@ func TestAFetchedColumnIsRefusedWhenItCannotBeDrawn(t *testing.T) {
 
 func TestTheSweepSaysWhereItIsWhileItRuns(t *testing.T) {
 	m, _ := fetchModel(t, 300)
-	at := fetchKey("uptime", "1")
-	m.fetchTotal = map[string]int{at: 300}
-	m.fetchDone = map[string]int{at: 200}
-	m.markFetchOut(at)
+	m.runtime().SetCellsProgress("uptime", "1", 300, 200)
+	m.runtime().MarkCellsOut("uptime", "1")
 
 	note := plain(m.cellsNote())
 	if !strings.Contains(note, "uptime") || !strings.Contains(note, "200/300") {
@@ -314,8 +312,7 @@ var _ = tea.Batch
 func TestTheListSaysWhyAColumnIsSlow(t *testing.T) {
 	m, portal := fetchModel(t, 3)
 	portal.bulkErr = fmt.Errorf("403 not for this tenant")
-	at := fetchKey("uptime", "1")
-	m.fetchTotal = map[string]int{at: 3}
+	m.runtime().SetCellsProgress("uptime", "1", 3, 0)
 
 	m = runFetch(t, m, portal, "0", "1", "2")
 

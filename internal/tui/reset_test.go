@@ -11,7 +11,7 @@ func resetModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := pickModel(t)
 	m.width, m.height = 100, 30
-	if err := m.store.SaveConfig(m.cfg); err != nil {
+	if err := m.store().SaveConfig(m.cfg()); err != nil {
 		t.Fatal(err)
 	}
 	m.phase = phaseSettings
@@ -31,26 +31,26 @@ func TestFactoryResetAsksTwice(t *testing.T) {
 		t.Errorf("the armed section does not say what y will do:\n%s", got)
 	}
 
-	if cfg, err := m.store.Config(); err != nil || len(cfg.Tenants) == 0 {
+	if cfg, err := m.store().Config(); err != nil || len(cfg.Tenants) == 0 {
 		t.Errorf("arming already deleted the config (%+v, %v)", cfg, err)
 	}
 
 	done, _ := armed.(tuiModel).onSettingsKey("y")
 	got := done.(tuiModel)
-	if got.hasTenant || len(got.cfg.Tenants) != 0 || len(got.all) != 0 {
-		t.Errorf("the model still has a tenant after the reset: %+v", got.cfg)
+	if got.hasTenant() || len(got.cfg().Tenants) != 0 || len(got.rows()) != 0 {
+		t.Errorf("the model still has a tenant after the reset: %+v", got.cfg())
 	}
 	if got.phase != phaseMenu {
 		t.Errorf("phase = %v after the reset, want the menu", got.phase)
 	}
-	cfg, err := m.store.Config()
+	cfg, err := m.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cfg.Tenants) != 0 {
 		t.Errorf("config still holds %d tenants", len(cfg.Tenants))
 	}
-	if _, err := m.store.Secrets.Get(config.IONPassKey("1", "u")); err == nil {
+	if _, err := m.store().Secrets.Get(config.IONPassKey("1", "u")); err == nil {
 		t.Error("the ION password survived the reset")
 	}
 }
@@ -64,7 +64,7 @@ func TestFactoryResetCancelsOnAnythingElse(t *testing.T) {
 		if after.(tuiModel).resetArmed {
 			t.Errorf("%q left the reset armed", key)
 		}
-		cfg, err := m.store.Config()
+		cfg, err := m.store().Config()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,7 +85,7 @@ func TestArmingDoesNotSurviveLeavingTheSection(t *testing.T) {
 	}
 
 	fired, _ := back.(tuiModel).onSettingsKey("y")
-	cfg, err := m.store.Config()
+	cfg, err := m.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}

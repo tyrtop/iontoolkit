@@ -75,7 +75,7 @@ func TestTheMouseCanBeHandedBackOnADeadTab(t *testing.T) {
 	m.phase = phaseSession
 	conn.Close(websocket.StatusAbnormalClosure, "torn")
 
-	s := m.sessions.Active()
+	s := m.sessions().Active()
 	waitForTUI(t, func() bool { return s.Err() != nil || s.Ended() })
 
 	m, _ = pressSessionKey(t, m, altKey('v'))

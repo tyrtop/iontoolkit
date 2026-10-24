@@ -75,7 +75,7 @@ func Open(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 
 	s := &Session{
 		ElementID: eid,
@@ -130,9 +130,9 @@ func (s *Session) pumpOutput(ctx context.Context) {
 		s.mu.Unlock()
 
 		s.mu.Lock()
-		auto := s.auto
+		send, ok := s.auto.feed(data)
 		s.mu.Unlock()
-		if send, ok := auto.feed(data); ok {
+		if ok {
 			s.SendText(send)
 		}
 		s.markDirty()
@@ -240,6 +240,18 @@ func (s *Session) Answered() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.gotData
+}
+
+func (s *Session) LoggedIn() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gotData && s.auto.done()
+}
+
+func (s *Session) LoggingIn() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.auto.done()
 }
 
 func (s *Session) Hung() bool {

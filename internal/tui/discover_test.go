@@ -22,9 +22,9 @@ var discoveredTenants = []saseauth.Tenant{
 func discoverModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := signInModel(t, config.Tenant{})
-	m.cfg = &config.Config{}
-	m.hasTenant = false
-	m.tenant = config.Tenant{}
+	m.runtime().UseConfig(m.store(), &config.Config{})
+	m.runtime().ClearTenant()
+	m.runtime().ReplaceTenant(config.Tenant{})
 	m.width, m.height = 100, 30
 	m.spinner = ui.NewSpinner("")
 	return m
@@ -32,7 +32,7 @@ func discoverModel(t *testing.T) tuiModel {
 
 func seedKnown(t *testing.T, m tuiModel, tenants ...config.KnownTenant) {
 	t.Helper()
-	if err := m.store.SaveTenantCache(&config.TenantCache{
+	if err := m.store().SaveTenantCache(&config.TenantCache{
 		FetchedAt: time.Now(),
 		Account:   "Ben Hall <ben@example.test>",
 		Tenants:   tenants,
@@ -96,17 +96,17 @@ func TestDiscoveryLandsOnTheWorkingSetPicker(t *testing.T) {
 	if got.phase != phaseTenantPick {
 		t.Fatalf("phase = %v, want the tenant picker", got.phase)
 	}
-	if len(got.discovered) != 3 {
-		t.Errorf("discovered %d tenants, want 3 offered", len(got.discovered))
+	if len(got.rt.Discovered()) != 3 {
+		t.Errorf("discovered %d tenants, want 3 offered", len(got.rt.Discovered()))
 	}
-	if len(got.cfg.Tenants) != 0 {
-		t.Errorf("%d tenants were saved before anything was picked", len(got.cfg.Tenants))
+	if len(got.cfg().Tenants) != 0 {
+		t.Errorf("%d tenants were saved before anything was picked", len(got.cfg().Tenants))
 	}
-	if len(got.picked) != 0 {
-		t.Errorf("%d tenants started ticked, want none on a first sign-in", len(got.picked))
+	if got.rt.PickedCount() != 0 {
+		t.Errorf("%d tenants started ticked, want none on a first sign-in", got.rt.PickedCount())
 	}
 
-	cached, err := got.store.TenantCache()
+	cached, err := got.store().TenantCache()
 	if err != nil {
 		t.Fatalf("TenantCache() error = %v", err)
 	}
@@ -124,10 +124,10 @@ func TestTenantChoicesMergeDiscoveredAndSaved(t *testing.T) {
 		config.KnownTenant{TSGID: "1643707006", Name: "CIS root"},
 		config.KnownTenant{TSGID: "1984021017", Name: "Tractor Supply Co."},
 	)
-	m.cfg = &config.Config{Tenants: []config.Tenant{
+	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 		{Name: "Legacy Co", TSGID: "999", Auth: config.AuthServiceAccount, ClientID: "svc"},
 		{Name: "Tractor Supply Co.", TSGID: "1984021017", Auth: config.AuthBrowser},
-	}}
+	}})
 
 	got := m.tenantChoices()
 	if len(got) != 3 {
@@ -164,24 +164,24 @@ func TestUsingADiscoveredTenantCreatesItsRecordLazily(t *testing.T) {
 	if got.phase != phaseMenu {
 		t.Fatalf("phase = %v, want phaseMenu", got.phase)
 	}
-	if len(got.cfg.Tenants) != 1 {
-		t.Fatalf("config holds %d tenants, want the used one recorded", len(got.cfg.Tenants))
+	if len(got.cfg().Tenants) != 1 {
+		t.Fatalf("config holds %d tenants, want the used one recorded", len(got.cfg().Tenants))
 	}
-	saved := got.cfg.Tenants[0]
+	saved := got.cfg().Tenants[0]
 	if saved.TSGID != "1984021017" || saved.Name != "Tractor Supply Co." {
 		t.Errorf("saved = %+v, want the portal's name and id", saved)
 	}
 	if !saved.UsesBrowser() {
 		t.Errorf("Auth = %q, want a discovered tenant to be browser-backed", saved.Auth)
 	}
-	if !got.hasTenant || got.tenant.TSGID != "1984021017" {
+	if !got.hasTenant() || got.tenant().TSGID != "1984021017" {
 		t.Error("the chosen tenant did not become active")
 	}
-	if got.cfg.LastTenant != saved.Name {
-		t.Errorf("LastTenant = %q, want %q", got.cfg.LastTenant, saved.Name)
+	if got.cfg().LastTenant != saved.Name {
+		t.Errorf("LastTenant = %q, want %q", got.cfg().LastTenant, saved.Name)
 	}
-	if got.cacheState != cacheUpdating {
-		t.Errorf("cacheState = %v, want a fetch owed for a tenant never used", got.cacheState)
+	if got.cacheState() != cacheUpdating {
+		t.Errorf("cacheState = %v, want a fetch owed for a tenant never used", got.cacheState())
 	}
 }
 
@@ -195,32 +195,32 @@ func TestUsingATenantTwiceDoesNotDuplicateIt(t *testing.T) {
 	mm, _ = m.onSwitchKey("enter")
 	got := mm.(tuiModel)
 
-	if len(got.cfg.Tenants) != 1 {
-		t.Errorf("config holds %d tenants, want 1", len(got.cfg.Tenants))
+	if len(got.cfg().Tenants) != 1 {
+		t.Errorf("config holds %d tenants, want 1", len(got.cfg().Tenants))
 	}
 }
 
 func TestSwitchingKeepsAServiceAccountsOwnAuth(t *testing.T) {
 	m := discoverModel(t)
-	m.cfg = &config.Config{Tenants: []config.Tenant{
+	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 		{Name: "Legacy Co", TSGID: "999", Auth: config.AuthServiceAccount, ClientID: "svc"},
-	}}
+	}})
 	m.phase = phaseSwitch
 
 	mm, _ := m.onSwitchKey("enter")
 	got := mm.(tuiModel)
-	if got.tenant.UsesBrowser() {
+	if got.tenant().UsesBrowser() {
 		t.Error("switching to a service account tenant turned it into a browser tenant")
 	}
-	if got.tenant.ClientID != "svc" {
-		t.Errorf("ClientID = %q, want the existing record reused", got.tenant.ClientID)
+	if got.tenant().ClientID != "svc" {
+		t.Errorf("ClientID = %q, want the existing record reused", got.tenant().ClientID)
 	}
 }
 
 func TestSwitchingToATenantWithCachedElements(t *testing.T) {
 	m := discoverModel(t)
 	seedKnown(t, m, config.KnownTenant{TSGID: "111", Name: "Acme Co"})
-	if err := m.store.SaveCache(&config.ElementCache{
+	if err := m.store().SaveCache(&config.ElementCache{
 		TSGID: "111", FetchedAt: time.Now().Add(-2 * time.Minute),
 		Elements: []api.Element{{ID: "e1", Name: "s0001"}},
 	}); err != nil {
@@ -230,11 +230,11 @@ func TestSwitchingToATenantWithCachedElements(t *testing.T) {
 
 	mm, _ := m.onSwitchKey("enter")
 	got := mm.(tuiModel)
-	if got.cacheState != cacheCached {
-		t.Errorf("cacheState = %v, want a fresh cache recognised", got.cacheState)
+	if got.cacheState() != cacheCached {
+		t.Errorf("cacheState = %v, want a fresh cache recognised", got.cacheState())
 	}
-	if got.cacheCount != 1 {
-		t.Errorf("cacheCount = %d, want 1", got.cacheCount)
+	if got.cacheCount() != 1 {
+		t.Errorf("cacheCount = %d, want 1", got.cacheCount())
 	}
 }
 
@@ -246,19 +246,19 @@ func TestSwitchingClearsTheOldTenantsClient(t *testing.T) {
 	)
 	m.phase = phaseSwitch
 	setTestClient(&m, liveClient())
-	m.tokenDead = "sign-in expired"
+	m.runtime().TokenDied("sign-in expired", false)
 	m.switchCursor = 1
 
 	mm, _ := m.onSwitchKey("enter")
 	got := mm.(tuiModel)
-	if got.client != nil {
+	if got.pool().Get(got.tenant().TSGID) != nil {
 		t.Error("the previous tenant's client was kept, so calls would go to the wrong tenant")
 	}
-	if got.tokenDead != "" {
+	if got.rt.TokenDead() != "" {
 		t.Error("the previous tenant's expiry warning was kept")
 	}
-	if got.tenant.TSGID != "222" {
-		t.Errorf("active tenant = %q, want 222", got.tenant.TSGID)
+	if got.tenant().TSGID != "222" {
+		t.Errorf("active tenant = %q, want 222", got.tenant().TSGID)
 	}
 }
 
@@ -328,10 +328,10 @@ func TestMenuIsOneEntryPerThing(t *testing.T) {
 func TestServiceAndBrowserTenantsArePartitioned(t *testing.T) {
 	m := discoverModel(t)
 	seedKnown(t, m, config.KnownTenant{TSGID: "111", Name: "Acme Co"})
-	m.cfg = &config.Config{Tenants: []config.Tenant{
+	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 		{Name: "Browser Co", TSGID: "111", Auth: config.AuthBrowser},
 		{Name: "Legacy Co", TSGID: "999", Auth: config.AuthServiceAccount, ClientID: "svc"},
-	}}
+	}})
 
 	accounts := m.serviceTenants()
 	if len(accounts) != 1 || accounts[0].tsg != "999" {
@@ -349,10 +349,10 @@ func TestRenderTenantList(t *testing.T) {
 		config.KnownTenant{TSGID: "1643707006", Name: "CIS root"},
 		config.KnownTenant{TSGID: "1984021017", Name: "Tractor Supply Co."},
 	)
-	m.cfg = &config.Config{Tenants: []config.Tenant{
+	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 		{Name: "Legacy Co", TSGID: "999", Auth: config.AuthServiceAccount},
-	}}
-	m.tenant, m.hasTenant = config.Tenant{Name: "CIS root", TSGID: "1643707006"}, true
+	}})
+	m.runtime().UseTenant(config.Tenant{Name: "CIS root", TSGID: "1643707006"})
 	m.phase = phaseSwitch
 
 	out := plain(m.viewSwitch())
@@ -383,11 +383,11 @@ func TestRenderDiscoverWait(t *testing.T) {
 }
 
 func TestTenantChoicesSurviveANilStore(t *testing.T) {
-	m := tuiModel{cfg: &config.Config{}}
+	m := withStore(tuiModel{}, nil, &config.Config{})
 	if got := m.tenantChoices(); len(got) != 0 {
 		t.Errorf("tenantChoices() = %+v, want none", got)
 	}
-	m.cfg = &config.Config{Tenants: []config.Tenant{{Name: "Acme Co", TSGID: "1"}}}
+	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{{Name: "Acme Co", TSGID: "1"}}})
 	if got := m.tenantChoices(); len(got) != 1 {
 		t.Errorf("tenantChoices() = %+v, want the saved tenant", got)
 	}
@@ -399,10 +399,10 @@ func TestTenantChoicesSurviveANilStore(t *testing.T) {
 
 func TestTenantsWithoutAnIDDoNotCollapse(t *testing.T) {
 	m := discoverModel(t)
-	m.cfg = &config.Config{Tenants: []config.Tenant{
+	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 		{Name: "Acme Co"},
 		{Name: "Lab"},
-	}}
+	}})
 	if got := m.tenantChoices(); len(got) != 2 {
 		t.Errorf("got %d choices, want both kept apart: %+v", len(got), got)
 	}
@@ -442,7 +442,7 @@ func TestSwitchingActuallyFetchesForTheNewTenant(t *testing.T) {
 			m := discoverModel(t)
 			seedKnown(t, m, config.KnownTenant{TSGID: "111", Name: "Acme Co"})
 			if tt.cached {
-				if err := m.store.SaveCache(&config.ElementCache{
+				if err := m.store().SaveCache(&config.ElementCache{
 					TSGID: "111", FetchedAt: time.Now().Add(-tt.cacheAge),
 					Elements: []api.Element{{ID: "e1", Name: "s0001"}},
 				}); err != nil {
@@ -454,8 +454,8 @@ func TestSwitchingActuallyFetchesForTheNewTenant(t *testing.T) {
 			mm, cmd := m.onSwitchKey("enter")
 			got := mm.(tuiModel)
 
-			if got.cacheState != tt.wantState {
-				t.Errorf("cacheState = %v, want %v", got.cacheState, tt.wantState)
+			if got.cacheState() != tt.wantState {
+				t.Errorf("cacheState = %v, want %v", got.cacheState(), tt.wantState)
 			}
 			if tt.wantCmd && cmd == nil {
 				t.Error("no command returned, so the cache line would claim to be updating forever")
@@ -472,10 +472,10 @@ func TestSwitchingActuallyFetchesForTheNewTenant(t *testing.T) {
 
 func TestAddingATenantFetchesEvenBesideAFreshlyCachedOne(t *testing.T) {
 	m := discoverModel(t)
-	m.discovered = discoveredTenants
-	m.picked = map[string]bool{"1643707006": true, "1984021017": true}
+	m.runtime().SetDiscovered(discoveredTenants)
+	pickOnly(&m, "1643707006", "1984021017")
 
-	if err := m.store.SaveCache(&config.ElementCache{
+	if err := m.store().SaveCache(&config.ElementCache{
 		TSGID: "1643707006", FetchedAt: time.Now().Add(-2 * time.Minute),
 		Elements: []api.Element{{ID: "e1", Name: "s0001-rtr-01"}},
 	}); err != nil {
@@ -488,22 +488,22 @@ func TestAddingATenantFetchesEvenBesideAFreshlyCachedOne(t *testing.T) {
 	if cmd == nil {
 		t.Error("nothing was fetched, so the tenant just added has no elements until a manual refresh")
 	}
-	if got.cacheState != cacheUpdating {
-		t.Errorf("cacheState = %v, want cacheUpdating with a tenant still unread", got.cacheState)
+	if got.cacheState() != cacheUpdating {
+		t.Errorf("cacheState = %v, want cacheUpdating with a tenant still unread", got.cacheState())
 	}
 }
 
 func TestSwitchingToATenantWithNoUsableCredentialSaysSo(t *testing.T) {
 	m := discoverModel(t)
-	m.cfg = &config.Config{Tenants: []config.Tenant{
+	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 		{Name: "Legacy Co", TSGID: "999", Auth: config.AuthServiceAccount},
-	}}
+	}})
 	m.phase = phaseSwitch
 
 	mm, _ := m.onSwitchKey("enter")
 	got := mm.(tuiModel)
-	if got.cacheState != cacheFailed {
-		t.Errorf("cacheState = %v, want cacheFailed rather than a permanent 'updating'", got.cacheState)
+	if got.cacheState() != cacheFailed {
+		t.Errorf("cacheState = %v, want cacheFailed rather than a permanent 'updating'", got.cacheState())
 	}
 	if got.status == "" {
 		t.Error("status is empty, want the credential problem surfaced")
@@ -519,34 +519,30 @@ func setTestElements(m *tuiModel, els []api.Element) {
 }
 
 func setTestClient(m *tuiModel, c *api.Client) {
-	m.client = c
-	if m.pool == nil {
-		m.pool = newClientPool()
-	}
-	m.pool.set(m.tenant.TSGID, c)
-	m.pool.set("1", c)
+	m.pool().Set(m.tenant().TSGID, c)
+	m.pool().Set("1", c)
 }
 
 func TestServiceAccountModeOnlyOffersWhatItCanReach(t *testing.T) {
 	m := multiModel(t)
-	m.cfg = &config.Config{Tenants: []config.Tenant{
+	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 		{Name: "Saved SA", TSGID: "111", Auth: config.AuthServiceAccount, ClientID: "sa@1.iam"},
 		{Name: "Saved Browser", TSGID: "222", Auth: config.AuthBrowser},
-	}}
-	m.tenant, m.hasTenant = m.cfg.Tenants[0], true
-	if err := m.store.SaveTenantCache(&config.TenantCache{
+	}})
+	m.runtime().UseTenant(m.cfg().Tenants[0])
+	if err := m.store().SaveTenantCache(&config.TenantCache{
 		Account: "someone@example.com",
 		Tenants: []config.KnownTenant{{TSGID: "333", Name: "Discovered"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	m.authMode = authBrowser
+	m.setAuthMode(authBrowser)
 	if got := len(m.switchChoices()); got != 3 {
 		t.Errorf("browser mode offers %d tenants, want all 3", got)
 	}
 
-	m.authMode = authTenant
+	m.setAuthMode(authTenant)
 	got := m.switchChoices()
 	if len(got) != 1 || got[0].name != "Saved SA" {
 		t.Errorf("service account mode offers %+v, want only the saved service account", got)
@@ -566,7 +562,7 @@ func TestServiceAccountModeOnlyOffersWhatItCanReach(t *testing.T) {
 
 func TestReListIsRefusedInServiceAccountMode(t *testing.T) {
 	m := multiModel(t)
-	m.authMode = authTenant
+	m.setAuthMode(authTenant)
 	m.phase = phaseSwitch
 
 	mm, cmd := m.onSwitchKey("alt+r")
@@ -585,13 +581,14 @@ func TestReListIsRefusedInServiceAccountMode(t *testing.T) {
 func serviceModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := multiModel(t)
-	m.phase, m.authMode = phaseSwitch, authTenant
+	m.phase = phaseSwitch
+	m.setAuthMode(authTenant)
 	m.width, m.height = 100, 30
-	m.cfg.Tenants = []config.Tenant{
+	m.cfg().Tenants = []config.Tenant{
 		{Name: "Acme Co", TSGID: "111", Auth: config.AuthServiceAccount,
 			ClientID: "svc@1234.iam.panserviceaccount.com", Added: true},
 	}
-	m.tenant, m.hasTenant = m.cfg.Tenants[0], true
+	m.runtime().UseTenant(m.cfg().Tenants[0])
 	return m
 }
 
@@ -624,7 +621,7 @@ func TestTheServiceAccountPageAddsAndForgets(t *testing.T) {
 	m.switchCursor = 1
 	next, _ = m.onSwitchKey("x")
 	m = next.(tuiModel)
-	if _, still := m.cfg.Tenant("Acme Co"); !still {
+	if _, still := m.cfg().Tenant("Acme Co"); !still {
 		t.Fatal("one x forgot the account")
 	}
 	if !strings.Contains(m.status, "x again") {
@@ -632,13 +629,13 @@ func TestTheServiceAccountPageAddsAndForgets(t *testing.T) {
 	}
 	next, _ = m.onSwitchKey("x")
 	m = next.(tuiModel)
-	if _, still := m.cfg.Tenant("Acme Co"); still {
+	if _, still := m.cfg().Tenant("Acme Co"); still {
 		t.Errorf("the second x left it in place: %s", m.status)
 	}
 
 	next, _ = m.onSwitchKey("u")
 	m = next.(tuiModel)
-	if _, back := m.cfg.Tenant("Acme Co"); !back {
+	if _, back := m.cfg().Tenant("Acme Co"); !back {
 		t.Errorf("u did not put the record back: %s", m.status)
 	}
 	if !strings.Contains(m.status, "secret") {
@@ -652,8 +649,8 @@ func TestTheServiceAccountPageAddsAndForgets(t *testing.T) {
 
 func TestTheAccountInUseIsListedEvenWithNoSavedRecord(t *testing.T) {
 	m := serviceModel(t)
-	m.cfg.Tenants = nil
-	m.tenant, m.hasTenant = config.Tenant{Name: "env", TSGID: "999"}, true
+	m.cfg().Tenants = nil
+	m.runtime().UseTenant(config.Tenant{Name: "env", TSGID: "999"})
 
 	choices := m.switchChoices()
 	if len(choices) != 1 || choices[0].tsg != "999" {
@@ -677,7 +674,7 @@ func TestTheAccountInUseIsListedEvenWithNoSavedRecord(t *testing.T) {
 
 func TestTheBrowserTenantPageHasNoAddRow(t *testing.T) {
 	m := serviceModel(t)
-	m.authMode = authBrowser
+	m.setAuthMode(authBrowser)
 
 	if out := plain(m.viewSwitch()); strings.Contains(out, "+ New") {
 		t.Errorf("the browser page offers to type one in:\n%s", out)
@@ -699,10 +696,10 @@ func TestRenderTheServiceAccountPage(t *testing.T) {
 
 func TestABrowserTenantIsNeverListedAsAServiceAccount(t *testing.T) {
 	m := serviceModel(t)
-	m.cfg.Tenants = []config.Tenant{
+	m.cfg().Tenants = []config.Tenant{
 		{Name: "Tractor Supply", TSGID: "111", Auth: config.AuthBrowser, Added: true},
 	}
-	m.tenant, m.hasTenant = m.cfg.Tenants[0], true
+	m.runtime().UseTenant(m.cfg().Tenants[0])
 
 	for _, c := range m.switchChoices() {
 		if c.name == "Tractor Supply" {
@@ -723,12 +720,12 @@ func TestABrowserTenantIsNeverListedAsAServiceAccount(t *testing.T) {
 
 func TestThePickWarmsEveryTenantSoOneSignInLasts(t *testing.T) {
 	m := multiModel(t)
-	m.browserAuthDone = true
-	m.discovered = []saseauth.Tenant{
+	m.runtime().MarkBrowserSignedIn()
+	m.runtime().SetDiscovered([]saseauth.Tenant{
 		{ID: "111", Name: "Tractor Supply"},
 		{ID: "222", Name: "Niagara Bottling"},
-	}
-	m.picked = map[string]bool{"111": true, "222": true}
+	})
+	pickOnly(&m, "111", "222")
 	m.spinner = ui.NewSpinner("")
 
 	next, cmd := m.saveTenantPick()
@@ -736,8 +733,8 @@ func TestThePickWarmsEveryTenantSoOneSignInLasts(t *testing.T) {
 	if mm.phase != phaseWarming {
 		t.Errorf("phase = %v, want phaseWarming so each tenant gets a credential of its own", mm.phase)
 	}
-	if mm.warming != 2 {
-		t.Errorf("warming = %d, want 2 tenants", mm.warming)
+	if mm.rt.Warming() != 2 {
+		t.Errorf("warming = %d, want 2 tenants", mm.rt.Warming())
 	}
 	if cmd == nil {
 		t.Fatal("saveTenantPick() returned no command, so nothing warms the tenants")
@@ -746,8 +743,8 @@ func TestThePickWarmsEveryTenantSoOneSignInLasts(t *testing.T) {
 
 func TestThePickDoesNotWarmWithoutABrowserSignIn(t *testing.T) {
 	m := multiModel(t)
-	m.discovered = []saseauth.Tenant{{ID: "111", Name: "Tractor Supply"}}
-	m.picked = map[string]bool{"111": true}
+	m.runtime().SetDiscovered([]saseauth.Tenant{{ID: "111", Name: "Tractor Supply"}})
+	pickOnly(&m, "111")
 
 	next, _ := m.saveTenantPick()
 	if mm := next.(tuiModel); mm.phase == phaseWarming {
@@ -757,24 +754,24 @@ func TestThePickDoesNotWarmWithoutABrowserSignIn(t *testing.T) {
 
 func TestAWarmFailureIsRecordedWithoutKillingTheSignIn(t *testing.T) {
 	m := multiModel(t)
-	m.browserAuthDone = true
+	m.runtime().MarkBrowserSignedIn()
 	m.spinner = ui.NewSpinner("")
 
 	next, _ := m.onTenantsWarmed(tenantsWarmedMsg{results: []app.TenantWarm{
-		{Tenant: m.cfg.Tenants[0]},
-		{Tenant: m.cfg.Tenants[1], Err: fmt.Errorf("%w: %w; %w",
+		{Tenant: m.cfg().Tenants[0]},
+		{Tenant: m.cfg().Tenants[1], Err: fmt.Errorf("%w: %w; %w",
 			saseauth.ErrInteractiveRequired, saseauth.ErrNoCredential, saseauth.ErrNoSession)},
 	}})
 	mm := next.(tuiModel)
 
-	if mm.tenantIssues["222"] == "" {
+	if mm.tenantIssues()["222"] == "" {
 		t.Error("the tenant that could not be warmed carries no issue, so nothing will say why")
 	}
-	if mm.tenantIssues["111"] != "" {
-		t.Errorf("the warmed tenant carries %q, want nothing", mm.tenantIssues["111"])
+	if mm.tenantIssues()["111"] != "" {
+		t.Errorf("the warmed tenant carries %q, want nothing", mm.tenantIssues()["111"])
 	}
-	if mm.tokenDead != "" {
-		t.Errorf("tokenDead = %q; one tenant refusing must not mark the whole sign-in dead", mm.tokenDead)
+	if mm.rt.TokenDead() != "" {
+		t.Errorf("tokenDead = %q; one tenant refusing must not mark the whole sign-in dead", mm.rt.TokenDead())
 	}
 	if !strings.Contains(mm.status, "Niagara Bottling") {
 		t.Errorf("status = %q, want it to name the tenant that failed", mm.status)
@@ -786,8 +783,9 @@ func TestAWarmFailureIsRecordedWithoutKillingTheSignIn(t *testing.T) {
 
 func TestASecondBrowserSignInIsNotOfferedForATenantItAlreadyFailed(t *testing.T) {
 	m := multiModel(t)
-	m.browserAuthDone = true
-	m.tenantIssues = map[string]string{"111": "no sign-in for this tenant"}
+	m.runtime().MarkBrowserSignedIn()
+	m.runtime().ClearIssues()
+	m.runtime().SetIssue("111", "no sign-in for this tenant")
 	m.phase = phaseLoading
 	m.spinner = ui.NewSpinner("")
 
@@ -803,12 +801,26 @@ func TestASecondBrowserSignInIsNotOfferedForATenantItAlreadyFailed(t *testing.T)
 
 func TestAnExpiredTenantStillGetsABrowserSignIn(t *testing.T) {
 	m := multiModel(t)
-	m.browserAuthDone = true
-	m.tokenDead = "sign-in expired"
+	m.runtime().MarkBrowserSignedIn()
+	m.runtime().TokenDied("sign-in expired", false)
 	m.spinner = ui.NewSpinner("")
 
 	next, _ := m.startSignInAuto()
 	if mm := next.(tuiModel); mm.phase != phaseSignIn {
 		t.Errorf("phase = %v, want phaseSignIn: a tenant with no recorded issue has only aged out", mm.phase)
+	}
+}
+
+func pickOnly(m *tuiModel, ids ...string) {
+	rt := m.runtime()
+	for _, t := range rt.Discovered() {
+		if rt.Picked(t.ID) {
+			rt.TogglePick(t.ID)
+		}
+	}
+	for _, id := range ids {
+		if !rt.Picked(id) {
+			rt.TogglePick(id)
+		}
 	}
 }

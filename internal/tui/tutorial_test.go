@@ -42,7 +42,7 @@ func TestTheAskArrivesOnlyUntilItIsAnswered(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := pickModel(t)
-			m.cfg = tt.cfg
+			m.runtime().UseConfig(m.store(), tt.cfg)
 			if got := m.raiseTutorialAsk().askTutorial; got != tt.want {
 				t.Errorf("askTutorial = %v, want %v", got, tt.want)
 			}
@@ -52,7 +52,7 @@ func TestTheAskArrivesOnlyUntilItIsAnswered(t *testing.T) {
 
 func TestSayingNoPointsAtTheSettingsSectionAndDoesNotAskAgain(t *testing.T) {
 	m := pickModel(t)
-	m.cfg = &config.Config{}
+	m.runtime().UseConfig(m.store(), &config.Config{})
 	m = m.raiseTutorialAsk()
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Text: "n"}))
@@ -67,11 +67,11 @@ func TestSayingNoPointsAtTheSettingsSectionAndDoesNotAskAgain(t *testing.T) {
 	if got := plain(m.View().Content); !strings.Contains(got, tutorialSection) {
 		t.Errorf("the note never names the settings section:\n%s", got)
 	}
-	if !m.cfg.TutorialSeen {
+	if !m.cfg().TutorialSeen {
 		t.Error("the answer was not remembered, so the box comes back next launch")
 	}
 
-	saved, err := m.store.Config()
+	saved, err := m.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestSayingYesStartsTheShippedPages(t *testing.T) {
 	t.Cleanup(func() { app.Fixture = nil })
 
 	m := pickModel(t)
-	m.cfg = &config.Config{}
+	m.runtime().UseConfig(m.store(), &config.Config{})
 	m = m.raiseTutorialAsk()
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'y', Text: "y"}))
@@ -101,11 +101,11 @@ func TestSayingYesStartsTheShippedPages(t *testing.T) {
 	if len(m.tut.steps) < 2 {
 		t.Errorf("the run has %d steps, want the pages the file ships", len(m.tut.steps))
 	}
-	if !m.real.cfg.TutorialSeen {
+	if !m.real.rt.Config().TutorialSeen {
 		t.Error("the answer was not remembered")
 	}
 
-	saved, err := m.real.store.Config()
+	saved, err := m.real.rt.Store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestAnEmptyScriptSaysSoRatherThanStarting(t *testing.T) {
 
 func TestAFactoryResetAsksAgain(t *testing.T) {
 	m := settingsModel(t)
-	m.cfg.TutorialSeen = true
+	m.cfg().TutorialSeen = true
 	m.setSection, m.setFocus, m.setCursor = secReset, focusContent, factoryResetRow
 	m.resetArmed = true
 
@@ -347,11 +347,11 @@ func TestAStepHoldsEveryKeyButTheOnesItNames(t *testing.T) {
 		t.Fatalf("/ left the filter %v on step %d, want it open on step 2", m.filterOn, m.tut.at+1)
 	}
 
-	mode := m.mode
+	mode := m.mode()
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModAlt}))
 	m = mm.(tuiModel)
-	if m.mode != mode {
-		t.Errorf("mode = %v, want alt+m held on a step that names only typing", m.mode)
+	if m.mode() != mode {
+		t.Errorf("mode = %v, want alt+m held on a step that names only typing", m.mode())
 	}
 	if got := m.filter.Value(); got != "" {
 		t.Errorf("a held chord reached the filter as %q", got)
@@ -502,8 +502,8 @@ func TestStartingTheTutorialBorrowsAFakeFleet(t *testing.T) {
 	t.Cleanup(func() { app.Fixture = nil })
 
 	m := pickModel(t)
-	realStore, realCfg := m.store, m.cfg
-	realElements := len(m.all)
+	realStore, realCfg := m.store(), m.cfg()
+	realElements := len(m.rows())
 
 	next, cmd := m.startTutorial()
 	m = next.(tuiModel)
@@ -511,26 +511,26 @@ func TestStartingTheTutorialBorrowsAFakeFleet(t *testing.T) {
 	if app.Fixture == nil {
 		t.Fatal("the tutorial did not swap in the fixture set")
 	}
-	if m.store == realStore {
+	if m.store() == realStore {
 		t.Error("the tutorial is writing to the real config root")
 	}
-	if m.cfg == realCfg {
+	if m.cfg() == realCfg {
 		t.Error("the tutorial is using the real tenant list")
 	}
-	if m.tenant.Name != "Acme Co" {
-		t.Errorf("tenant = %q, want the fixture tenant", m.tenant.Name)
+	if m.tenant().Name != "Acme Co" {
+		t.Errorf("tenant = %q, want the fixture tenant", m.tenant().Name)
 	}
 	if m.flags.IONPassword == "" {
 		t.Error("no device password for the fake tenant, so a shell step could not log in")
 	}
 
 	m = runTenantLoads(t, m, cmd)
-	if len(m.all) < 6 {
-		t.Fatalf("the fake fleet loaded %d elements, want the six in tutorial.yaml", len(m.all))
+	if len(m.rows()) < 6 {
+		t.Fatalf("the fake fleet loaded %d elements, want the six in tutorial.yaml", len(m.rows()))
 	}
 
 	var names []string
-	for _, el := range m.all {
+	for _, el := range m.rows() {
 		names = append(names, el.Name)
 	}
 	if got := strings.Join(names, " "); !strings.Contains(got, "store-0003-rtr-01") {
@@ -543,11 +543,11 @@ func TestStartingTheTutorialBorrowsAFakeFleet(t *testing.T) {
 	if app.Fixture != nil {
 		t.Error("leaving the tutorial left the fixture set in place")
 	}
-	if m.store != realStore || m.cfg != realCfg {
+	if m.store() != realStore || m.cfg() != realCfg {
 		t.Error("the real store and config did not come back")
 	}
-	if len(m.all) != realElements {
-		t.Errorf("%d elements after leaving, want the real %d back", len(m.all), realElements)
+	if len(m.rows()) != realElements {
+		t.Errorf("%d elements after leaving, want the real %d back", len(m.rows()), realElements)
 	}
 	if m.real.held {
 		t.Error("the saved world is still being held")
@@ -577,7 +577,7 @@ func TestEvenAFixturesRunGetsTheBlankTutorialWorld(t *testing.T) {
 	withTutorialScript(t, tutorialStep{lines: []string{"anything"}})
 
 	m, set := fixtureTUI(t)
-	launched := m.tenant
+	launched := m.tenant()
 
 	next, _ := m.startTutorial()
 	m = next.(tuiModel)
@@ -588,8 +588,8 @@ func TestEvenAFixturesRunGetsTheBlankTutorialWorld(t *testing.T) {
 	if app.Fixture == set {
 		t.Error("the tour ran against the fixtures the run was launched with, not its own blank world")
 	}
-	if m.tenant.Name != "Acme Co" {
-		t.Errorf("tenant = %q, want the tutorial's own", m.tenant.Name)
+	if m.tenant().Name != "Acme Co" {
+		t.Errorf("tenant = %q, want the tutorial's own", m.tenant().Name)
 	}
 	if m.real.fixture != set {
 		t.Error("the launched fixture set was not held for afterwards")
@@ -601,14 +601,14 @@ func TestEvenAFixturesRunGetsTheBlankTutorialWorld(t *testing.T) {
 	if app.Fixture != set {
 		t.Error("the fixtures the run was launched with did not come back")
 	}
-	if m.tenant.Name != launched.Name {
-		t.Errorf("tenant = %q after leaving, want %q back", m.tenant.Name, launched.Name)
+	if m.tenant().Name != launched.Name {
+		t.Errorf("tenant = %q after leaving, want %q back", m.tenant().Name, launched.Name)
 	}
 }
 
 func TestAYAMLFileInTheConfigRootReplacesTheShippedPages(t *testing.T) {
 	m := pickModel(t)
-	path := filepath.Join(m.store.Root, tutorial.FileName)
+	path := filepath.Join(m.store().Root, tutorial.FileName)
 	if err := os.WriteFile(path, []byte(`
 pages:
   - name: welcome
@@ -622,7 +622,7 @@ pages:
 		t.Fatal(err)
 	}
 
-	flows, err := tutorialScript(m.store)
+	flows, err := tutorialScript(m.store())
 	if err != nil {
 		t.Fatalf("tutorialScript() error = %v", err)
 	}
@@ -642,7 +642,7 @@ pages:
 
 func TestABrokenTutorialFileIsReportedRatherThanIgnored(t *testing.T) {
 	m := settingsModel(t)
-	dir := filepath.Join(m.store.Root, tutorial.DirName)
+	dir := filepath.Join(m.store().Root, tutorial.DirName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -671,7 +671,7 @@ func TestABrokenTutorialFileIsReportedRatherThanIgnored(t *testing.T) {
 
 func TestEveryFileInTheFolderIsATutorialOfItsOwn(t *testing.T) {
 	m := settingsModel(t)
-	dir := filepath.Join(m.store.Root, tutorial.DirName)
+	dir := filepath.Join(m.store().Root, tutorial.DirName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -715,7 +715,7 @@ func TestEveryFileInTheFolderIsATutorialOfItsOwn(t *testing.T) {
 
 func TestTheAskBoxSaysOnlyWhatItWasAskedTo(t *testing.T) {
 	m := sized(t, pickModel(t), 100, 30)
-	m.cfg = &config.Config{}
+	m.runtime().UseConfig(m.store(), &config.Config{})
 	m = m.raiseTutorialAsk()
 
 	got := plain(m.View().Content)

@@ -220,7 +220,7 @@ func (m tuiModel) editTarget() (editTarget, bool) {
 func (m tuiModel) columnsTarget() editTarget {
 	path := m.listFrom
 	if path == "" {
-		path = existingOr(ColumnsPath(m.store), filepath.Join(ViewsDir(m.store), elementsViewFile))
+		path = existingOr(ColumnsPath(m.store()), filepath.Join(ViewsDir(m.store()), elementsViewFile))
 	}
 	return editTarget{
 		what: filepath.Base(path),
@@ -242,7 +242,8 @@ func (m tuiModel) columnsTarget() editTarget {
 		},
 		apply: func(m *tuiModel) (string, tea.Cmd, error) {
 			m.listSpec, m.listFrom, m.columnsErr = nil, "", ""
-			m.loadRuntime(m.store)
+			m.runtime().SetColumns(builtinSpecs())
+			m.loadRuntime(m.store())
 			if err := m.runtimeErr(); err != nil {
 				return "", nil, err
 			}
@@ -259,14 +260,14 @@ func (m tuiModel) viewsTarget() (editTarget, bool) {
 		return editTarget{}, false
 	}
 	name := m.viewAtScroll(tab)
-	v, ok := m.views.View(name)
+	v, ok := m.runtime().Views().View(name)
 	if !ok {
 		return editTarget{}, false
 	}
 
 	path := v.Source
 	if path == "" {
-		path = existingOr(legacyViewsPath(m.store), filepath.Join(ViewsDir(m.store), view.FileName(v.Name)))
+		path = existingOr(legacyViewsPath(m.store()), filepath.Join(ViewsDir(m.store()), view.FileName(v.Name)))
 	}
 	return editTarget{
 		what: filepath.Base(path),
@@ -293,12 +294,11 @@ func (m tuiModel) viewsTarget() (editTarget, bool) {
 			return err
 		},
 		apply: func(m *tuiModel) (string, tea.Cmd, error) {
-			m.viewsErr = ""
-			m.loadRuntime(m.store)
+			m.loadRuntime(m.store())
 			if err := m.runtimeErr(); err != nil {
 				return "", nil, err
 			}
-			return fmt.Sprintf("%d views · r refetches the page", len(m.views.Views)), nil, nil
+			return fmt.Sprintf("%d views · r refetches the page", len(m.runtime().Views().Views)), nil, nil
 		},
 	}, true
 }
@@ -308,7 +308,7 @@ const viewPointer = "internal/dataview/builtin.yaml is the worked example"
 func (m tuiModel) menuTarget() (editTarget, bool) {
 	path := m.menuFrom
 	if path == "" {
-		dir := ViewsDir(m.store)
+		dir := ViewsDir(m.store())
 		if dir == "" {
 			return editTarget{}, false
 		}
@@ -322,12 +322,12 @@ func (m tuiModel) menuTarget() (editTarget, bool) {
 			if err := view.CheckEnvelope(b, view.KindMenu); err != nil {
 				return err
 			}
-			_, err := parseMenu(b)
+			_, err := parseMenu(b, m.runsCommand)
 			return err
 		},
 		apply: func(m *tuiModel) (string, tea.Cmd, error) {
 			m.menuErr = ""
-			m.loadRuntime(m.store)
+			m.loadRuntime(m.store())
 			if err := m.runtimeErr(); err != nil {
 				return "", nil, err
 			}
@@ -366,7 +366,7 @@ func (m tuiModel) flowTarget() (editTarget, bool) {
 
 	path := flow.source
 	if path == "" {
-		dir := app.TutorialsPath(m.store)
+		dir := app.TutorialsPath(m.store())
 		if dir == "" {
 			return editTarget{}, false
 		}
@@ -395,7 +395,7 @@ func (m tuiModel) flowTarget() (editTarget, bool) {
 }
 
 func (m tuiModel) fixturesTarget() (editTarget, bool) {
-	path := FixturesPath(m.store)
+	path := FixturesPath(m.store())
 	if path == "" {
 		return editTarget{}, false
 	}
@@ -423,7 +423,7 @@ func (m tuiModel) fixturesTarget() (editTarget, bool) {
 }
 
 func (m tuiModel) keybindsTarget() (editTarget, bool) {
-	path := KeybindsPath(m.store)
+	path := KeybindsPath(m.store())
 	if path == "" {
 		return editTarget{}, false
 	}
@@ -440,7 +440,7 @@ func (m tuiModel) keybindsTarget() (editTarget, bool) {
 		},
 		apply: func(m *tuiModel) (string, tea.Cmd, error) {
 			m.keysErr = ""
-			m.loadRuntime(m.store)
+			m.loadRuntime(m.store())
 			if err := m.runtimeErr(); err != nil {
 				return "", nil, err
 			}
@@ -454,7 +454,7 @@ func (m tuiModel) themeTarget() (editTarget, bool) {
 	if !ok {
 		return editTarget{}, false
 	}
-	dir := app.ThemesPath(m.store)
+	dir := app.ThemesPath(m.store())
 	path, ok := ui.UserThemePath(dir, t.Name)
 	if !ok {
 		return editTarget{}, false
@@ -477,7 +477,7 @@ func (m tuiModel) themeTarget() (editTarget, bool) {
 			if err := ui.LoadThemes(dir); err != nil {
 				return "", nil, err
 			}
-			next, _ := ui.ThemeByName(m.cfg.Theme)
+			next, _ := ui.ThemeByName(m.cfg().Theme)
 			mm, cmd := m.applyTheme(next)
 			*m = mm.(tuiModel)
 			return t.Name + " applied", cmd, nil

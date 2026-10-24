@@ -40,7 +40,7 @@ func TestTheTestingSectionSaysWhatTheFakeFleetHolds(t *testing.T) {
 
 func TestEnterTakesYouIntoTheFakeFleetAndBackOut(t *testing.T) {
 	m := settingsAt(t, secDebug)
-	was := m.tenant.Name
+	was := m.tenant().Name
 
 	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = next.(tuiModel)
@@ -48,8 +48,8 @@ func TestEnterTakesYouIntoTheFakeFleetAndBackOut(t *testing.T) {
 	if !m.real.held {
 		t.Fatalf("enter did not swap the world in: status %q", m.status)
 	}
-	if m.tenant.Name != "Acme Co" {
-		t.Errorf("tenant = %q, want the fake one", m.tenant.Name)
+	if m.tenant().Name != "Acme Co" {
+		t.Errorf("tenant = %q, want the fake one", m.tenant().Name)
 	}
 	if !strings.Contains(m.status, "network") {
 		t.Errorf("status = %q, want it to say nothing reaches the network", m.status)
@@ -64,8 +64,8 @@ func TestEnterTakesYouIntoTheFakeFleetAndBackOut(t *testing.T) {
 	if m.real.held {
 		t.Fatal("enter did not put the real world back")
 	}
-	if m.tenant.Name != was {
-		t.Errorf("tenant = %q, want %q back", m.tenant.Name, was)
+	if m.tenant().Name != was {
+		t.Errorf("tenant = %q, want %q back", m.tenant().Name, was)
 	}
 }
 
@@ -137,7 +137,7 @@ func TestAFakeFleetThatWillNotParseIsNotWritten(t *testing.T) {
 
 func TestTheFileBesideTheConfigWinsOverTheOneIontkShips(t *testing.T) {
 	m := settingsAt(t, secDebug)
-	path := filepath.Join(m.store.Root, fixture.FileName)
+	path := filepath.Join(m.store().Root, fixture.FileName)
 	if err := os.WriteFile(path, []byte("tenants:\n  - name: Lab Co\n    elements:\n      - name: rtr-99\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -151,23 +151,22 @@ func TestTheFileBesideTheConfigWinsOverTheOneIontkShips(t *testing.T) {
 	}
 
 	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if got := next.(tuiModel).tenant.Name; got != "Lab Co" {
+	if got := next.(tuiModel).tenant().Name; got != "Lab Co" {
 		t.Errorf("entered as %q, want the fleet from the file", got)
 	}
 }
 
 func TestTheTabRingIsNotMixedBetweenWorlds(t *testing.T) {
 	m := settingsAt(t, secDebug)
-	m.data = []dataTab{{eid: "real-1", name: "store-9999-rtr-01", tsg: m.tenant.TSGID}}
-	m.dataActive = 0
+	m.runtime().SetDataTabs([]dataTab{{EID: "real-1", Name: "store-9999-rtr-01", TSG: m.tenant().TSGID}}, 0)
 
 	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = next.(tuiModel)
 	if !m.real.held {
 		t.Fatalf("enter did not swap the world in: %q", m.status)
 	}
-	if len(m.data) != 0 {
-		t.Errorf("%d data tabs came into the fake world: %+v", len(m.data), m.data)
+	if len(m.dataTabs()) != 0 {
+		t.Errorf("%d data tabs came into the fake world: %+v", len(m.dataTabs()), m.dataTabs())
 	}
 	if got := m.tabCount(); got != 1 {
 		t.Errorf("tabCount() = %d, want the element list alone", got)
@@ -175,8 +174,8 @@ func TestTheTabRingIsNotMixedBetweenWorlds(t *testing.T) {
 
 	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = next.(tuiModel)
-	if len(m.data) != 1 || m.data[0].eid != "real-1" {
-		t.Errorf("data tabs after leaving = %+v, want the real one back", m.data)
+	if len(m.dataTabs()) != 1 || m.dataTabs()[0].EID != "real-1" {
+		t.Errorf("data tabs after leaving = %+v, want the real one back", m.dataTabs())
 	}
 }
 
@@ -210,11 +209,11 @@ func TestDemoOpensOnTheMenuWithoutAsking(t *testing.T) {
 	if m.phase != phaseMenu {
 		t.Errorf("phase = %v (status %q), want the main menu", m.phase, m.status)
 	}
-	if m.cacheState != cacheUpdating {
+	if m.cacheState() != cacheUpdating {
 		t.Error("the demo does not load the fleet behind the menu")
 	}
-	if m.tenant.Name != "Acme Co" {
-		t.Errorf("tenant = %q, want the first of the fake ones", m.tenant.Name)
+	if m.tenant().Name != "Acme Co" {
+		t.Errorf("tenant = %q, want the first of the fake ones", m.tenant().Name)
 	}
 }
 

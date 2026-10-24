@@ -2,18 +2,14 @@ package tui
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
-	"tyrtop.com/iontk/internal/sase/ioncli"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/ui"
 )
-
-const warnMacroModel = "macro/model"
 
 func newMacroFilter() textinput.Model {
 	in := textinput.New()
@@ -32,7 +28,7 @@ func (m tuiModel) openMacros() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) macroRows() []config.Macro {
-	all := m.cmds.Macros
+	all := m.runtime().Macros()
 	q := strings.ToLower(strings.TrimSpace(m.macroFilter.Value()))
 	if q == "" {
 		return all
@@ -136,39 +132,30 @@ func (m tuiModel) armOrDeleteMacro(armed string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.macroUndo = append(slices.Clone(m.macroUndo), mac)
-	m.cmds.RemoveMacro(mac.Name)
+	m.runtime().RemoveMacro(mac.Name)
 	m.macroCursor = max(0, min(m.macroCursor, len(m.macroRows())))
 	m.status = "deleted " + mac.Name + " · u puts it back"
-	return m, saveCommands(m.store, m.cmds)
+	return m, m.saveCommands()
 }
 
 func (m tuiModel) undoMacroDelete() (tea.Model, tea.Cmd) {
-	if len(m.macroUndo) == 0 {
-		m.status = "nothing to undo"
-		return m, nil
-	}
-	last := len(m.macroUndo) - 1
-	mac := m.macroUndo[last]
-	m.macroUndo = slices.Clone(m.macroUndo[:last])
-
-	if err := m.cmds.SetMacro(mac); err != nil {
+	mac, n, err := m.runtime().UndoMacro()
+	if err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
 	m.status = mac.Name + " is back"
-	if n := len(m.macroUndo); n > 0 {
+	if n > 0 {
 		m.status += fmt.Sprintf(" · %d more to undo", n)
 	}
-	return m, saveCommands(m.store, m.cmds)
+	return m, m.saveCommands()
 }
 
 func (m tuiModel) armMacro(mac config.Macro) (tea.Model, tea.Cmd) {
-	m.armedMacro = mac.Name
-	m.mode = modeMacro
+	m.runtime().ArmMacro(mac.Name)
 	m.status = mac.Name + ": select elements, then enter"
 
-	if len(m.all) == 0 {
+	if len(m.rows()) == 0 {
 		return m.startContinue()
 	}
 	m.phase = phasePicking
@@ -177,10 +164,9 @@ func (m tuiModel) armMacro(mac config.Macro) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) runArmedMacro(rows []elementRow) (tea.Model, tea.Cmd) {
-	mac, ok := m.cmds.Macro(m.armedMacro)
+	mac, ok := m.runtime().Macro(m.armed())
 	if !ok {
-		m.mode = modeShell
-		m.armedMacro = ""
+		m.setMode(modeShell)
 		m.status = "that macro is gone — pick another from the menu"
 		return m, nil
 	}
@@ -188,11 +174,9 @@ func (m tuiModel) runArmedMacro(rows []elementRow) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) runMacro(mac config.Macro, rows []elementRow) (tea.Model, tea.Cmd) {
-	if !app.Defaults.AllowWrites && !m.cfg.AllowWrites {
-		if err := ioncli.CheckReadOnly(mac.Commands); err != nil {
-			m.status = mac.Name + ": " + err.Error()
-			return m, nil
-		}
+	if err := m.runtime().CheckCommands(mac.Commands); err != nil {
+		m.status = mac.Name + ": " + err.Error()
+		return m, nil
 	}
 
 	if len(rows) == 0 {
@@ -200,7 +184,7 @@ func (m tuiModel) runMacro(mac config.Macro, rows []elementRow) (tea.Model, tea.
 		return m, nil
 	}
 
-	if macroMismatch(mac, rows) != "" && !m.cmds.Acked(warnMacroModel) {
+	if macroMismatch(mac, rows) != "" && !m.runtime().Acked(runtime.WarnMacroModel) {
 		m.askMacro = mac.Name
 		m.askMacroOn = rows
 		return m, nil
@@ -214,19 +198,11 @@ func (m tuiModel) runMacro(mac config.Macro, rows []elementRow) (tea.Model, tea.
 }
 
 func macroMismatch(mac config.Macro, rows []elementRow) string {
-	if mac.Model == "" {
-		return ""
-	}
-	for _, r := range rows {
-		if r.Model != "" && r.Model != mac.Model {
-			return fmt.Sprintf("built on %s, selection has %s", mac.Model, r.Model)
-		}
-	}
-	return ""
+	return runtime.MacroMismatch(mac, rows)
 }
 
 func (m tuiModel) macroWarnPrompt() string {
-	mac, _ := m.cmds.Macro(m.askMacro)
+	mac, _ := m.runtime().Macro(m.askMacro)
 	rows := m.askMacroOn
 
 	lines := []string{
@@ -268,9 +244,9 @@ func (m tuiModel) onMacroWarnKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.cmds.Ack(warnMacroModel)
-	save := saveCommands(m.store, m.cmds)
-	mac, ok := m.cmds.Macro(name)
+	m.runtime().Ack(runtime.WarnMacroModel)
+	save := m.saveCommands()
+	mac, ok := m.runtime().Macro(name)
 	if !ok {
 		return m, save
 	}
@@ -348,16 +324,16 @@ func (m tuiModel) submitMacro() (tea.Model, tea.Cmd) {
 	mac := config.Macro{Name: name, Commands: m.macroFormCommands(), Model: m.selectionModel()}
 
 	if m.formMacroName != "" && !strings.EqualFold(m.formMacroName, name) {
-		m.cmds.RemoveMacro(m.formMacroName)
+		m.runtime().RemoveMacro(m.formMacroName)
 	}
-	if err := m.cmds.SetMacro(mac); err != nil {
+	if err := m.runtime().SetMacro(mac); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
 	m.form, m.formKind = nil, formNone
 	m.phase = m.formReturn
 	m.status = fmt.Sprintf("saved %s, %d command(s)", mac.Name, len(mac.Commands))
-	return m, saveCommands(m.store, m.cmds)
+	return m, m.saveCommands()
 }
 
 func (m tuiModel) selectionModel() string {
@@ -399,7 +375,7 @@ func (m tuiModel) viewMacros() string {
 	b.WriteString(line(m.macroCursor == 0, newRow, ui.StyleGhost.Render(newRow)))
 
 	list := m.macroRows()
-	if len(m.cmds.Macros) > 0 && len(list) == 0 {
+	if len(m.runtime().Macros()) > 0 && len(list) == 0 {
 		b.WriteString(ui.StyleDim.Render("  nothing matches the filter") + "\n")
 	}
 
@@ -430,9 +406,9 @@ func (m tuiModel) viewMacros() string {
 }
 
 func (m tuiModel) modeLabel() string {
-	label := ui.StyleElement.Render(ui.Title(m.mode.String()) + " Mode")
-	if m.mode == modeMacro && m.armedMacro != "" {
-		label += ui.StyleCmd.Render("  " + m.armedMacro)
+	label := ui.StyleElement.Render(ui.Title(m.mode().String()) + " Mode")
+	if m.mode() == modeMacro && m.armed() != "" {
+		label += ui.StyleCmd.Render("  " + m.armed())
 	}
 	return label
 }
@@ -456,7 +432,7 @@ func (m tuiModel) pasteMacroCommands(cmds []string) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) listReturn() tuiPhase {
-	if m.mode == modeMacro && m.armedMacro != "" {
+	if m.mode() == modeMacro && m.armed() != "" {
 		return phaseMacros
 	}
 	return phaseMenu

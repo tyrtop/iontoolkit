@@ -64,9 +64,10 @@ func TestAColumnFromAFileReadsTheRecordByItsPortalName(t *testing.T) {
     from: site
     value: "{{ .name }}"
 `, 2)
-	m.all[0].Software = "6.3.4-b2"
-	m.sites = map[string]string{"1/0": "Store 0000"}
-	m.setElements(m.all)
+	rows := append([]elementRow(nil), m.rows()...)
+	rows[0].Software = "6.3.4-b2"
+	m.runtime().MergeSites(map[string]string{"1/0": "Store 0000"})
+	m.setElements(rows)
 
 	if got := plain(columnCell(t, &m, 0, "version")); got != "6.3.4-b2" {
 		t.Errorf("the version column = %q, want the field off the element record", got)
@@ -114,7 +115,7 @@ func TestTheMarkAndTheCaretSurviveWhateverAFileNames(t *testing.T) {
 	}
 
 	before := plain(columnCell(t, &m, 1, colSite))
-	m.selected = map[string]bool{"1/1": true}
+	selectOnly(&m, "1/1")
 	m.rebuildRows()
 	after := plain(columnCell(t, &m, 1, colSite))
 

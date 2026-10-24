@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"path"
 	"strings"
+
+	"tyrtop.com/iontk/internal/sase/api"
 )
 
 func (s *Set) Transport(tsg string) http.RoundTripper {
@@ -21,6 +23,16 @@ type transport struct {
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	p := req.URL.Path
+	switch req.Method {
+	case http.MethodPut, http.MethodPatch:
+		if strings.Contains(p, "/elements/") && strings.Contains(p, "/interfaces/") {
+			return t.editInterface(req, p)
+		}
+		return t.refuseWrite(req, p)
+	case http.MethodDelete:
+		return t.refuseWrite(req, p)
+	}
+
 	switch {
 	case strings.HasSuffix(p, "/api/profile"):
 		return t.json(req, http.StatusOK, t.profile())
@@ -87,9 +99,8 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		map[string]string{"error": fmt.Sprintf("fixture mode serves no %s", p)})
 }
 
-func (t *transport) interfaces(req *http.Request, p string) (*http.Response, error) {
+func interfaceIDs(p string) (eid, iid string) {
 	seg := strings.Split(strings.Trim(p, "/"), "/")
-	var eid, iid string
 	for i, s := range seg {
 		switch s {
 		case "elements":
@@ -102,13 +113,17 @@ func (t *transport) interfaces(req *http.Request, p string) (*http.Response, err
 			}
 		}
 	}
+	return eid, iid
+}
 
+func (t *transport) interfaces(req *http.Request, p string) (*http.Response, error) {
+	eid, iid := interfaceIDs(p)
 	el := t.element(eid)
 	if el == nil {
 		return t.noElement(req, eid)
 	}
 	if iid == "" {
-		return t.json(req, http.StatusOK, items(el.apiInterfaces()))
+		return t.json(req, http.StatusOK, items(t.set.withEdits(eid, el.apiInterfaces())))
 	}
 	st := el.apiInterfaceStatus(iid)
 	if st == nil {
@@ -231,4 +246,66 @@ func (t *transport) json(req *http.Request, status int, v any) (*http.Response, 
 		ContentLength: int64(len(b)),
 		Request:       req,
 	}, nil
+}
+
+func (t *transport) editInterface(req *http.Request, p string) (*http.Response, error) {
+	eid, iid := interfaceIDs(p)
+	el := t.element(eid)
+	if el == nil {
+		return t.noElement(req, eid)
+	}
+	if strings.HasSuffix(p, "/status") || iid == "" {
+		return t.refuseWrite(req, p)
+	}
+	known := false
+	for _, in := range el.apiInterfaces() {
+		known = known || in.ID == iid
+	}
+	if !known {
+		return t.json(req, http.StatusNotFound,
+			map[string]string{"error": "interface " + iid + " not found on element " + eid})
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		return t.json(req, http.StatusBadRequest, map[string]string{"error": "body is not a JSON object: " + err.Error()})
+	}
+	return t.json(req, http.StatusOK, t.set.saveEdit(eid+"/"+iid, body, req.Method == http.MethodPatch))
+}
+
+func (t *transport) refuseWrite(req *http.Request, p string) (*http.Response, error) {
+	return t.json(req, http.StatusMethodNotAllowed,
+		map[string]string{"error": fmt.Sprintf("fixture mode takes edits to interfaces only, not %s %s", req.Method, p)})
+}
+
+func (s *Set) saveEdit(key string, body map[string]any, merge bool) map[string]any {
+	s.editMu.Lock()
+	defer s.editMu.Unlock()
+	if s.edits == nil {
+		s.edits = map[string]map[string]any{}
+	}
+	if have := s.edits[key]; merge && have != nil {
+		for k, v := range body {
+			have[k] = v
+		}
+		body = have
+	}
+	s.edits[key] = body
+	return body
+}
+
+func (s *Set) withEdits(eid string, ifs []api.Interface) []map[string]any {
+	b, _ := json.Marshal(ifs)
+	var out []map[string]any
+	_ = json.Unmarshal(b, &out)
+
+	s.editMu.Lock()
+	defer s.editMu.Unlock()
+	for _, rec := range out {
+		id, _ := rec["id"].(string)
+		for k, v := range s.edits[eid+"/"+id] {
+			rec[k] = v
+		}
+	}
+	return out
 }

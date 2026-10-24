@@ -42,10 +42,10 @@ func TestTimesRowShowsTheZoneAndTheClock(t *testing.T) {
 	m.setCursor = zoneRow
 	mm, _ := m.onGeneralKey("space")
 	got := mm.(tuiModel)
-	if got.cfg.Zone != clock.Local {
-		t.Errorf("cfg.Zone = %q, want the cycle to reach local", got.cfg.Zone)
+	if got.cfg().Zone != clock.Local {
+		t.Errorf("cfg.Zone = %q, want the cycle to reach local", got.cfg().Zone)
 	}
-	saved, err := got.store.Config()
+	saved, err := got.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestTheCycleKeepsTheTypedZone(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		mm, _ := m.onGeneralKey("space")
 		m = mm.(tuiModel)
-		seen[m.cfg.Zone] = true
+		seen[m.cfg().Zone] = true
 	}
 	for _, want := range []string{clock.UTC, clock.Local, "America/Chicago"} {
 		if !seen[want] {
@@ -110,8 +110,8 @@ func TestEnterOnTheTimesRowOpensTheZonePicker(t *testing.T) {
 	if clock.Name() != "Europe/London" {
 		t.Errorf("clock.Name() = %q, want the picked zone", clock.Name())
 	}
-	if m.cfg.Zone != "Europe/London" {
-		t.Errorf("cfg.Zone = %q, want the pick persisted", m.cfg.Zone)
+	if m.cfg().Zone != "Europe/London" {
+		t.Errorf("cfg.Zone = %q, want the pick persisted", m.cfg().Zone)
 	}
 }
 
@@ -167,8 +167,8 @@ func TestAZoneThatWillNotLoadIsRefusedByThePicker(t *testing.T) {
 	if m.status == "" {
 		t.Error("nothing said why the zone was refused")
 	}
-	if m.cfg.Zone != "" {
-		t.Errorf("cfg.Zone = %q, want the saved value left alone", m.cfg.Zone)
+	if m.cfg().Zone != "" {
+		t.Errorf("cfg.Zone = %q, want the saved value left alone", m.cfg().Zone)
 	}
 }
 
@@ -214,7 +214,7 @@ func TestPickingAThemeAppliesAndPersistsIt(t *testing.T) {
 	if ui.CurrentTheme().Name != "mono" {
 		t.Errorf("CurrentTheme() = %q, want mono", ui.CurrentTheme().Name)
 	}
-	saved, err := m.store.Config()
+	saved, err := m.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,12 +232,12 @@ func TestPickingAThemeAppliesAndPersistsIt(t *testing.T) {
 func TestAnUnknownSavedThemeOpensInTheDefault(t *testing.T) {
 	pinTheme(t)
 	m := settingsModel(t)
-	m.cfg.Theme = "something from the future"
-	if err := m.store.SaveConfig(m.cfg); err != nil {
+	m.cfg().Theme = "something from the future"
+	if err := m.store().SaveConfig(m.cfg()); err != nil {
 		t.Fatal(err)
 	}
 
-	ui.UseTheme(m.cfg.Theme)
+	ui.UseTheme(m.cfg().Theme)
 	if ui.CurrentTheme().Name != "classic" {
 		t.Errorf("CurrentTheme() = %q, want classic", ui.CurrentTheme().Name)
 	}
@@ -370,7 +370,7 @@ func TestDeletingASchemeTakesTwoPresses(t *testing.T) {
 	m.width, m.height = 110, 44
 	m.setSection, m.setFocus = secTheme, focusContent
 
-	if err := ui.SaveUserTheme(app.ThemesPath(m.store),
+	if err := ui.SaveUserTheme(app.ThemesPath(m.store()),
 		ui.Theme{Name: "workbench", OK: "2", Spinner: "dot"}); err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +443,7 @@ func TestAShippedSchemeIsHiddenRatherThanRemoved(t *testing.T) {
 	if !strings.Contains(m.status, "Reset") {
 		t.Errorf("status = %q, want it to say where it comes back from", m.status)
 	}
-	saved, err := m.store.Config()
+	saved, err := m.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +456,7 @@ func TestAShippedSchemeIsHiddenRatherThanRemoved(t *testing.T) {
 	if _, ok := ui.ThemeByName("desert"); !ok {
 		t.Errorf("desert did not come back: %s", m.status)
 	}
-	saved, err = m.store.Config()
+	saved, err = m.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func TestRestoringTheShippedSchemesKeepsYourOwn(t *testing.T) {
 
 	m := settingsModel(t)
 	m.setSection, m.setFocus = secTheme, focusContent
-	dir := app.ThemesPath(m.store)
+	dir := app.ThemesPath(m.store())
 
 	if err := ui.SaveUserTheme(dir, ui.Theme{Name: "nord", OK: "#ffffff", Spinner: "dot"}); err != nil {
 		t.Fatal(err)

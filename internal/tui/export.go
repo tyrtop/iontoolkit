@@ -2,13 +2,11 @@ package tui
 
 import (
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/ui"
@@ -39,20 +37,7 @@ func (m tuiModel) exportText(what, slug, ext, text string) (tuiModel, tea.Cmd) {
 }
 
 func (m tuiModel) writeExport(slug, ext, text string) (string, error) {
-	if m.store == nil {
-		return "", fmt.Errorf("no config directory to write to")
-	}
-
-	path := filepath.Join(m.store.ExportsDir(), output.ExportName(slug, ext, time.Now()))
-	f, where, err := output.Open(path, "", "", time.Now())
-	if err != nil {
-		return "", err
-	}
-	if _, err := io.WriteString(f, text+"\n"); err != nil {
-		f.Close()
-		return "", err
-	}
-	return where, f.Close()
+	return app.Export(m.store(), slug, ext, text)
 }
 
 func size(n int) string {
@@ -63,7 +48,7 @@ func size(n int) string {
 }
 
 func (m tuiModel) exportSession() (tea.Model, tea.Cmd) {
-	s := m.sessions.Active()
+	s := m.sessions().Active()
 	if s == nil {
 		m.status = "nothing to export here"
 		return m, nil
@@ -79,17 +64,17 @@ func (m tuiModel) exportDataPage() (tea.Model, tea.Cmd) {
 	}
 	page := m.visiblePage(tab)
 	lines := make([]string, 0, len(page.lines)+1)
-	lines = append(lines, tab.name)
+	lines = append(lines, tab.Name)
 	for _, ln := range page.lines {
 		lines = append(lines, strings.TrimRight(ui.Plain(ln), " "))
 	}
-	return m.exportText(tab.name+" data", tab.name, "txt", strings.Join(lines, "\n"))
+	return m.exportText(tab.Name+" data", tab.Name, "txt", strings.Join(lines, "\n"))
 }
 
 func (m tuiModel) exportResults() (tea.Model, tea.Cmd) {
 	idx, ok := m.currentResult()
 	if ok && m.resOpen {
-		r := m.results[idx]
+		r := m.batch().Results[idx]
 		name := r.Name
 		if name == "" {
 			name = r.ElementID
@@ -106,7 +91,7 @@ func (m tuiModel) exportResults() (tea.Model, tea.Cmd) {
 func (m tuiModel) exportRunJSON() (tea.Model, tea.Cmd) {
 	var b strings.Builder
 	sink := output.NewSink(&b, output.FormatJSON, output.WithOrientation(m.batchOrient()))
-	for i, r := range m.results {
+	for i, r := range m.batch().Results {
 		if r.ElementID == "" {
 			continue
 		}

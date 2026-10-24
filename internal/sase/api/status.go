@@ -3,14 +3,21 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -324,9 +331,11 @@ func quoted(ids []string) string {
 	return strings.Join(out, ",")
 }
 
-func checkRead(path string) error {
+func checkRead(path string) error { return checkPath(path, "read") }
+
+func checkPath(path, what string) error {
 	if !strings.HasPrefix(path, "/sdwan/") {
-		return fmt.Errorf("path %q is not a /sdwan read", path)
+		return fmt.Errorf("path %q is not a /sdwan %s", path, what)
 	}
 	if strings.Contains(path, "://") || strings.HasPrefix(path, "//") {
 		return fmt.Errorf("path %q names a host of its own", path)
@@ -347,18 +356,77 @@ func (s *Client) post(ctx context.Context, what, url string, body []byte) ([]byt
 	return s.do(ctx, what, http.MethodPost, url, body)
 }
 
-const rateRetries = 2
+// the cloudgenix SDK's urllib3 retry: 8 more tries, sleeping 0, 1.41s, 2.82s ... 90.35s
+const (
+	retries     = 8
+	backoff     = 705883 * time.Microsecond
+	retryAtMost = 5 * time.Minute
+)
 
-const rateWaitCap = 5 * time.Second
+const (
+	noConnection = -2
+	noAnswer     = 0
+)
+
+// urllib3 retries these only for methods safe to repeat, and a failed connect for any
+func again(method string, status int) bool {
+	if status == noConnection || status == http.StatusTooManyRequests {
+		return true
+	}
+	if method == http.MethodPost || method == http.MethodPatch {
+		return false
+	}
+	switch status {
+	case noAnswer, http.StatusRequestEntityTooLarge, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// urllib3 counts a reset or a timeout in a TLS handshake or proxy CONNECT as a read error, the rest as "other"
+func brokenOff(err error) bool {
+	var ne net.Error
+	return errors.Is(err, syscall.ECONNRESET) || (errors.As(err, &ne) && ne.Timeout())
+}
+
+// urllib3 counts an SSL error as "other", which the SDK never retries
+func badCertificate(err error) bool {
+	var verify *tls.CertificateVerificationError
+	var authority x509.UnknownAuthorityError
+	var host x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	var header tls.RecordHeaderError
+	return errors.As(err, &verify) || errors.As(err, &authority) || errors.As(err, &host) ||
+		errors.As(err, &invalid) || errors.As(err, &header)
+}
+
+// urllib3 sleeps nothing after the first failure, then factor × 2^(failures-1)
+func backoffBefore(retry int) time.Duration {
+	if retry <= 1 {
+		return 0
+	}
+	return backoff << (retry - 1)
+}
 
 func (s *Client) do(ctx context.Context, what, method, url string, body []byte) ([]byte, error) {
+	return s.call(ctx, what, method, url, body, false)
+}
+
+func (s *Client) call(ctx context.Context, what, method, url string, body []byte, write bool) ([]byte, error) {
 	for attempt := 0; ; attempt++ {
-		answer, wait, err := s.attempt(ctx, what, method, url, body)
-		if wait <= 0 || attempt >= rateRetries {
+		answer, status, after, err := s.attempt(ctx, what, method, url, body, write)
+		if err == nil || ctx.Err() != nil || attempt >= retries || !again(method, status) {
+			return answer, err
+		}
+		wait := after
+		if wait <= 0 {
+			wait = backoffBefore(attempt + 1)
+		}
+		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wait {
 			return answer, err
 		}
 		if s.verbose {
-			fmt.Fprintf(os.Stderr, "%s: rate limited, waiting %s\n", what, wait)
+			fmt.Fprintf(os.Stderr, "%s: %v; trying again in %s\n", what, err, wait)
 		}
 		select {
 		case <-ctx.Done():
@@ -368,9 +436,9 @@ func (s *Client) do(ctx context.Context, what, method, url string, body []byte) 
 	}
 }
 
-func (s *Client) attempt(ctx context.Context, what, method, url string, body []byte) ([]byte, time.Duration, error) {
+func (s *Client) attempt(ctx context.Context, what, method, url string, body []byte, write bool) ([]byte, int, time.Duration, error) {
 	if err := s.limiter.Wait(ctx); err != nil {
-		return nil, 0, fmt.Errorf("%s: rate limit wait: %w", what, err)
+		return nil, -1, 0, fmt.Errorf("%s: rate limit wait: %w", what, err)
 	}
 
 	if s.verbose {
@@ -381,9 +449,20 @@ func (s *Client) attempt(ctx context.Context, what, method, url string, body []b
 	if body != nil {
 		rdr = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, url, rdr)
+	var dialing, connected, ready atomic.Bool
+	trace := &httptrace.ClientTrace{
+		DNSStart:     func(httptrace.DNSStartInfo) { dialing.Store(true) },
+		ConnectStart: func(_, _ string) { dialing.Store(true) },
+		ConnectDone: func(_, _ string, err error) {
+			if err == nil {
+				connected.Store(true)
+			}
+		},
+		GotConn: func(httptrace.GotConnInfo) { dialing.Store(true); connected.Store(true); ready.Store(true) },
+	}
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), method, url, rdr)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s: build request: %w", what, err)
+		return nil, -1, 0, fmt.Errorf("%s: build request: %w", what, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+s.getToken())
 	req.Header.Set("Accept", "application/json")
@@ -392,9 +471,18 @@ func (s *Client) attempt(ctx context.Context, what, method, url string, body []b
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := s.client.Do(req)
+	resp, err := s.httpFor(write || patient(ctx)).Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s: response: %w", what, err)
+		status := noAnswer
+		switch {
+		case badCertificate(err) || errors.Is(err, http.ErrSchemeMismatch) || !dialing.Load():
+			status = -1
+		case !connected.Load():
+			status = noConnection
+		case !ready.Load() && !brokenOff(err):
+			status = -1
+		}
+		return nil, status, 0, fmt.Errorf("%s: response: %w", what, err)
 	}
 
 	if s.verbose {
@@ -412,25 +500,25 @@ func (s *Client) attempt(ctx context.Context, what, method, url string, body []b
 
 	answer, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s: read body: %w", what, err)
+		return nil, resp.StatusCode, retryAfter(resp), fmt.Errorf("%s: read body: %w", what, err)
 	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, retryAfter(resp), fmt.Errorf("%s: status %s: %s", what, resp.Status, answer)
+	// the cloudgenix SDK takes a 204 as a good answer too
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return nil, resp.StatusCode, retryAfter(resp), fmt.Errorf("%s: status %s: %s", what, resp.Status, answer)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, 0, fmt.Errorf("%s: status %s: %s", what, resp.Status, answer)
-	}
-	return answer, 0, nil
+	return answer, resp.StatusCode, 0, nil
 }
 
+// urllib3 sleeps for a Retry-After, in seconds or as a date, on any status it retries
 func retryAfter(resp *http.Response) time.Duration {
-	wait := time.Second
-	if v := resp.Header.Get("Retry-After"); v != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
-			wait = time.Duration(n) * time.Second
-		}
+	v := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		return min(time.Duration(n)*time.Second, retryAtMost)
 	}
-	return min(wait, rateWaitCap)
+	if at, err := http.ParseTime(v); err == nil && time.Until(at) > 0 {
+		return min(time.Until(at), retryAtMost)
+	}
+	return 0
 }
 
 // The envelope the portal's query_* POSTs take, from its own calls.

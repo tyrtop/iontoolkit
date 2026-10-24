@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"tyrtop.com/iontk/internal/config"
-	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -16,11 +16,11 @@ import (
 func filterModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := multiModel(t)
-	m.sites = map[string]string{
+	m.runtime().MergeSites(map[string]string{
 		"111/s100": "Store 0100",
 		"111/s200": "Store 0200",
 		"222/s9":   "ORD Plant",
-	}
+	})
 	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
 		{ID: "e1", Name: "s0100-rtr-01", SiteID: "s100", Model: "ion1200", Software: "6.5.1", HWID: "HW-AAA", Connected: true},
 		{ID: "e2", Name: "s0100-rtr-02", SiteID: "s100", Model: "ion3200", Software: "6.5.1", HWID: "HW-BBB"},
@@ -34,8 +34,8 @@ func filterModel(t *testing.T) tuiModel {
 
 func matchedNames(m tuiModel) []string {
 	var out []string
-	for _, i := range m.matches {
-		out = append(out, m.all[i].Name)
+	for _, i := range m.matched() {
+		out = append(out, m.rows()[i].Name)
 	}
 	return out
 }
@@ -95,8 +95,8 @@ func TestFilterNarrowsAcrossTenantsAtOnce(t *testing.T) {
 	m.applyFilter()
 
 	tenants := map[string]bool{}
-	for _, i := range m.matches {
-		tenants[m.all[i].TSG] = true
+	for _, i := range m.matched() {
+		tenants[m.rows()[i].TSG] = true
 	}
 	if len(tenants) != 2 {
 		t.Errorf("matches came from %d tenants, want both: %v", len(tenants), matchedNames(m))
@@ -120,12 +120,12 @@ func TestCountLabelShowsTheNarrowing(t *testing.T) {
 func TestFilterKeepsTheCursorInRange(t *testing.T) {
 	m := filterModel(t)
 	m.applyFilter()
-	m.table.SetCursor(3)
+	m.moveCursorTo(3)
 
 	m.filter.SetValue("niagara")
 	m.applyFilter()
-	if len(m.matches) != 1 {
-		t.Fatalf("matched %d, want 1", len(m.matches))
+	if len(m.matched()) != 1 {
+		t.Fatalf("matched %d, want 1", len(m.matched()))
 	}
 	if c := m.table.Cursor(); c != 0 {
 		t.Errorf("cursor = %d, want it pulled back into range", c)
@@ -140,8 +140,8 @@ func TestFilterWithNoTenantColumnStillSearchesTenant(t *testing.T) {
 	}
 	m.filter.SetValue("tractor")
 	m.applyFilter()
-	if len(m.matches) != 1 {
-		t.Errorf("matched %d, want the tenant name to still apply", len(m.matches))
+	if len(m.matched()) != 1 {
+		t.Errorf("matched %d, want the tenant name to still apply", len(m.matched()))
 	}
 }
 
@@ -149,7 +149,7 @@ func TestRenderFilteredCrossTenantList(t *testing.T) {
 	m := filterModel(t)
 	m.width, m.height = 110, 30
 	m.spinner = ui.NewSpinner("")
-	m.cacheState = cacheUpdated
+	m.setCacheState(cacheUpdated)
 	m.phase = phasePicking
 	m.filter.SetValue("1200 connected")
 	m.applyFilter()
@@ -217,10 +217,10 @@ func TestResultsStayInNameOrder(t *testing.T) {
 func searchEnterModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := multiModel(t)
-	m.cfg.Tenants = m.cfg.Tenants[:1]
-	m.cfg.Tenants[0].Users = []config.IONUser{{Name: "ops", Default: true}}
-	m.tenant = m.cfg.Tenants[0]
-	if err := m.store.Secrets.Set(config.IONPassKey("111", "ops"), "pw"); err != nil {
+	m.cfg().Tenants = m.cfg().Tenants[:1]
+	m.cfg().Tenants[0].Users = []config.IONUser{{Name: "ops", Default: true}}
+	m.runtime().ReplaceTenant(m.cfg().Tenants[0])
+	if err := m.store().Secrets.Set(config.IONPassKey("111", "ops"), "pw"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
@@ -229,7 +229,7 @@ func searchEnterModel(t *testing.T) tuiModel {
 		{ID: "e3", Name: "s0100-rtr-01", Model: "ion 1200", Connected: true},
 	})
 	setTestClient(&m, liveClient())
-	m.sessions = ionterm.NewManager()
+	m.runtime().ResetSessions()
 	m.spinner = ui.NewSpinner("")
 	m.phase = phasePicking
 	m.width, m.height = 110, 30
@@ -238,12 +238,12 @@ func searchEnterModel(t *testing.T) tuiModel {
 
 func TestOneMatchInShellModeGoesStraightIn(t *testing.T) {
 	m := searchEnterModel(t)
-	m.mode = modeShell
+	m.setMode(modeShell)
 	m.filterOn = true
 	m.filter.SetValue("rtr-02")
 	m.applyFilter()
-	if len(m.matches) != 1 {
-		t.Fatalf("query matched %d, want exactly 1", len(m.matches))
+	if len(m.matched()) != 1 {
+		t.Fatalf("query matched %d, want exactly 1", len(m.matched()))
 	}
 
 	mm, cmd := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), "enter")
@@ -265,7 +265,7 @@ func TestOneMatchInShellModeGoesStraightIn(t *testing.T) {
 
 func TestOneMatchInBatchModeSelectsAndStays(t *testing.T) {
 	m := searchEnterModel(t)
-	m.mode = modeBatch
+	m.setMode(modeBatch)
 	m.filterOn = true
 	m.filter.SetValue("rtr-02")
 	m.applyFilter()
@@ -279,8 +279,8 @@ func TestOneMatchInBatchModeSelectsAndStays(t *testing.T) {
 	if got.phase != phasePicking {
 		t.Errorf("phase = %v, want to stay on the list in batch mode", got.phase)
 	}
-	if len(got.selected) != 1 || !got.selected["111/e2"] {
-		t.Errorf("selected = %v, want the single match selected", got.selected)
+	if got.selectedCount() != 1 || !got.isSelected("111/e2") {
+		t.Errorf("selected = %v, want the single match selected", got.selection())
 	}
 	if got.connecting != "" {
 		t.Error("batch mode started a session")
@@ -291,12 +291,12 @@ func TestSeveralMatchesJustApplyTheFilter(t *testing.T) {
 	for _, mode := range []pickMode{modeShell, modeBatch} {
 		t.Run(mode.String(), func(t *testing.T) {
 			m := searchEnterModel(t)
-			m.mode = mode
+			m.setMode(mode)
 			m.filterOn = true
 			m.filter.SetValue("s5024")
 			m.applyFilter()
-			if len(m.matches) != 2 {
-				t.Fatalf("query matched %d, want 2 so the choice is ambiguous", len(m.matches))
+			if len(m.matched()) != 2 {
+				t.Fatalf("query matched %d, want 2 so the choice is ambiguous", len(m.matched()))
 			}
 
 			mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), "enter")
@@ -308,8 +308,8 @@ func TestSeveralMatchesJustApplyTheFilter(t *testing.T) {
 			if got.phase != phasePicking {
 				t.Errorf("phase = %v, want to stay on the narrowed list", got.phase)
 			}
-			if len(got.selected) != 0 {
-				t.Errorf("selected = %v, want nothing chosen for an ambiguous query", got.selected)
+			if got.selectedCount() != 0 {
+				t.Errorf("selected = %v, want nothing chosen for an ambiguous query", got.selection())
 			}
 			if got.filter.Value() != "s5024" {
 				t.Errorf("filter = %q, want the query kept", got.filter.Value())
@@ -357,15 +357,15 @@ func TestEscapeWhileTypingStillClearsTheQuery(t *testing.T) {
 	if got.filterOn || got.filter.Value() != "" {
 		t.Errorf("on=%v query=%q, want esc to clear and close the input", got.filterOn, got.filter.Value())
 	}
-	if len(got.matches) != len(got.all) {
-		t.Errorf("matched %d of %d, want the whole list back", len(got.matches), len(got.all))
+	if len(got.matched()) != len(got.rows()) {
+		t.Errorf("matched %d of %d, want the whole list back", len(got.matched()), len(got.rows()))
 	}
 }
 
 func TestASingleMatchBeatsAnEarlierSelection(t *testing.T) {
 	m := searchEnterModel(t)
-	m.mode = modeShell
-	m.selected["111/e3"] = true
+	m.setMode(modeShell)
+	m.runtime().Select("111/e3")
 	m.filterOn = true
 	m.filter.SetValue("rtr-02")
 	m.applyFilter()
@@ -379,8 +379,8 @@ func TestASingleMatchBeatsAnEarlierSelection(t *testing.T) {
 
 func TestASingleMatchStillChecksCredentials(t *testing.T) {
 	m := searchEnterModel(t)
-	m.mode = modeShell
-	if err := m.store.Secrets.Delete(config.IONPassKey("111", "ops")); err != nil {
+	m.setMode(modeShell)
+	if err := m.store().Secrets.Delete(config.IONPassKey("111", "ops")); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 	m.filterOn = true
@@ -408,7 +408,7 @@ func TestFilterHintSaysWhatEnterWillDo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := searchEnterModel(t)
-			m.mode = tt.mode
+			m.setMode(tt.mode)
 			m.filterOn = true
 			m.filter.SetValue(tt.query)
 			m.applyFilter()
@@ -422,20 +422,20 @@ func TestFilterHintSaysWhatEnterWillDo(t *testing.T) {
 
 func TestClearingTheSelection(t *testing.T) {
 	m := searchEnterModel(t)
-	for _, r := range m.all {
-		m.selected[r.key()] = true
+	for _, r := range m.rows() {
+		m.runtime().Select(r.Key())
 	}
 
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
 	got := mm.(tuiModel)
-	if len(got.selected) != 0 {
-		t.Errorf("selected = %v, want it emptied", got.selected)
+	if got.selectedCount() != 0 {
+		t.Errorf("selected = %v, want it emptied", got.selection())
 	}
 	if !strings.Contains(got.status, "cleared 3") {
 		t.Errorf("status = %q, want the count reported", got.status)
 	}
-	if len(got.matches) != 3 {
-		t.Errorf("matched %d, want the full list back", len(got.matches))
+	if len(got.matched()) != 3 {
+		t.Errorf("matched %d, want the full list back", len(got.matched()))
 	}
 
 	mm, _ = got.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
@@ -446,18 +446,18 @@ func TestClearingTheSelection(t *testing.T) {
 
 func TestShowingOnlyTheSelection(t *testing.T) {
 	m := searchEnterModel(t)
-	m.selected["111/e2"] = true
+	m.runtime().Select("111/e2")
 
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModAlt}), "alt+s")
 	got := mm.(tuiModel)
-	if !got.showSelected {
+	if !got.showingSelected() {
 		t.Fatal("alt+s did not switch to the selection")
 	}
-	if len(got.matches) != 1 {
-		t.Fatalf("matched %d, want only the selected element", len(got.matches))
+	if len(got.matched()) != 1 {
+		t.Fatalf("matched %d, want only the selected element", len(got.matched()))
 	}
-	if got.all[got.matches[0]].ID != "e2" {
-		t.Errorf("listed %q, want the selected element", got.all[got.matches[0]].ID)
+	if got.rows()[got.matched()[0]].ID != "e2" {
+		t.Errorf("listed %q, want the selected element", got.rows()[got.matched()[0]].ID)
 	}
 	if out := plain(got.viewPicking()); !strings.Contains(out, "selected only") {
 		t.Errorf("the list does not say it is narrowed:\n%s", out)
@@ -465,11 +465,11 @@ func TestShowingOnlyTheSelection(t *testing.T) {
 
 	mm, _ = got.onPickKey(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModAlt}), "alt+s")
 	back := mm.(tuiModel)
-	if back.showSelected {
+	if back.showingSelected() {
 		t.Error("alt+s did not switch back")
 	}
-	if len(back.matches) != 3 {
-		t.Errorf("matched %d, want the full list back", len(back.matches))
+	if len(back.matched()) != 3 {
+		t.Errorf("matched %d, want the full list back", len(back.matched()))
 	}
 }
 
@@ -477,7 +477,7 @@ func TestShowingTheSelectionNeedsASelection(t *testing.T) {
 	m := searchEnterModel(t)
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModAlt}), "alt+s")
 	got := mm.(tuiModel)
-	if got.showSelected {
+	if got.showingSelected() {
 		t.Error("switched to an empty selection, which would be an empty list")
 	}
 	if !strings.Contains(got.status, "nothing selected") {
@@ -487,33 +487,33 @@ func TestShowingTheSelectionNeedsASelection(t *testing.T) {
 
 func TestClearingWhileShowingTheSelectionRestoresTheList(t *testing.T) {
 	m := searchEnterModel(t)
-	m.selected["111/e2"] = true
-	m.showSelected = true
+	m.runtime().Select("111/e2")
+	m.runtime().SetShowSelected(true)
 	m.applyFilter()
 
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
 	got := mm.(tuiModel)
-	if got.showSelected {
+	if got.showingSelected() {
 		t.Error("still showing only the selection after clearing it")
 	}
-	if len(got.matches) != 3 {
-		t.Errorf("matched %d, want the full list", len(got.matches))
+	if len(got.matched()) != 3 {
+		t.Errorf("matched %d, want the full list", len(got.matched()))
 	}
 }
 
 func TestSelectedOnlyStillHonoursTheQuery(t *testing.T) {
 	m := searchEnterModel(t)
-	m.selected["111/e1"] = true
-	m.selected["111/e3"] = true
-	m.showSelected = true
+	m.runtime().Select("111/e1")
+	m.runtime().Select("111/e3")
+	m.runtime().SetShowSelected(true)
 	m.filter.SetValue("s5024")
 	m.applyFilter()
 
-	if len(m.matches) != 1 {
-		t.Fatalf("matched %d, want the intersection of query and selection", len(m.matches))
+	if len(m.matched()) != 1 {
+		t.Fatalf("matched %d, want the intersection of query and selection", len(m.matched()))
 	}
-	if m.all[m.matches[0]].ID != "e1" {
-		t.Errorf("listed %q, want e1", m.all[m.matches[0]].ID)
+	if m.rows()[m.matched()[0]].ID != "e1" {
+		t.Errorf("listed %q, want e1", m.rows()[m.matched()[0]].ID)
 	}
 }
 
@@ -574,14 +574,14 @@ func TestUndoingAClearedSelection(t *testing.T) {
 	for _, key := range []string{"alt+z", "ctrl+z"} {
 		t.Run(key, func(t *testing.T) {
 			m := searchEnterModel(t)
-			m.selected["111/e1"] = true
-			m.selected["111/e2"] = true
+			m.runtime().Select("111/e1")
+			m.runtime().Select("111/e2")
 			m.applyFilter()
 
 			mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
 			cleared := mm.(tuiModel)
-			if len(cleared.selected) != 0 {
-				t.Fatalf("selected = %v, want it cleared", cleared.selected)
+			if cleared.selectedCount() != 0 {
+				t.Fatalf("selected = %v, want it cleared", cleared.selection())
 			}
 			if !strings.Contains(cleared.status, "alt+z to undo") {
 				t.Errorf("status = %q, want the undo offered", cleared.status)
@@ -589,11 +589,11 @@ func TestUndoingAClearedSelection(t *testing.T) {
 
 			mm, _ = cleared.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModAlt}), key)
 			got := mm.(tuiModel)
-			if len(got.selected) != 2 {
-				t.Fatalf("selected = %v, want both restored", got.selected)
+			if got.selectedCount() != 2 {
+				t.Fatalf("selected = %v, want both restored", got.selection())
 			}
-			if !got.selected["111/e1"] || !got.selected["111/e2"] {
-				t.Errorf("selected = %v, want the same two elements", got.selected)
+			if !got.isSelected("111/e1") || !got.isSelected("111/e2") {
+				t.Errorf("selected = %v, want the same two elements", got.selection())
 			}
 			if !strings.Contains(got.status, "restored 2") {
 				t.Errorf("status = %q, want the count reported", got.status)
@@ -610,7 +610,7 @@ func TestUndoIsOnlyOfferedWhenThereIsSomethingToUndo(t *testing.T) {
 		t.Errorf("status = %q, want it to say so", got.status)
 	}
 
-	m.selected["111/e1"] = true
+	m.runtime().Select("111/e1")
 	mm, _ = m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
 	mm, _ = mm.(tuiModel).onPickKey(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModAlt}), "alt+z")
 	again := mm.(tuiModel)
@@ -622,60 +622,60 @@ func TestUndoIsOnlyOfferedWhenThereIsSomethingToUndo(t *testing.T) {
 
 func TestUndoRestoresRatherThanReplaces(t *testing.T) {
 	m := searchEnterModel(t)
-	m.selected["111/e1"] = true
+	m.runtime().Select("111/e1")
 
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
 	m = mm.(tuiModel)
-	m.selected["111/e3"] = true
+	m.runtime().Select("111/e3")
 
 	mm, _ = m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModAlt}), "alt+z")
 	got := mm.(tuiModel)
-	if len(got.selected) != 2 || !got.selected["111/e1"] || !got.selected["111/e3"] {
-		t.Errorf("selected = %v, want the restored and the newly picked", got.selected)
+	if got.selectedCount() != 2 || !got.isSelected("111/e1") || !got.isSelected("111/e3") {
+		t.Errorf("selected = %v, want the restored and the newly picked", got.selection())
 	}
 }
 
 func TestUndoBringsBackTheSelectionOnlyView(t *testing.T) {
 	m := searchEnterModel(t)
-	m.selected["111/e2"] = true
-	m.showSelected = true
+	m.runtime().Select("111/e2")
+	m.runtime().SetShowSelected(true)
 	m.applyFilter()
 
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
 	cleared := mm.(tuiModel)
-	if cleared.showSelected {
+	if cleared.showingSelected() {
 		t.Fatal("clearing left the selection-only view on an empty list")
 	}
 
 	mm, _ = cleared.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModAlt}), "alt+z")
 	got := mm.(tuiModel)
-	if !got.showSelected {
+	if !got.showingSelected() {
 		t.Error("undo did not restore the selection-only view")
 	}
-	if len(got.matches) != 1 {
-		t.Errorf("matched %d, want the restored selection listed", len(got.matches))
+	if len(got.matched()) != 1 {
+		t.Errorf("matched %d, want the restored selection listed", len(got.matched()))
 	}
 }
 
 func TestUndoDoesNotAliasTheClearedSelection(t *testing.T) {
 	m := searchEnterModel(t)
-	m.selected["111/e1"] = true
+	m.runtime().Select("111/e1")
 
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
 	cleared := mm.(tuiModel)
-	cleared.selected["111/e3"] = true
+	cleared.runtime().Select("111/e3")
 
-	if cleared.lastCleared["111/e3"] {
+	if cleared.rt.WouldRestore("111/e3") {
 		t.Error("the stored clear picked up a later selection, so the maps are shared")
 	}
-	if !cleared.lastCleared["111/e1"] {
+	if !cleared.rt.WouldRestore("111/e1") {
 		t.Error("the stored clear lost what was actually cleared")
 	}
 }
 
 func TestHintOffersUndoAfterAClear(t *testing.T) {
 	m := searchEnterModel(t)
-	m.selected["111/e1"] = true
+	m.runtime().Select("111/e1")
 
 	if out := plain(m.viewPicking()); !strings.Contains(out, "alt+c clear") {
 		t.Errorf("the hint does not offer the clear:\n%s", out)
@@ -746,7 +746,7 @@ func TestJAndKStillMoveTheListWhenNotSearching(t *testing.T) {
 		t.Fatal("filterOn = true before any search, want it closed")
 	}
 
-	m.table.SetCursor(1)
+	m.moveCursorTo(1)
 	start := m.table.Cursor()
 	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}), "j")
 	m = next.(tuiModel)
@@ -767,7 +767,7 @@ func TestArrowsStillMoveTheListWhileSearching(t *testing.T) {
 	m := filterModel(t)
 	m = typeIntoFilter(t, m, "1200")
 
-	m.table.SetCursor(0)
+	m.moveCursorTo(0)
 	start := m.table.Cursor()
 	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}), "down")
 	m = next.(tuiModel)
@@ -804,8 +804,8 @@ func TestBackspacingTheQueryEmptiesItThenLeaves(t *testing.T) {
 	if m.filter.Value() != "" {
 		t.Errorf("query = %q, want it empty", m.filter.Value())
 	}
-	if len(m.matches) != len(m.all) {
-		t.Errorf("%d matches, want the whole list of %d", len(m.matches), len(m.all))
+	if len(m.matched()) != len(m.rows()) {
+		t.Errorf("%d matches, want the whole list of %d", len(m.matched()), len(m.rows()))
 	}
 
 	m = typeString(t, m, "s9")
@@ -869,7 +869,7 @@ func TestHoldingKWalksBackUpTheList(t *testing.T) {
 	if got := m.table.Cursor(); got != 30 {
 		t.Fatalf("cursor = %d after 30 j, want 30", got)
 	}
-	if !strings.Contains(plain(m.table.View()), m.all[30].Name) {
+	if !strings.Contains(plain(m.table.View()), m.rows()[30].Name) {
 		t.Errorf("the row the cursor is on is not in the window:\n%s", plain(m.table.View()))
 	}
 
@@ -879,7 +879,7 @@ func TestHoldingKWalksBackUpTheList(t *testing.T) {
 		if got := m.table.Cursor(); got != i {
 			t.Fatalf("cursor = %d after k, want %d", got, i)
 		}
-		if view := plain(m.table.View()); !strings.Contains(view, m.all[i].Name) {
+		if view := plain(m.table.View()); !strings.Contains(view, m.rows()[i].Name) {
 			t.Fatalf("row %d is highlighted but not in the window:\n%s", i, view)
 		}
 	}
@@ -887,8 +887,8 @@ func TestHoldingKWalksBackUpTheList(t *testing.T) {
 
 func TestAltJAndAltKJumpTheList(t *testing.T) {
 	m := pickModel(t)
-	m.cfg.PageStep = 2
-	m.table.SetCursor(0)
+	m.cfg().PageStep = 2
+	m.moveCursorTo(0)
 
 	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Mod: tea.ModAlt}))
 	m = next.(tuiModel)
@@ -903,8 +903,7 @@ func TestAltJAndAltKJumpTheList(t *testing.T) {
 
 func TestAltHAndAltLSwitchTabs(t *testing.T) {
 	m := pickModel(t)
-	m.data = []dataTab{{eid: "1", name: "S0100-RTR-01", tsg: "1"}}
-	m.dataActive = 0
+	m.runtime().SetDataTabs([]dataTab{{EID: "1", Name: "S0100-RTR-01", TSG: "1"}}, 0)
 	m.phase = phasePicking
 
 	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'l', Mod: tea.ModAlt}))
@@ -940,10 +939,10 @@ func TestTheSerialIsOnTheRowAndSearchable(t *testing.T) {
 
 	m.filter.SetValue("ION1200XYZ789")
 	m.applyFilter()
-	if len(m.matches) != 1 {
-		t.Fatalf("%d matches for a serial, want the one element", len(m.matches))
+	if len(m.matched()) != 1 {
+		t.Fatalf("%d matches for a serial, want the one element", len(m.matched()))
 	}
-	if got := m.all[m.matches[0]].Name; got != "s0500-rtr-01" {
+	if got := m.rows()[m.matched()[0]].Name; got != "s0500-rtr-01" {
 		t.Errorf("matched %s, want the element with that serial", got)
 	}
 }
@@ -1037,9 +1036,9 @@ func TestRenderTheElementListWithSerials(t *testing.T) {
 	})
 	m.phase = phasePicking
 	m.width, m.height = 170, 24
-	m.ha = map[string]string{"111/e1": haActive}
-	m.haCached = map[string]string{"111/e2": haStandby}
-	m.haTotal, m.haDone = 2, 1
+	m.runtime().SetHA(map[string]string{"111/e1": haActive})
+	m.runtime().SetCachedHA(map[string]string{"111/e2": haStandby})
+	m.runtime().SetHAProgress(2, 1, time.Time{})
 	m.rebuildRows()
 	t.Log("\n" + m.viewPicking())
 }
@@ -1047,8 +1046,8 @@ func TestRenderTheElementListWithSerials(t *testing.T) {
 func TestATickedRowCarriesABarAgainstItsName(t *testing.T) {
 	m := searchEnterModel(t)
 	m.applyFilter()
-	if len(m.matches) < 2 {
-		t.Fatalf("need two rows to compare, got %d", len(m.matches))
+	if len(m.matched()) < 2 {
+		t.Fatalf("need two rows to compare, got %d", len(m.matched()))
 	}
 
 	nameCell := func(row int) string {
@@ -1061,8 +1060,8 @@ func TestATickedRowCarriesABarAgainstItsName(t *testing.T) {
 		return ""
 	}
 
-	el := m.all[m.matches[1]]
-	m.selected = map[string]bool{el.key(): true}
+	el := m.rows()[m.matched()[1]]
+	selectOnly(&m, el.Key())
 	m.rebuildRows()
 
 	ticked := nameCell(1)
@@ -1084,7 +1083,7 @@ func TestATickedRowCarriesABarAgainstItsName(t *testing.T) {
 		t.Error("a name cell came out empty")
 	}
 
-	m.selected = map[string]bool{}
+	m.runtime().ForgetSelection()
 	m.rebuildRows()
 	if got := plain(nameCell(1)); strings.Contains(got, "▌") {
 		t.Errorf("the bar survived unticking: %q", got)
@@ -1124,10 +1123,10 @@ func TestOpeningTheFilterAgainStartsFresh(t *testing.T) {
 	if applied == "" {
 		t.Fatal("enter dropped the query, which is what it is meant to keep")
 	}
-	narrowed := len(m.matches)
-	if narrowed >= len(m.all) {
+	narrowed := len(m.matched())
+	if narrowed >= len(m.rows()) {
 		t.Fatalf("the query matched everything (%d of %d), so there is nothing to clear",
-			narrowed, len(m.all))
+			narrowed, len(m.rows()))
 	}
 
 	next, _ = m.onPickKey(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}), "/")
@@ -1135,9 +1134,9 @@ func TestOpeningTheFilterAgainStartsFresh(t *testing.T) {
 	if got := m.filter.Value(); got != "" {
 		t.Errorf("the filter reopened on %q, want an empty query", got)
 	}
-	if len(m.matches) != len(m.all) {
+	if len(m.matched()) != len(m.rows()) {
 		t.Errorf("%d of %d rows after reopening, want the whole list back",
-			len(m.matches), len(m.all))
+			len(m.matched()), len(m.rows()))
 	}
 	if !m.filterOn {
 		t.Error("the filter did not open")
@@ -1149,19 +1148,19 @@ func TestAltAAlsoCyclesTheMode(t *testing.T) {
 	m.phase = phasePicking
 
 	for _, key := range []string{"alt+m", "alt+a"} {
-		before := m.mode
+		before := m.mode()
 		next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModAlt}), key)
 		m = next.(tuiModel)
-		if m.mode == before {
+		if m.mode() == before {
 			t.Errorf("%s left the mode on %v", key, before)
 		}
 	}
 
-	m.mode, m.armedMacro = modeMacro, "ha check"
+	m.runtime().ArmMacro("ha check")
 	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'a', Mod: tea.ModAlt}), "alt+a")
 	m = next.(tuiModel)
-	if m.armedMacro != "" {
-		t.Errorf("armedMacro = %q after cycling out of macro mode", m.armedMacro)
+	if m.armed() != "" {
+		t.Errorf("armedMacro = %q after cycling out of macro mode", m.armed())
 	}
 
 	if out := plain(m.viewPicking()); !strings.Contains(out, "alt+m/alt+a mode") {
@@ -1171,13 +1170,13 @@ func TestAltAAlsoCyclesTheMode(t *testing.T) {
 
 func TestEnterSelectsTheRowInBatchMode(t *testing.T) {
 	m := searchEnterModel(t)
-	m.mode = modeBatch
+	m.setMode(modeBatch)
 
 	next, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), "enter")
 	got := next.(tuiModel)
 
-	if len(got.selected) != 1 {
-		t.Fatalf("selected = %v, want the row under the cursor ticked", got.selected)
+	if got.selectedCount() != 1 {
+		t.Fatalf("selected = %v, want the row under the cursor ticked", got.selection())
 	}
 	if got.phase != phasePicking {
 		t.Errorf("phase = %v, want to still be on the list", got.phase)
@@ -1193,7 +1192,7 @@ func TestEnterSelectsTheRowInBatchMode(t *testing.T) {
 
 func TestTheFooterOffersSelectBeforeAnythingIsTicked(t *testing.T) {
 	m := searchEnterModel(t)
-	m.mode = modeBatch
+	m.setMode(modeBatch)
 	if got := plain(m.viewPicking()); !strings.Contains(got, "enter select") {
 		t.Errorf("the footer reads:\n%s", got)
 	}

@@ -44,10 +44,10 @@ columns:
 	if m.columnsErr != "" {
 		t.Fatalf("the file was refused: %s", m.columnsErr)
 	}
-	if got := m.listPaths[column.ElementsSrc]; got != "/sdwan/v9.9/api/elements" {
+	if got := m.runtime().ListPaths().Elements; got != "/sdwan/v9.9/api/elements" {
 		t.Errorf("the loader would ask for %q, want the path the file names", got)
 	}
-	if got := m.listPaths[column.SitesSrc]; got != "/sdwan/v8.8/api/sites" {
+	if got := m.runtime().ListPaths().Sites; got != "/sdwan/v8.8/api/sites" {
 		t.Errorf("sites would come from %q", got)
 	}
 }

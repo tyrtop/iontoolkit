@@ -17,6 +17,12 @@ func main() {
 
 	defer logging.Close()
 
+	if err := prepare(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	buildTree()
+
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

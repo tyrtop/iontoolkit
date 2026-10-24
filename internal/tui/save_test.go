@@ -50,15 +50,12 @@ func TestSaveBatchResults(t *testing.T) {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
 
-	m := tuiModel{
-		cfg:   &config.Config{BatchToFile: true, BatchDir: dir, BatchFormat: output.FormatText},
-		store: st,
-		results: []sase.Result{
-			sampleResult("1", "s0001"),
-			{},
-			sampleResult("3", "s0003"),
-		},
-	}
+	m := withStore(tuiModel{}, st, &config.Config{BatchToFile: true, BatchDir: dir, BatchFormat: output.FormatText})
+	m.runtime().LoadBatch(nil, []sase.Result{
+		sampleResult("1", "s0001"),
+		{},
+		sampleResult("3", "s0003"),
+	}, nil)
 
 	note := m.saveBatchResults()
 	if !strings.HasPrefix(note, "saved to ") {
@@ -94,10 +91,8 @@ func TestSaveBatchResults(t *testing.T) {
 }
 
 func TestSaveBatchResultsDoesNothingWithoutAFolder(t *testing.T) {
-	m := tuiModel{
-		cfg:     &config.Config{BatchToFile: false, BatchDir: t.TempDir()},
-		results: []sase.Result{sampleResult("1", "s0001")},
-	}
+	m := withStore(tuiModel{}, nil, &config.Config{BatchToFile: false, BatchDir: t.TempDir()})
+	m.runtime().LoadBatch(nil, []sase.Result{sampleResult("1", "s0001")}, nil)
 	if note := m.saveBatchResults(); note != "" {
 		t.Errorf("saveBatchResults() = %q, want nothing written while output is stdout", note)
 	}
@@ -107,17 +102,13 @@ func TestRenderBatchSettings(t *testing.T) {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
 
-	m := tuiModel{
-		cfg:        &config.Config{BatchToFile: true, BatchDir: "/home/me/ion-reports", BatchFormat: output.FormatJSONL},
-		store:      st,
-		tenant:     config.Tenant{Name: "Acme Co", TSGID: "1"},
-		hasTenant:  true,
+	m := withWorkspace(withStore(tuiModel{
 		phase:      phaseSettings,
 		setSection: secBatch,
 		setFocus:   focusContent,
 		width:      100,
 		height:     30,
-	}
+	}, st, &config.Config{BatchToFile: true, BatchDir: "/home/me/ion-reports", BatchFormat: output.FormatJSONL}), config.Tenant{Name: "Acme Co", TSGID: "1"}, true, "", authBrowser)
 	m.spinner = ui.NewSpinner("")
 
 	if got := m.sectionRows(); got != 4 {
@@ -135,21 +126,19 @@ func TestRenderBatchSettings(t *testing.T) {
 func TestBatchSettingsCycleAndToggle(t *testing.T) {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
-	m := tuiModel{
-		cfg:        &config.Config{},
-		store:      st,
+	m := withStore(tuiModel{
 		phase:      phaseSettings,
 		setSection: secBatch,
 		setFocus:   focusContent,
 		width:      100,
 		height:     30,
-	}
+	}, st, &config.Config{})
 
 	m.setCursor = 0
 	mm, _ := m.onBatchKey("enter")
 	m = mm.(tuiModel)
-	if m.cfg.BatchFormat != output.FormatJSONL {
-		t.Errorf("BatchFormat = %q, want %q after one cycle from the default", m.cfg.BatchFormat, output.FormatJSONL)
+	if m.cfg().BatchFormat != output.FormatJSONL {
+		t.Errorf("BatchFormat = %q, want %q after one cycle from the default", m.cfg().BatchFormat, output.FormatJSONL)
 	}
 	if saved, err := st.Config(); err != nil {
 		t.Errorf("Config() error = %v", err)
@@ -160,8 +149,8 @@ func TestBatchSettingsCycleAndToggle(t *testing.T) {
 	m.setCursor = 1
 	mm, _ = m.onBatchKey("enter")
 	m = mm.(tuiModel)
-	if m.cfg.BatchOrient != output.OrientCommand {
-		t.Errorf("BatchOrient = %q, want %q after one cycle from the default", m.cfg.BatchOrient, output.OrientCommand)
+	if m.cfg().BatchOrient != output.OrientCommand {
+		t.Errorf("BatchOrient = %q, want %q after one cycle from the default", m.cfg().BatchOrient, output.OrientCommand)
 	}
 	if saved, err := st.Config(); err != nil {
 		t.Errorf("Config() error = %v", err)
@@ -172,12 +161,12 @@ func TestBatchSettingsCycleAndToggle(t *testing.T) {
 	m.setCursor = 2
 	mm, _ = m.onBatchKey("enter")
 	m = mm.(tuiModel)
-	if !m.cfg.BatchToFile {
+	if !m.cfg().BatchToFile {
 		t.Error("BatchToFile = false, want file output turned on")
 	}
 	mm, _ = m.onBatchKey("enter")
 	m = mm.(tuiModel)
-	if m.cfg.BatchToFile {
+	if m.cfg().BatchToFile {
 		t.Error("BatchToFile = true, want the toggle to go back to stdout")
 	}
 
@@ -194,11 +183,11 @@ func TestBatchSettingsCycleAndToggle(t *testing.T) {
 	m.form[0].input.SetValue("~/ion-reports")
 	mm, _ = m.submitForm()
 	m = mm.(tuiModel)
-	if strings.HasPrefix(m.cfg.BatchDir, "~") {
-		t.Errorf("BatchDir = %q, want the home directory expanded", m.cfg.BatchDir)
+	if strings.HasPrefix(m.cfg().BatchDir, "~") {
+		t.Errorf("BatchDir = %q, want the home directory expanded", m.cfg().BatchDir)
 	}
-	if !strings.HasSuffix(m.cfg.BatchDir, "ion-reports") {
-		t.Errorf("BatchDir = %q, want it to end in the typed folder", m.cfg.BatchDir)
+	if !strings.HasSuffix(m.cfg().BatchDir, "ion-reports") {
+		t.Errorf("BatchDir = %q, want it to end in the typed folder", m.cfg().BatchDir)
 	}
 	if m.phase != phaseSettings {
 		t.Errorf("phase = %v, want to land back in settings", m.phase)

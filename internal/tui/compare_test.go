@@ -5,10 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/dataview"
+	"tyrtop.com/iontk/internal/runtime"
 )
 
 const compareFixtureYAML = `
@@ -60,28 +63,28 @@ func TestCompareAsksTheDeviceAndMarksEachRow(t *testing.T) {
 	useViews(t, compareViewYAML)
 	m, set := fixtureTUIWith(t, compareFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	if got := plain(m.dataPage(m.data[0]).String()); !strings.Contains(got, "c asks the device") {
+	if got := plain(m.dataPage(m.dataTabs()[0]).String()); !strings.Contains(got, "c asks the device") {
 		t.Errorf("the page does not offer the comparison:\n%s", got)
 	}
 
 	next, cmd = m.onDataKey("c")
 	m = next.(tuiModel)
-	if !m.data[0].cmp.loading {
+	if !m.dataTabs()[0].Check.Loading {
 		t.Fatal("c did not start a comparison")
 	}
 	m = runCompare(t, m, cmd)
 
-	if m.data[0].cmp.err != "" {
-		t.Fatalf("comparison failed: %s", m.data[0].cmp.err)
+	if m.dataTabs()[0].Check.Err != "" {
+		t.Fatalf("comparison failed: %s", m.dataTabs()[0].Check.Err)
 	}
-	page := plain(m.dataPage(m.data[0]).String())
+	page := plain(m.dataPage(m.dataTabs()[0]).String())
 	for _, want := range []string{
 		"CLI check", "dump device status",
 		"CHECK", "PORTAL", "DEVICE",
@@ -103,14 +106,14 @@ func TestCompareWithoutADeviceLoginAsksForOne(t *testing.T) {
 	useViews(t, compareViewYAML)
 	m, set := fixtureTUIWith(t, compareFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	if err := m.store.Secrets.Delete(config.IONPassKey(m.tenant.TSGID, "admin")); err != nil {
+	if err := m.store().Secrets.Delete(config.IONPassKey(m.tenant().TSGID, "admin")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -119,7 +122,7 @@ func TestCompareWithoutADeviceLoginAsksForOne(t *testing.T) {
 	if cmd != nil {
 		t.Error("c dialled the element with no login saved")
 	}
-	if m.data[0].cmp.loading {
+	if m.dataTabs()[0].Check.Loading {
 		t.Error("the tab is waiting for a comparison that was never started")
 	}
 	if !strings.Contains(m.status, "no ION login") {
@@ -130,29 +133,29 @@ func TestCompareWithoutADeviceLoginAsksForOne(t *testing.T) {
 func TestComparisonsTheElementCannotAnswerAreNotOffered(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	clustered := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: clustered.ID, name: clustered.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: clustered.ID, name: clustered.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
-	if got := strings.Count(plain(m.dataPage(m.data[0]).String()), "CLI check"); got != 2 {
+	if got := strings.Count(plain(m.dataPage(m.dataTabs()[0]).String()), "CLI check"); got != 2 {
 		t.Errorf("%d comparisons offered on a clustered element, want both built-ins", got)
 	}
 
 	m2, set2 := fixtureTUIWith(t, fixtureYAML)
 	m2.phase = phasePicking
-	m2.mode = modeData
+	m2.setMode(modeData)
 	m2.rebuildRows()
 	spoke := set2.Tenants[0].Elements[0]
-	next, cmd = m2.openDataTabs([]sessionTarget{{eid: spoke.ID, name: spoke.Name, tsg: m2.tenant.TSGID}})
+	next, cmd = m2.openDataTabs([]sessionTarget{{eid: spoke.ID, name: spoke.Name, tsg: m2.tenant().TSGID}})
 	m2 = runDataLoads(t, next.(tuiModel), cmd)
 
-	page := plain(m2.dataPage(m2.data[0]).String())
+	page := plain(m2.dataPage(m2.dataTabs()[0]).String())
 	if got := strings.Count(page, "CLI check"); got != 1 {
 		t.Errorf("%d comparisons offered on an unclustered element, want only the one that applies:\n%s", got, page)
 	}
-	applies := dataview.CompareViews(m2.views.Views, m2.data[0].vars())
+	applies := dataview.CompareViews(m2.runtime().Views().Views, m2.dataTabs()[0].Vars())
 	if len(dataview.CompareCommands(applies)) != 1 {
 		t.Error("the HA command would still be run on an element with no cluster")
 	}
@@ -162,17 +165,17 @@ func TestAFailedComparisonLeavesThePageReadable(t *testing.T) {
 	useViews(t, compareViewYAML)
 	m, set := fixtureTUIWith(t, compareFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	next, _ = m.Update(compareDoneMsg{eid: el.ID, err: "dial: expected handshake response status 101 but got 404"})
+	next, _ = m.Update(compareDoneMsg{eid: el.ID, check: runtime.Check{At: time.Now(), Err: "dial: expected handshake response status 101 but got 404"}})
 	m = next.(tuiModel)
 
-	page := plain(m.dataPage(m.data[0]).String())
+	page := plain(m.dataPage(m.dataTabs()[0]).String())
 	for _, want := range []string{"store-0003-rtr-01", "CLI check", "got 404"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page is missing %q:\n%s", want, page)
@@ -186,8 +189,8 @@ func useViews(t *testing.T, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	Views = path
-	t.Cleanup(func() { Views = "" })
+	app.ViewsFolder = path
+	t.Cleanup(func() { app.ViewsFolder = "" })
 }
 
 func runCompare(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {

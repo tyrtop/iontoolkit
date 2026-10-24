@@ -1,13 +1,9 @@
 package tui
 
 import (
-	"encoding/json"
-	"fmt"
-	"strings"
-
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/column"
-	"tyrtop.com/iontk/internal/logging"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/tmpl"
 )
 
@@ -40,18 +36,10 @@ func fleetValue(spec column.Spec) func(*tuiModel, elementRow) string {
 	}
 }
 
-func subjectOf(f fleetSpec) string {
-	switch {
-	case strings.HasSuffix(f.path, "/"+column.ElementsSrc):
-		return column.FromElement
-	case strings.HasSuffix(f.path, "/"+column.SitesSrc):
-		return column.FromSite
-	}
-	return ""
-}
+func subjectOf(f fleetSpec) string { return runtime.TableSubject(f.path) }
 
 func (m *tuiModel) joined(f fleetSpec, el elementRow) (map[string]any, bool) {
-	rows := m.fleet[fleetKey(f.path, el.TSG)]
+	rows := m.runtime().Table(f.path, el.TSG)
 	if rows == nil {
 		return nil, false
 	}
@@ -76,93 +64,37 @@ func (m tuiModel) readFleet(r cellReader, f fleetSpec, tsg string) tea.Cmd {
 	if r == nil {
 		return nil
 	}
-	ctx, path, key := m.ctx, f.path, f.key
+	rt, ctx, job := m.runtime(), m.ctx, runtime.TableJob{Path: f.path, Key: f.key, TSG: tsg}
 	return func() tea.Msg {
-		body, err := r.GetJSON(ctx, path)
-		if err != nil {
-			return fleetReadMsg{path: path, tsg: tsg, err: shortTenantErr(err)}
-		}
-		rows, err := rowsByKey(body, key)
-		if err != nil {
-			return fleetReadMsg{path: path, tsg: tsg, err: err.Error()}
-		}
-		logging.L().Info("column read for the fleet", "path", path, "tsg", tsg, "rows", len(rows))
-		return fleetReadMsg{path: path, tsg: tsg, rows: rows}
+		res := rt.ReadTableWith(ctx, r, job)
+		return fleetReadMsg{path: res.Path, tsg: res.TSG, rows: res.Rows, err: res.Err}
 	}
 }
 
 func rowsByKey(body []byte, key string) (map[string]map[string]any, error) {
-	var env struct {
-		Items []map[string]any `json:"items"`
-	}
-	if err := json.Unmarshal(body, &env); err != nil || env.Items == nil {
-		var bare []map[string]any
-		if err := json.Unmarshal(body, &bare); err != nil {
-			return nil, fmt.Errorf("decode: %w", err)
-		}
-		env.Items = bare
-	}
-	out := make(map[string]map[string]any, len(env.Items))
-	for _, row := range env.Items {
-		if id := fmt.Sprint(row[key]); id != "" && id != "<nil>" {
-			out[id] = row
-		}
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("%d row(s), none of them with a %s", len(env.Items), key)
-	}
-	return out, nil
+	return runtime.RowsByKey(body, key)
 }
 
 func (m tuiModel) onFleetRead(msg fleetReadMsg) (tea.Model, tea.Cmd) {
-	at := fleetKey(msg.path, msg.tsg)
-	delete(m.fleetOut, at)
+	m.runtime().ApplyTable(runtime.TableResult{Path: msg.path, TSG: msg.tsg, Rows: msg.rows, Err: msg.err})
 	if msg.err != "" {
-		if m.fleetErr == nil {
-			m.fleetErr = map[string]string{}
-		}
-		m.fleetErr[at] = msg.err
 		if m.status == "" {
 			m.status = msg.path + ": " + msg.err
 		}
 		return m, nil
 	}
-	if m.fleet == nil {
-		m.fleet = map[string]map[string]map[string]any{}
-	}
-	m.fleet[at] = msg.rows
 	m.forgetRows()
 	m.rebuildRows()
 	return m, nil
 }
 
-func (m tuiModel) fleetWorking(path string) bool {
-	for at, out := range m.fleetOut {
-		if out && strings.HasPrefix(at, path+"\x00") {
-			return true
-		}
-	}
-	return false
-}
+func (m tuiModel) fleetWorking(path string) bool { return m.rt != nil && m.rt.TableWorking(path) }
 
 func (m *tuiModel) readFleets() tea.Cmd {
 	var cmds []tea.Cmd
-	for _, f := range m.fleetSpecs() {
-		if subjectOf(f) != "" {
-			continue
-		}
-		for tsg := range m.tenantsOnTheList() {
-			at := fleetKey(f.path, tsg)
-			if m.fleetOut[at] || m.fleet[at] != nil || m.fleetErr[at] != "" {
-				continue
-			}
-			if m.fleetOut == nil {
-				m.fleetOut = map[string]bool{}
-			}
-			m.fleetOut[at] = true
-			if cmd := m.readFleet(m.readerFor(tsg), f, tsg); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
+	for _, job := range m.runtime().TablesWanted() {
+		if cmd := m.readFleet(m.readerFor(job.TSG), fleetSpec{path: job.Path, key: job.Key}, job.TSG); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 	}
 	if len(cmds) == 0 {
@@ -173,7 +105,7 @@ func (m *tuiModel) readFleets() tea.Cmd {
 
 func (m tuiModel) fleetSpecs() []fleetSpec {
 	var out []fleetSpec
-	for _, spec := range m.listSpecs {
+	for _, spec := range m.runtime().Columns() {
 		if spec.Fleet() {
 			out = append(out, fleetSpec{name: spec.Name, path: spec.Fetch,
 				key: spec.Key, on: spec.On, value: spec.Template})

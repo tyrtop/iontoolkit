@@ -17,6 +17,12 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
+const (
+	completedKept = 300
+	inflightRows  = 5
+	errKindRows   = 3
+)
+
 func DrainLive(ctx context.Context, events <-chan sase.Event, commands []string, total int, sink output.Sink, stdinTaken bool) (int, int, error) {
 	opts := []tea.ProgramOption{
 		tea.WithContext(ctx),
@@ -33,6 +39,10 @@ func DrainLive(ctx context.Context, events <-chan sase.Event, commands []string,
 	}
 
 	fm := final.(batchModel)
+	// bubbletea drops tea.Printf while the altscreen is up
+	for _, line := range fm.summaryLines() {
+		fmt.Fprintln(os.Stderr, line)
+	}
 	return total, fm.failed, fm.sinkErr
 }
 
@@ -57,6 +67,7 @@ type batchModel struct {
 	finished  int
 	failed    int
 	running   []inflight
+	completed []string
 	errGroups []errGroup
 
 	spinner  spinner.Model
@@ -133,28 +144,28 @@ func (m batchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		cmds := []tea.Cmd{
-			m.progress.SetPercent(float64(m.finished) / float64(m.total)),
-			waitForEvent(m.events),
+		name := ev.Result.Name
+		if name == "" {
+			name = ev.Element
 		}
-
 		if ev.Result.Error != "" {
 			m.failed++
 			m.recordError(ev.Element, ev.Result.Error)
+			m.record(fmt.Sprintf("%s %s  %s", ui.MarkCross,
+				ui.StyleElement.Render(name), ui.StyleErr.Render(normalizeErr(ev.Result.Error))))
 		} else {
-			name := ev.Result.Name
-			if name == "" {
-				name = ev.Element
-			}
-			cmds = append(cmds, tea.Printf("%s %s  %s",
-				ui.MarkCheck, ui.StyleElement.Render(name), ui.StyleDim.Render(short(ev.Elapsed))))
+			m.record(fmt.Sprintf("%s %s  %s", ui.MarkCheck,
+				ui.StyleElement.Render(name), ui.StyleDim.Render(short(ev.Elapsed))))
 		}
 
-		return m, tea.Batch(cmds...)
+		return m, tea.Batch(
+			m.progress.SetPercent(float64(m.finished)/float64(m.total)),
+			waitForEvent(m.events),
+		)
 
 	case streamClosedMsg:
 		m.done = true
-		return m, tea.Sequence(append(m.summaryCmds(), tea.Quit)...)
+		return m, tea.Quit
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -169,6 +180,13 @@ func (m batchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *batchModel) record(line string) {
+	m.completed = append(m.completed, line)
+	if len(m.completed) > completedKept {
+		m.completed = m.completed[len(m.completed)-completedKept:]
+	}
+}
+
 func (m *batchModel) recordError(element, msg string) {
 	key := normalizeErr(msg)
 	for i := range m.errGroups {
@@ -180,16 +198,16 @@ func (m *batchModel) recordError(element, msg string) {
 	m.errGroups = append(m.errGroups, errGroup{msg: key, count: 1, first: element})
 }
 
-func (m batchModel) summaryCmds() []tea.Cmd {
+func (m batchModel) summaryLines() []string {
 	if m.failed == 0 {
-		return []tea.Cmd{tea.Printf("%s %d/%d elements succeeded", ui.MarkCheck, m.finished, m.total)}
+		return []string{fmt.Sprintf("%s %d/%d elements succeeded", ui.MarkCheck, m.finished, m.total)}
 	}
-	cmds := []tea.Cmd{tea.Printf("%s %d of %d elements failed", ui.MarkCross, m.failed, m.total)}
+	lines := []string{fmt.Sprintf("%s %d of %d elements failed", ui.MarkCross, m.failed, m.total)}
 	for _, g := range m.errGroups {
-		cmds = append(cmds, tea.Printf("    %d × %s %s",
+		lines = append(lines, fmt.Sprintf("    %d × %s %s",
 			g.count, g.msg, ui.StyleDim.Render("(first: "+g.first+")")))
 	}
-	return cmds
+	return lines
 }
 
 func (m batchModel) View() tea.View {
@@ -197,46 +215,68 @@ func (m batchModel) View() tea.View {
 		return tea.NewView("")
 	}
 
-	var b strings.Builder
+	head := m.head()
+	lines := append(head, m.scroll(m.height-len(head))...)
+	for i, l := range lines {
+		lines[i] = ui.Truncate(l, m.width)
+	}
 
-	b.WriteString(ui.Banner(m.width, m.height))
-	b.WriteString(ui.StyleCmd.Render(strings.Join(m.commands, ", ")) + "\n")
+	v := tea.NewView(ui.ClipFrame(strings.Join(lines, "\n"), m.height))
+	v.AltScreen = true
+	return v
+}
+
+func (m batchModel) head() []string {
+	lines := strings.Split(strings.TrimRight(ui.Banner(m.width, m.height), "\n"), "\n")
+	lines = append(lines, ui.StyleCmd.Render(strings.Join(m.commands, ", ")))
 
 	counts := fmt.Sprintf("  %d/%d", m.finished, m.total)
 	if m.failed > 0 {
 		counts += ui.StyleErr.Render(fmt.Sprintf("  %d failed", m.failed))
 	}
-	b.WriteString(m.spinner.View() + " " + m.progress.View() + counts + "\n")
+	lines = append(lines, m.spinner.View()+" "+m.progress.View()+counts, "")
 
-	avail := max(2, m.height-6-ui.BannerHeight(m.width, m.height))
-	errShown := min(len(m.errGroups), max(1, avail/2))
-	flightShown := min(len(m.running), max(1, avail-errShown))
-
-	if errShown > 0 {
-		b.WriteString("\n")
-		for _, g := range m.errGroups[:errShown] {
-			b.WriteString(fmt.Sprintf("%s %d × %s %s\n",
-				ui.MarkCross, g.count, g.msg,
+	if shown := min(len(m.errGroups), errKindRows); shown > 0 {
+		for i, g := range m.errGroups[:shown] {
+			if i == shown-1 && len(m.errGroups) > shown {
+				lines = append(lines, ui.StyleDim.Render(
+					fmt.Sprintf("  … %d more error kinds", len(m.errGroups)-shown+1)))
+				break
+			}
+			lines = append(lines, fmt.Sprintf("%s %d × %s %s", ui.MarkCross, g.count, g.msg,
 				ui.StyleDim.Render("(first: "+g.first+")")))
 		}
-		if n := len(m.errGroups) - errShown; n > 0 {
-			b.WriteString(ui.StyleDim.Render(fmt.Sprintf("  … %d more error kinds\n", n)))
-		}
+		lines = append(lines, "")
 	}
 
-	if flightShown > 0 {
-		b.WriteString("\n")
-		for _, f := range m.running[:flightShown] {
-			b.WriteString(fmt.Sprintf("  %s  %s\n",
-				ui.StyleElement.Render(f.element),
-				ui.StyleDim.Render(short(time.Since(f.started)))))
+	for i := range inflightRows {
+		if i == inflightRows-1 && len(m.running) > inflightRows {
+			lines = append(lines, ui.StyleDim.Render(
+				fmt.Sprintf("  … %d more in flight", len(m.running)-inflightRows+1)))
+			break
 		}
-		if n := len(m.running) - flightShown; n > 0 {
-			b.WriteString(ui.StyleDim.Render(fmt.Sprintf("  … %d more\n", n)))
+		if i < len(m.running) {
+			f := m.running[i]
+			lines = append(lines, "  "+ui.StyleElement.Render(f.element)+"  "+
+				ui.StyleDim.Render(short(time.Since(f.started))))
+			continue
 		}
+		lines = append(lines, "")
 	}
+	return append(lines, "")
+}
 
-	return tea.NewView(b.String())
+func (m batchModel) scroll(n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	shown := m.completed
+	if len(shown) > n {
+		shown = shown[len(shown)-n:]
+	}
+	out := make([]string, n)
+	copy(out, shown)
+	return out
 }
 
 func normalizeErr(s string) string {

@@ -19,7 +19,7 @@ func listModel(t *testing.T, n int) tuiModel {
 		Name: "Acme Co", TSGID: "1", Users: []config.IONUser{{Name: "u", Default: true}},
 	}}}
 	m := newTUIModel(context.Background(), st, cfg)
-	m.tenant, m.hasTenant = cfg.Tenants[0], true
+	m.runtime().UseTenant(cfg.Tenants[0])
 
 	els := make([]api.Element, 0, n)
 	for i := range n {
@@ -53,8 +53,8 @@ func columnCell(t *testing.T, m *tuiModel, row int, name string) string {
 
 func TestTheHAColumnKeepsItsColour(t *testing.T) {
 	m := listModel(t, 4)
-	m.ha = map[string]string{"1/1": haActive, "1/2": haStandby}
-	m.haCached = map[string]string{"1/3": haActive}
+	m.runtime().SetHA(map[string]string{"1/1": haActive, "1/2": haStandby})
+	m.runtime().SetCachedHA(map[string]string{"1/3": haActive})
 	m.forgetRows()
 	m.rebuildRows()
 
@@ -75,7 +75,7 @@ func TestTheHAColumnKeepsItsColour(t *testing.T) {
 
 func TestTheStatusGlyphKeepsItsColour(t *testing.T) {
 	m := listModel(t, 4)
-	m.dialing = map[string]dialState{"1": {failed: true}}
+	m.runtime().DialFailed("1", "")
 	m.forgetRows()
 	m.rebuildRows()
 
@@ -95,8 +95,8 @@ func TestACachedRowFollowsTheStateBehindIt(t *testing.T) {
 
 	first := set.Tenants[0].Elements[0]
 	at := -1
-	for i, n := range m.matches {
-		if m.all[n].ID == first.ID {
+	for i, n := range m.matched() {
+		if m.rows()[n].ID == first.ID {
 			at = i
 		}
 	}
@@ -107,7 +107,7 @@ func TestACachedRowFollowsTheStateBehindIt(t *testing.T) {
 		t.Fatalf("ha before the sweep = %q, want loading", got)
 	}
 
-	cmd := loadHA(t.Context(), m.pool.get(m.tenant.TSGID), m.tenant.TSGID, haClusters(elementsOf(m)).pairs)
+	cmd := loadHA(t.Context(), m.runtime(), m.tenant().TSGID, haClusters(elementsOf(m)).pairs)
 	msg, ok := cmd().(haStatesMsg)
 	if !ok {
 		t.Fatalf("message = %T, want the HA states", msg)
@@ -126,8 +126,8 @@ func TestACachedRowFollowsTheSiteName(t *testing.T) {
 		t.Fatalf("site without a name = %q, want the raw id", got)
 	}
 
-	m.sites = map[string]string{"1/0": "Store 0000", "1/1": "Store 0001"}
-	m.setElements(m.all)
+	m.runtime().MergeSites(map[string]string{"1/0": "Store 0000", "1/1": "Store 0001"})
+	m.setElements(m.rows())
 
 	if got := plain(columnCell(t, &m, 0, colSite)); got != "Store 0000" {
 		t.Errorf("site = %q, want the name that has since landed", got)
@@ -187,7 +187,7 @@ func TestANarrowTerminalKeepsEveryColumnInside(t *testing.T) {
 func TestTheMarkOnATickedRowStaysTwoColumnsWide(t *testing.T) {
 	m := listModel(t, 4)
 	before := plain(columnCell(t, &m, 1, colName))
-	m.selected = map[string]bool{"1/1": true}
+	selectOnly(&m, "1/1")
 	m.rebuildRows()
 	after := plain(columnCell(t, &m, 1, colName))
 

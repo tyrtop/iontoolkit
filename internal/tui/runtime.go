@@ -4,58 +4,29 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"tyrtop.com/iontk/internal/app"
 
 	"tyrtop.com/iontk/internal/column"
 	"tyrtop.com/iontk/internal/config"
-	"tyrtop.com/iontk/internal/dataview"
 	"tyrtop.com/iontk/internal/logging"
-	"tyrtop.com/iontk/internal/script"
 	"tyrtop.com/iontk/internal/view"
 )
 
-var Views string
+func ViewsDir(st *config.Store) string { return app.ViewsDir(st) }
 
-func ViewsDir(st *config.Store) string {
-	if Views != "" {
-		return Views
-	}
-	if st == nil {
-		return ""
-	}
-	return filepath.Join(st.Root, view.DirName)
-}
-
-func legacyViewsPath(st *config.Store) string {
-	if Views != "" && view.IsFile(Views) {
-		return Views
-	}
-	if st == nil {
-		return ""
-	}
-	return filepath.Join(st.Root, dataview.FileName)
-}
+func legacyViewsPath(st *config.Store) string { return app.LegacyViewsPath(st) }
 
 func (m *tuiModel) loadRuntime(st *config.Store) {
-	m.views, m.viewsErr = m.loadDataViews(st)
+	m.runtime().SetViews(app.LoadDataViews(st))
 	m.loadColumns(st)
 
 	files, err := view.Load(ViewsDir(st))
 	if err != nil {
-		m.viewsErr = joinErr(m.viewsErr, err.Error())
 		logging.L().Warn("views refused", "err", err)
 	}
 
 	for _, f := range files {
 		switch f.Kind {
-		case view.KindData:
-			v, perr := dataview.ParseOne(f.Bytes)
-			if perr != nil {
-				m.viewsErr = joinErr(m.viewsErr, filepath.Base(f.Source)+": "+perr.Error())
-				continue
-			}
-			v.Source = f.Source
-			m.views.Replace(*v)
-
 		case view.KindList:
 			set, perr := column.Parse(f.Bytes)
 			if perr != nil {
@@ -69,9 +40,10 @@ func (m *tuiModel) loadRuntime(st *config.Store) {
 				continue
 			}
 			m.listSpec, m.listFrom = cols, f.Source
+			m.runtime().SetColumns(set.Columns)
 
 		case view.KindMenu:
-			entries, perr := parseMenu(f.Bytes)
+			entries, perr := parseMenu(f.Bytes, m.runsCommand)
 			if perr != nil {
 				m.menuErr = joinErr(m.menuErr, filepath.Base(f.Source)+": "+perr.Error())
 				continue
@@ -80,41 +52,36 @@ func (m *tuiModel) loadRuntime(st *config.Store) {
 		}
 	}
 	m.viewFiles = files
-	m.loadScripts(st)
+	m.loadWrites(st)
+	app.ReloadCommands(m.runtime())
 	m.loadKeys(st)
 }
 
-func ScriptsPath(st *config.Store) string {
-	if Scripts != "" {
-		return Scripts
+func (m tuiModel) actionNames() []string {
+	var out []string
+	for _, c := range m.runtime().CommandsNamed(app.ActionPrefix) {
+		out = append(out, strings.TrimPrefix(c.Name, app.ActionPrefix))
 	}
-	if st == nil {
-		return ""
-	}
-	return filepath.Join(st.Root, script.DirName)
+	return out
 }
 
-var Scripts string
-
-func (m *tuiModel) loadScripts(st *config.Store) {
-	set, err := script.Load(ScriptsPath(st))
-	m.scripts = set
-	if err != nil {
-		m.scriptsErr = err.Error()
-		logging.L().Warn("lua action refused", "err", err)
-	}
+func (m tuiModel) hasAction(name string) bool {
+	_, ok := m.runtime().Command(app.ActionPrefix + name)
+	return ok
 }
 
-func (m *tuiModel) loadDataViews(st *config.Store) (*dataview.Set, string) {
-	set, err := dataview.Load(legacyViewsPath(st))
-	if err != nil {
-		return set, err.Error()
+func (m tuiModel) actionsErr() string {
+	var out []string
+	for _, w := range m.runtime().Warnings() {
+		if rest, ok := strings.CutPrefix(w, app.ActionsRefused); ok {
+			out = append(out, rest)
+		}
 	}
-	return set, ""
+	return strings.Join(out, "; ")
 }
 
 func (m tuiModel) runtimeErr() error {
-	for _, e := range []string{m.columnsErr, m.viewsErr, m.menuErr, m.keysErr, m.scriptsErr} {
+	for _, e := range []string{m.columnsErr, m.runtime().ViewsErr(), m.menuErr, m.keysErr, m.actionsErr(), m.writesErr} {
 		if e != "" {
 			return fmt.Errorf("%s", e)
 		}
@@ -152,7 +119,7 @@ func (m tuiModel) viewFileCount(kind string) int {
 }
 
 func (m tuiModel) runtimeLine() string {
-	dir := ViewsDir(m.store)
+	dir := ViewsDir(m.store())
 	if dir == "" {
 		return ""
 	}

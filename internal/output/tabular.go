@@ -264,3 +264,5 @@ func pad(s string, n int) string {
 	}
 	return s
 }
+
+func Orientations() []string { return append([]string(nil), orientations...) }

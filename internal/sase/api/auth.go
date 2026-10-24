@@ -78,10 +78,10 @@ func (s *Client) mintLocked(ctx context.Context) (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
-	s.setToken(tok)
-	if err := s.activate(ctx); err != nil {
+	if err := s.activate(ctx, tok); err != nil {
 		return 0, err
 	}
+	s.setToken(tok)
 	s.setExpiry(ttl)
 	return ttl, nil
 }
@@ -162,7 +162,7 @@ func (s *Client) refreshLoop(ctx context.Context, ttl, margin time.Duration) {
 const profileURL = "https://api.sase.paloaltonetworks.com/sdwan/v2.1/api/profile"
 
 // Palo Alto needs an extra call to prime the token, or everything after it 403s
-func (s *Client) activate(ctx context.Context) error {
+func (s *Client) activate(ctx context.Context, tok string) error {
 	url := profileURL
 	if s.profileBase != "" {
 		url = s.profileBase
@@ -172,7 +172,7 @@ func (s *Client) activate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("build profile request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+s.getToken())
+	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", browserUA)
 

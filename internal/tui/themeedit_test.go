@@ -53,7 +53,7 @@ func TestEditingAThemeWritesAnOverrideAndAppliesIt(t *testing.T) {
 		t.Error("the ✓ was not restyled, so Apply did not reach the marks")
 	}
 
-	dir := app.ThemesPath(m.store)
+	dir := app.ThemesPath(m.store())
 	path := filepath.Join(dir, ui.ThemeFileName("classic"))
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -72,7 +72,7 @@ func TestEditingAThemeWritesAnOverrideAndAppliesIt(t *testing.T) {
 	if _, ok := ui.ThemeByName("nord"); !ok {
 		t.Error("the override took the rest of the set with it")
 	}
-	saved, err := m.store.Config()
+	saved, err := m.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}

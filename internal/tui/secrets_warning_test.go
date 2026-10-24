@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ui"
@@ -42,14 +43,10 @@ func TestPlaintextDetection(t *testing.T) {
 func warnModel(t *testing.T, secrets config.Secrets) tuiModel {
 	t.Helper()
 	st := config.OpenAt(t.TempDir(), secrets)
-	return tuiModel{
-		cfg:       &config.Config{},
-		store:     st,
-		tenant:    config.Tenant{Name: "Acme Co", TSGID: "1"},
-		hasTenant: true,
-		width:     100,
-		height:    30,
-	}
+	return withWorkspace(withStore(tuiModel{
+		width:  100,
+		height: 30,
+	}, st, &config.Config{}), config.Tenant{Name: "Acme Co", TSGID: "1"}, true, "", authBrowser)
 }
 
 func TestFormsWarnBeforeASecretIsTyped(t *testing.T) {
@@ -132,18 +129,13 @@ func TestGeneralSectionHasARefreshRow(t *testing.T) {
 	if err := st.Secrets.Set(config.ClientSecretKey("1"), "s"); err != nil {
 		t.Fatalf("seed secret: %v", err)
 	}
-	m := tuiModel{
-		cfg:        &config.Config{},
-		store:      st,
-		tenant:     config.Tenant{Name: "Acme Co", TSGID: "1", ClientID: "svc"},
-		hasTenant:  true,
+	m := withWorkspace(withFleet(withStore(tuiModel{
 		phase:      phaseSettings,
 		setSection: secGeneral,
 		setFocus:   focusContent,
-		cacheState: cacheCached,
 		width:      100,
 		height:     30,
-	}
+	}, st, &config.Config{}), cacheCached, 0, time.Time{}), config.Tenant{Name: "Acme Co", TSGID: "1", ClientID: "svc"}, true, "", authBrowser)
 	m.spinner = ui.NewSpinner("")
 
 	if got := m.sectionRows(); got != generalRows {
@@ -156,8 +148,8 @@ func TestGeneralSectionHasARefreshRow(t *testing.T) {
 	m.setCursor = m.sectionRows() - 1
 	mm, cmd := m.onGeneralKey("enter")
 	got := mm.(tuiModel)
-	if got.cacheState != cacheUpdating {
-		t.Errorf("cacheState = %v, want the settings entry to start a refresh", got.cacheState)
+	if got.cacheState() != cacheUpdating {
+		t.Errorf("cacheState = %v, want the settings entry to start a refresh", got.cacheState())
 	}
 	if cmd == nil {
 		t.Error("the settings refresh entry issued no command")

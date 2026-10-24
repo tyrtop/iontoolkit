@@ -53,11 +53,11 @@ func TestLaunchDecidesWhetherElementsAreOwedARefresh(t *testing.T) {
 				LastTenant: "Acme Co",
 			}
 			m := newTUIModel(context.Background(), st, cfg)
-			if m.cacheState != tt.wantState {
-				t.Errorf("cacheState = %v, want %v", m.cacheState, tt.wantState)
+			if m.cacheState() != tt.wantState {
+				t.Errorf("cacheState = %v, want %v", m.cacheState(), tt.wantState)
 			}
-			if tt.count > 0 && m.cacheCount != tt.count {
-				t.Errorf("cacheCount = %d, want %d", m.cacheCount, tt.count)
+			if tt.count > 0 && m.cacheCount() != tt.count {
+				t.Errorf("cacheCount = %d, want %d", m.cacheCount(), tt.count)
 			}
 		})
 	}
@@ -83,14 +83,9 @@ func TestInitStartsARefreshOnlyWhenOneIsOwed(t *testing.T) {
 					t.Fatalf("seed secret: %v", err)
 				}
 			}
-			m := tuiModel{
-				ctx:        context.Background(),
-				store:      st,
-				cfg:        &config.Config{},
-				tenant:     config.Tenant{Name: "Acme Co", TSGID: "1", ClientID: "svc"},
-				hasTenant:  true,
-				cacheState: tt.state,
-			}
+			m := withWorkspace(withFleet(withStore(tuiModel{
+				ctx: context.Background(),
+			}, st, &config.Config{}), tt.state, 0, time.Time{}), config.Tenant{Name: "Acme Co", TSGID: "1", ClientID: "svc"}, true, "", authBrowser)
 			m.spinner = ui.NewSpinner("")
 
 			const always = 2
@@ -112,7 +107,7 @@ func TestInitStartsARefreshOnlyWhenOneIsOwed(t *testing.T) {
 
 func TestRefreshNow(t *testing.T) {
 	t.Run("without a tenant it only reports", func(t *testing.T) {
-		m := tuiModel{cfg: &config.Config{}}
+		m := withStore(tuiModel{}, nil, &config.Config{})
 		mm, cmd := m.refreshNow()
 		got := mm.(tuiModel)
 		if cmd != nil {
@@ -126,14 +121,13 @@ func TestRefreshNow(t *testing.T) {
 	t.Run("without credentials it fails visibly", func(t *testing.T) {
 		root := t.TempDir()
 		st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
-		m := tuiModel{
-			ctx: context.Background(), store: st, cfg: &config.Config{},
-			tenant: config.Tenant{Name: "Acme Co", TSGID: "1"}, hasTenant: true,
-		}
+		m := withWorkspace(withStore(tuiModel{
+			ctx: context.Background(),
+		}, st, &config.Config{}), config.Tenant{Name: "Acme Co", TSGID: "1"}, true, "", authBrowser)
 		mm, _ := m.refreshNow()
 		got := mm.(tuiModel)
-		if got.cacheState != cacheFailed {
-			t.Errorf("cacheState = %v, want cacheFailed", got.cacheState)
+		if got.cacheState() != cacheFailed {
+			t.Errorf("cacheState = %v, want cacheFailed", got.cacheState())
 		}
 		if got.status == "" {
 			t.Error("status is empty, want the credential problem surfaced")
@@ -146,19 +140,16 @@ func TestRefreshNow(t *testing.T) {
 		if err := st.Secrets.Set(config.ClientSecretKey("1"), "s"); err != nil {
 			t.Fatalf("seed secret: %v", err)
 		}
-		m := tuiModel{
-			ctx: context.Background(), store: st, cfg: &config.Config{},
-			tenant:     config.Tenant{Name: "Acme Co", TSGID: "1", ClientID: "svc"},
-			hasTenant:  true,
-			cacheState: cacheCached,
-			status:     "something stale",
-		}
+		m := withWorkspace(withFleet(withStore(tuiModel{
+			ctx:    context.Background(),
+			status: "something stale",
+		}, st, &config.Config{}), cacheCached, 0, time.Time{}), config.Tenant{Name: "Acme Co", TSGID: "1", ClientID: "svc"}, true, "", authBrowser)
 		m.spinner = ui.NewSpinner("")
 
 		mm, cmd := m.refreshNow()
 		got := mm.(tuiModel)
-		if got.cacheState != cacheUpdating {
-			t.Errorf("cacheState = %v, want cacheUpdating", got.cacheState)
+		if got.cacheState() != cacheUpdating {
+			t.Errorf("cacheState = %v, want cacheUpdating", got.cacheState())
 		}
 		if got.status != "" {
 			t.Errorf("status = %q, want it cleared on a new refresh", got.status)
@@ -175,23 +166,19 @@ func TestAltRRefreshesFromTheElementsPage(t *testing.T) {
 	if err := st.Secrets.Set(config.ClientSecretKey("1"), "s"); err != nil {
 		t.Fatalf("seed secret: %v", err)
 	}
-	m := tuiModel{
-		ctx: context.Background(), store: st, cfg: &config.Config{},
-		tenant:     config.Tenant{Name: "Acme Co", TSGID: "1", ClientID: "svc"},
-		hasTenant:  true,
-		phase:      phasePicking,
-		selected:   map[string]bool{},
-		cacheState: cacheCached,
-		width:      100, height: 30,
-	}
+	m := withWorkspace(withFleet(withStore(tuiModel{
+		ctx:   context.Background(),
+		phase: phasePicking,
+		width: 100, height: 30,
+	}, st, &config.Config{}), cacheCached, 0, time.Time{}), config.Tenant{Name: "Acme Co", TSGID: "1", ClientID: "svc"}, true, "", authBrowser)
 	m.spinner = ui.NewSpinner("")
 	m.filter = newField("", "", false).input
 	m.table = newElementTable()
 
 	mm, cmd := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}), "alt+r")
 	got := mm.(tuiModel)
-	if got.cacheState != cacheUpdating {
-		t.Errorf("cacheState = %v, want alt+r to start a refresh", got.cacheState)
+	if got.cacheState() != cacheUpdating {
+		t.Errorf("cacheState = %v, want alt+r to start a refresh", got.cacheState())
 	}
 	if cmd == nil {
 		t.Error("alt+r issued no command")
@@ -204,14 +191,11 @@ func TestAltRRefreshesFromTheElementsPage(t *testing.T) {
 func TestRefreshKeybindIsAdvertised(t *testing.T) {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
-	m := tuiModel{
-		ctx: context.Background(), store: st, cfg: &config.Config{},
-		tenant:    config.Tenant{Name: "Acme Co", TSGID: "1"},
-		hasTenant: true,
-		phase:     phasePicking,
-		selected:  map[string]bool{},
-		width:     200, height: 40,
-	}
+	m := withWorkspace(withStore(tuiModel{
+		ctx:   context.Background(),
+		phase: phasePicking,
+		width: 200, height: 40,
+	}, st, &config.Config{}), config.Tenant{Name: "Acme Co", TSGID: "1"}, true, "", authBrowser)
 	m.spinner = ui.NewSpinner("")
 	m.filter = newField("", "", false).input
 	m.table = newElementTable()
@@ -224,13 +208,10 @@ func TestRefreshKeybindIsAdvertised(t *testing.T) {
 func TestFreshCacheSkipsTheRefetchOnceAuthenticated(t *testing.T) {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
-	m := tuiModel{
-		ctx: context.Background(), store: st, cfg: &config.Config{},
-		tenant: config.Tenant{Name: "Acme Co", TSGID: "1"}, hasTenant: true,
-		cacheState: cacheCached,
-		phase:      phaseLoading,
-		selected:   map[string]bool{},
-	}
+	m := withWorkspace(withFleet(withStore(tuiModel{
+		ctx:   context.Background(),
+		phase: phaseLoading,
+	}, st, &config.Config{}), cacheCached, 0, time.Time{}), config.Tenant{Name: "Acme Co", TSGID: "1"}, true, "", authBrowser)
 	m.spinner = ui.NewSpinner("")
 
 	mm, cmd := m.Update(clientReadyMsg{client: liveClient()})
@@ -245,10 +226,10 @@ func TestFreshCacheSkipsTheRefetchOnceAuthenticated(t *testing.T) {
 	if err := st.Secrets.Set(config.ClientSecretKey("1"), "s"); err != nil {
 		t.Fatalf("seed secret: %v", err)
 	}
-	m.cfg = &config.Config{Tenants: []config.Tenant{
+	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 		{Name: "Acme Co", TSGID: "1", ClientID: "svc", Added: true},
-	}}
-	m.cacheState = cacheUpdating
+	}})
+	m.setCacheState(cacheUpdating)
 	_, cmd = m.Update(clientReadyMsg{client: liveClient()})
 	if cmd == nil {
 		t.Error("a stale cache did not trigger a fetch")
@@ -258,14 +239,10 @@ func TestFreshCacheSkipsTheRefetchOnceAuthenticated(t *testing.T) {
 func TestLaunchRefreshDoesNotHijackTheMenuWithABrowser(t *testing.T) {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
-	m := tuiModel{
-		ctx: context.Background(), store: st, cfg: &config.Config{},
-		tenant:     config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser},
-		hasTenant:  true,
-		phase:      phaseMenu,
-		cacheState: cacheUpdating,
-		selected:   map[string]bool{},
-	}
+	m := withWorkspace(withFleet(withStore(tuiModel{
+		ctx:   context.Background(),
+		phase: phaseMenu,
+	}, st, &config.Config{}), cacheUpdating, 0, time.Time{}), config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser}, true, "", authBrowser)
 	m.spinner = ui.NewSpinner("")
 
 	mm, cmd := m.Update(needsSignInMsg{})

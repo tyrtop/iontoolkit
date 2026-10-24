@@ -282,3 +282,5 @@ func ExpandHome(path string) (string, error) {
 	}
 	return filepath.Join(home, path[2:]), nil
 }
+
+func Formats() []string { return append([]string(nil), outputFormats...) }

@@ -121,9 +121,9 @@ func TestLeavingWithChangesTakesTwoPresses(t *testing.T) {
 
 func TestTheDataPaneEditsItsViewsAndExportsWithAltY(t *testing.T) {
 	m := pickModel(t)
-	m.data = []dataTab{{eid: "1", name: "S0100-RTR-01", tsg: "1",
-		panes: []dataPane{{view: "Overview"}}}}
-	m.dataActive, m.phase = 0, phaseData
+	m.runtime().SetDataTabs([]dataTab{{EID: "1", Name: "S0100-RTR-01", TSG: "1",
+		Panes: []dataPane{{View: "Overview"}}}}, 0)
+	m.phase = phaseData
 	m.width = 200
 	mm := openEditor(t, m)
 

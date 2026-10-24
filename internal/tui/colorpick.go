@@ -229,7 +229,7 @@ func (m tuiModel) applyWorking() (tea.Model, tea.Cmd) {
 	if m.themeEdit {
 		return m.applyTheme(m.themeDraft)
 	}
-	t, _ := ui.ThemeByName(m.cfg.Theme)
+	t, _ := ui.ThemeByName(m.cfg().Theme)
 	return m.applyTheme(t)
 }
 

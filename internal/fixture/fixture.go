@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -20,6 +21,9 @@ type Set struct {
 	Slow            string   `yaml:"slow"`
 
 	slow time.Duration
+
+	editMu sync.Mutex
+	edits  map[string]map[string]any
 }
 
 type Tenant struct {
@@ -229,6 +233,19 @@ func syntheticID(seed string, digits int) string {
 	return out
 }
 
+func clientID(name, tsg string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+		case r == ' ' || r == '-' || r == '_':
+			b.WriteRune('-')
+		}
+	}
+	return strings.Trim(b.String(), "-") + "@" + tsg + ".iam.panserviceaccount.com"
+}
+
 func (s *Set) SavedTenants() []config.Tenant {
 	out := make([]config.Tenant, 0, len(s.Tenants))
 	for _, t := range s.Tenants {
@@ -236,7 +253,7 @@ func (s *Set) SavedTenants() []config.Tenant {
 			Name:     t.Name,
 			TSGID:    t.TSGID,
 			Auth:     config.AuthServiceAccount,
-			ClientID: "fixture",
+			ClientID: clientID(t.Name, t.TSGID),
 			Added:    true,
 		}
 		for i, u := range t.Users {

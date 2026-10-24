@@ -305,13 +305,13 @@ func (m tuiModel) submitColor() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) saveDraft() (tea.Model, tea.Cmd) {
-	path := app.ThemesPath(m.store)
+	path := app.ThemesPath(m.store())
 	if err := ui.SaveUserTheme(path, m.themeDraft); err != nil {
 		m.status = "save failed: " + err.Error()
 		return m, nil
 	}
-	m.cfg.Theme = m.themeDraft.Name
-	if err := m.store.SaveConfig(m.cfg); err != nil {
+	m.cfg().Theme = m.themeDraft.Name
+	if err := m.store().SaveConfig(m.cfg()); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
@@ -331,7 +331,7 @@ func (m tuiModel) themeEditContent() []string {
 
 	out := []string{
 		ui.StyleCmd.Render("Editing "+m.themeDraft.Name) +
-			ui.StyleDim.Render("  saved to "+shortenPath(app.ThemesPath(m.store), 34)),
+			ui.StyleDim.Render("  saved to "+shortenPath(app.ThemesPath(m.store()), 34)),
 		"",
 	}
 	for i, role := range roles {

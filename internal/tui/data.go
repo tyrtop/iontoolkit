@@ -8,31 +8,15 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/dataview"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
 )
 
-type dataTab struct {
-	eid     string
-	name    string
-	tsg     string
-	site    string
-	siteID  string
-	cluster string
-
-	panes  []dataPane
-	at     time.Time
-	scroll int
-
-	cmp compareState
-}
-
-type dataPane struct {
-	view     string
-	loading  bool
-	err      string
-	rendered dataview.Rendered
-}
+type (
+	dataTab  = runtime.DataTab
+	dataPane = runtime.DataPane
+)
 
 type dataLoadedMsg struct {
 	eid      string
@@ -41,35 +25,11 @@ type dataLoadedMsg struct {
 	err      string
 }
 
-func (m tuiModel) viewNames() []string {
-	if m.views == nil {
-		return nil
-	}
-	return m.views.Names()
-}
+func (m tuiModel) viewNames() []string { return m.runtime().ViewNames() }
 
-func (t dataTab) vars() dataview.Vars {
-	return dataview.Vars{
-		"element_id": t.eid,
-		"site_id":    t.siteID,
-		"cluster_id": t.cluster,
-		"tenant_id":  t.tsg,
-	}
-}
+func (m tuiModel) dataTabs() []dataTab { return m.runtime().DataTabs() }
 
-func loadDataCmd(ctx contextLike, g dataview.Getter, v dataview.View, t dataTab) tea.Cmd {
-	return func() tea.Msg {
-		d, err := dataview.Fetch(ctx, g, v, t.vars())
-		msg := dataLoadedMsg{eid: t.eid, view: v.Name}
-		if err != nil {
-			msg.err = err.Error()
-		}
-		if d != nil {
-			msg.rendered = dataview.Render(v, d)
-		}
-		return msg
-	}
-}
+func (m tuiModel) dataActive() int { return m.runtime().DataActive() }
 
 func (m tuiModel) openDataTabs(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	if len(targets) == 0 {
@@ -77,8 +37,8 @@ func (m tuiModel) openDataTabs(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	}
 	if len(m.viewNames()) == 0 {
 		m.status = "no data views are loaded"
-		if m.viewsErr != "" {
-			m.status = m.viewsErr
+		if e := m.runtime().ViewsErr(); e != "" {
+			m.status = e
 		}
 		return m, nil
 	}
@@ -102,27 +62,7 @@ func (m tuiModel) openDataTabs(targets []sessionTarget) (tea.Model, tea.Cmd) {
 			unreachable = append(unreachable, t.name)
 			continue
 		}
-
-		tab := dataTab{eid: t.eid, name: t.name, tsg: t.tsg}
-		if el, ok := m.elementByKey(t.tsg + "/" + t.eid); ok {
-			tab.siteID = el.SiteID
-			tab.site = m.siteName(el)
-			tab.cluster = el.ClusterID()
-		}
-
-		for _, name := range m.viewNames() {
-			tab.panes = append(tab.panes, dataPane{view: name, loading: true})
-		}
-
-		if i := m.dataIndex(t.tsg, t.eid); i >= 0 {
-			tab.scroll = m.data[i].scroll
-			m.data[i] = tab
-			m.dataActive = i
-		} else {
-			m.data = append(m.data, tab)
-			m.dataActive = len(m.data) - 1
-		}
-		cmds = append(cmds, m.loadTab(tab, c)...)
+		cmds = append(cmds, m.loadTab(m.runtime().OpenData(t.eid, t.name, t.tsg), c)...)
 	}
 	if len(cmds) == 0 {
 		m.status = "could not reach " + strings.Join(unreachable, ", ")
@@ -137,89 +77,40 @@ func (m tuiModel) openDataTabs(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(append(cmds, m.spinner.Tick)...)
 }
 
-func (m tuiModel) dataIndex(tsg, eid string) int {
-	for i, t := range m.data {
-		if t.eid == eid && t.tsg == tsg {
-			return i
-		}
-	}
-	return -1
-}
-
 func (m tuiModel) loadTab(tab dataTab, c *api.Client) []tea.Cmd {
-	cmds := make([]tea.Cmd, 0, len(m.views.Views))
-	for _, v := range m.views.Views {
-		cmds = append(cmds, loadDataCmd(m.ctx, c, v, tab))
+	set := m.runtime().Views()
+	if set == nil {
+		return nil
+	}
+	rt, ctx := m.runtime(), m.ctx
+	cmds := make([]tea.Cmd, 0, len(set.Views))
+	for _, v := range set.Views {
+		cmds = append(cmds, func() tea.Msg {
+			r, problem := rt.LoadView(ctx, c, tab, v)
+			return dataLoadedMsg{eid: tab.EID, view: v.Name, rendered: r, err: problem}
+		})
 	}
 	return cmds
 }
 
-type contextLike = interface {
-	Deadline() (time.Time, bool)
-	Done() <-chan struct{}
-	Err() error
-	Value(any) any
-}
-
 func (m tuiModel) onDataLoaded(msg dataLoadedMsg) (tea.Model, tea.Cmd) {
-	for i := range m.data {
-		if m.data[i].eid != msg.eid {
-			continue
-		}
-		for j := range m.data[i].panes {
-			if m.data[i].panes[j].view != msg.view {
-				continue
-			}
-			m.data[i].panes[j].loading = false
-			m.data[i].panes[j].err = msg.err
-			m.data[i].panes[j].rendered = msg.rendered
-			m.data[i].at = time.Now()
-			return m, nil
-		}
-	}
+	m.runtime().ApplyView(msg.eid, msg.view, msg.rendered, msg.err)
 	return m, nil
 }
 
-func (t dataTab) loading() bool {
-	for _, p := range t.panes {
-		if p.loading {
-			return true
-		}
-	}
-	return false
-}
-
-func (t dataTab) failed() bool {
-	for _, p := range t.panes {
-		if p.err != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func (m tuiModel) activeData() (dataTab, bool) {
-	if m.dataActive < 0 || m.dataActive >= len(m.data) {
-		return dataTab{}, false
-	}
-	return m.data[m.dataActive], true
-}
+func (m tuiModel) activeData() (dataTab, bool) { return m.runtime().ActiveData() }
 
 func (m tuiModel) refreshData() (tea.Model, tea.Cmd) {
 	tab, ok := m.activeData()
 	if !ok {
 		return m, nil
 	}
-	c := m.tenantClient(tab.tsg)
+	c := m.tenantClient(tab.TSG)
 	if c == nil {
-		m.status = "could not reach " + m.tenantName(tab.tsg)
+		m.status = "could not reach " + m.tenantName(tab.TSG)
 		return m, nil
 	}
-	for i := range tab.panes {
-		tab.panes[i].loading = true
-		tab.panes[i].err = ""
-	}
-	m.data[m.dataActive] = tab
+	tab, _ = m.runtime().RefreshData()
 	return m, tea.Batch(append(m.loadTab(tab, c), m.spinner.Tick)...)
 }
 
@@ -227,11 +118,7 @@ func (m tuiModel) closeDataTab() tuiModel {
 	if _, ok := m.activeData(); !ok {
 		return m
 	}
-	m.data = append(m.data[:m.dataActive], m.data[m.dataActive+1:]...)
-	if m.dataActive >= len(m.data) {
-		m.dataActive = len(m.data) - 1
-	}
-	if len(m.data) == 0 {
+	if m.runtime().CloseData() == 0 {
 		m.phase = phasePicking
 	}
 	return m
@@ -276,6 +163,10 @@ func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
 		if !m.dataFilterOn {
 			return m.startCompare()
 		}
+	case writeKey:
+		if !m.dataFilterOn {
+			return m.startWrite()
+		}
 	case exportKey:
 		return m.exportDataPage()
 	}
@@ -295,28 +186,28 @@ func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	at := tab.Scroll
 	switch key {
 	case "down", "j":
-		tab.scroll++
+		at++
 	case "up", "k":
-		tab.scroll--
+		at--
 	case "pgdown", " ", "space":
-		tab.scroll += max(1, rows-1)
+		at += max(1, rows-1)
 	case "pgup":
-		tab.scroll -= max(1, rows-1)
+		at -= max(1, rows-1)
 	case "home", "g":
-		tab.scroll = 0
+		at = 0
 	case "end", "G":
-		tab.scroll = len(page.lines)
+		at = len(page.lines)
 	case "alt+down", "]", "tab":
-		tab.scroll = nextHead(page.heads, tab.scroll, 1)
+		at = nextHead(page.heads, at, 1)
 	case "alt+up", "[", "shift+tab":
-		tab.scroll = nextHead(page.heads, tab.scroll, -1)
+		at = nextHead(page.heads, at, -1)
 	default:
 		return m, nil
 	}
-	tab.scroll = clampScroll(tab.scroll, len(page.lines), rows)
-	m.data[m.dataActive] = tab
+	m.runtime().ScrollData(clampScroll(at, len(page.lines), rows))
 	return m, nil
 }
 
@@ -419,21 +310,21 @@ func (m tuiModel) dataPage(tab dataTab) dataPage {
 	width, _ := m.dataPaneSize()
 	var p dataPage
 
-	for _, pane := range tab.panes {
-		p.views = append(p.views, pageView{at: len(p.lines), name: pane.view})
+	for _, pane := range tab.Panes {
+		p.views = append(p.views, pageView{at: len(p.lines), name: pane.View})
 		switch {
-		case pane.loading:
-			p.head(ui.StyleElement.Render("── "+pane.view+" ") +
+		case pane.Loading:
+			p.head(ui.StyleElement.Render("── "+pane.View+" ") +
 				ui.StyleDim.Render(fmt.Sprintf("%s reading", m.spinner.View())))
 			continue
-		case pane.err != "":
-			p.head(ui.StyleElement.Render("── " + pane.view + " "))
-			p.lines = append(p.lines, "  "+ui.StyleErr.Render(ui.Truncate(pane.err, width-2)))
+		case pane.Err != "":
+			p.head(ui.StyleElement.Render("── " + pane.View + " "))
+			p.lines = append(p.lines, "  "+ui.StyleErr.Render(ui.Truncate(pane.Err, width-2)))
 			continue
 		}
 
-		p.head(ui.StyleElement.Render("── " + pane.view + " "))
-		for _, sec := range pane.rendered.Sections {
+		p.head(ui.StyleElement.Render("── " + pane.View + " "))
+		for _, sec := range pane.Rendered.Sections {
 			p.head("  " + ui.StyleCmd.Render(sec.Title))
 			for _, row := range sec.Rows {
 				if row.Value == "" {
@@ -449,10 +340,10 @@ func (m tuiModel) dataPage(tab dataTab) dataPage {
 				p.lines = append(p.lines, "  "+ui.StyleDim.Render(fmt.Sprintf("… %d more not shown", sec.Truncated)))
 			}
 		}
-		for _, e := range pane.rendered.Errs {
+		for _, e := range pane.Rendered.Errs {
 			p.lines = append(p.lines, "  "+ui.StyleWarn.Render(ui.Truncate(e, width-2)))
 		}
-		m.comparePane(&p, tab, pane.view, width)
+		m.comparePane(&p, tab, pane.View, width)
 	}
 	return p
 }
@@ -461,13 +352,13 @@ func (m tuiModel) viewAtScroll(tab dataTab) string {
 	page := m.dataPage(tab)
 	name := ""
 	for _, v := range page.views {
-		if v.at > tab.scroll {
+		if v.at > tab.Scroll {
 			break
 		}
 		name = v.name
 	}
-	if name == "" && len(tab.panes) > 0 {
-		name = tab.panes[0].view
+	if name == "" && len(tab.Panes) > 0 {
+		name = tab.Panes[0].View
 	}
 	return name
 }
@@ -535,25 +426,25 @@ func (m tuiModel) viewData() string {
 		return b.String()
 	}
 
-	where := tab.name
-	if tab.site != "" {
-		where += ui.StyleDim.Render(" · " + tab.site)
+	where := tab.Name
+	if tab.Site != "" {
+		where += ui.StyleDim.Render(" · " + tab.Site)
 	}
 	waiting := 0
-	for _, pane := range tab.panes {
-		if pane.loading {
+	for _, pane := range tab.Panes {
+		if pane.Loading {
 			waiting++
 		}
 	}
 	state := ""
 	switch {
 	case waiting > 0:
-		state = fmt.Sprintf(" · reading %d of %d", len(tab.panes)-waiting+1, len(tab.panes))
-	case !tab.at.IsZero():
-		state = " · " + ui.Age(time.Since(tab.at)) + " old"
+		state = fmt.Sprintf(" · reading %d of %d", len(tab.Panes)-waiting+1, len(tab.Panes))
+	case !tab.At.IsZero():
+		state = " · " + ui.Age(time.Since(tab.At)) + " old"
 	}
 	b.WriteString(ui.StyleElement.Render(where) +
-		ui.StyleDim.Render(fmt.Sprintf("  %d views%s", len(tab.panes), state)) + "\n")
+		ui.StyleDim.Render(fmt.Sprintf("  %d views%s", len(tab.Panes), state)) + "\n")
 
 	if m.dataFilterOn || m.dataFilter.Value() != "" {
 		line := m.dataFilter.View()
@@ -570,7 +461,7 @@ func (m tuiModel) viewData() string {
 	page := m.visiblePage(tab)
 	lines := page.lines
 	_, rows := m.dataPaneSize()
-	at := clampScroll(tab.scroll, len(lines), rows)
+	at := clampScroll(tab.Scroll, len(lines), rows)
 	for i := 0; i < rows; i++ {
 		if at+i < len(lines) {
 			b.WriteString(lines[at+i])
@@ -591,7 +482,7 @@ func (m tuiModel) viewData() string {
 		status = scrolled + status
 	}
 	hint := "alt+↑↓ next heading · ↑↓ scroll · / filter · r refresh · c CLI check · " +
-		exportKeyHint + " · " + editKeyHint + " · alt+←→/hl tab · alt+k close · ctrl+] elements"
+		writeKeyHint + " · " + exportKeyHint + " · " + editKeyHint + " · alt+←→/hl tab · alt+k close · ctrl+] elements"
 	if m.dataFilterOn {
 		hint = "type to narrow the page · ↑↓ scroll · enter apply · esc clear"
 	}
@@ -626,8 +517,7 @@ func (m tuiModel) onDataFilterKey(msg tea.KeyPressMsg, key string) (tea.Model, t
 	m.dataFilter, cmd = m.dataFilter.Update(msg)
 	if tab, ok := m.activeData(); ok {
 		_, rows := m.dataPaneSize()
-		tab.scroll = clampScroll(tab.scroll, len(m.visiblePage(tab).lines), rows)
-		m.data[m.dataActive] = tab
+		m.runtime().ScrollData(clampScroll(tab.Scroll, len(m.visiblePage(tab).lines), rows))
 	}
 	return m, cmd, true
 }

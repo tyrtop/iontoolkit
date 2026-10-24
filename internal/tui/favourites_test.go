@@ -13,10 +13,10 @@ func favModel(t *testing.T) (tuiModel, *recConn) {
 	t.Helper()
 	m := historyModel(t)
 	m.phase = phaseSession
-	t.Cleanup(m.sessions.CloseAll)
+	t.Cleanup(m.sessions().CloseAll)
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 	return m, conn
@@ -32,7 +32,7 @@ func altKey(r rune) tea.Key { return tea.Key{Code: r, Mod: tea.ModAlt} }
 
 func TestAltDigitInsertsAFavourite(t *testing.T) {
 	m, conn := favModel(t)
-	if err := m.cmds.SetFavourite(1, "dump device status", "ion 1200"); err != nil {
+	if err := m.runtime().SetFavourite(1, "dump device status", "ion 1200"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,7 +59,7 @@ func TestAnEmptySlotSaysHowToFillIt(t *testing.T) {
 
 func TestAFavouriteFromAnotherModelIsFlagged(t *testing.T) {
 	m, conn := favModel(t)
-	if err := m.cmds.SetFavourite(2, "dump interface status 8", "ion 3200"); err != nil {
+	if err := m.runtime().SetFavourite(2, "dump interface status 8", "ion 3200"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -88,7 +88,7 @@ func TestAltFSavesThePromptLine(t *testing.T) {
 	if m.favPick {
 		t.Error("the picker stayed open after saving")
 	}
-	f, ok := m.cmds.Favourite(4)
+	f, ok := m.runtime().Favourite(4)
 	if !ok || f.Command != "dump vpn count" {
 		t.Fatalf("slot 4 = %+v, %v, want the line that was typed", f, ok)
 	}
@@ -99,7 +99,7 @@ func TestAltFSavesThePromptLine(t *testing.T) {
 		t.Fatal("saving queued no write")
 	}
 	runSave(t, cmd)
-	saved, err := m.store.Commands()
+	saved, err := m.store().Commands()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,10 +110,10 @@ func TestAltFSavesThePromptLine(t *testing.T) {
 
 func TestThePickerListsAndClearsSlots(t *testing.T) {
 	m, _ := favModel(t)
-	if err := m.cmds.SetFavourite(1, "dump device status", "ion 1200"); err != nil {
+	if err := m.runtime().SetFavourite(1, "dump device status", "ion 1200"); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.cmds.SetFavourite(9, "dump interface status 8", "ion 3200"); err != nil {
+	if err := m.runtime().SetFavourite(9, "dump interface status 8", "ion 3200"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -127,7 +127,7 @@ func TestThePickerListsAndClearsSlots(t *testing.T) {
 
 	cleared, cmd := m.onFavouriteKey("ctrl+d")
 	after := cleared.(tuiModel)
-	if _, ok := after.cmds.Favourite(1); ok {
+	if _, ok := after.runtime().Favourite(1); ok {
 		t.Error("ctrl+d left the slot filled")
 	}
 	if cmd == nil {
@@ -167,7 +167,7 @@ func TestTheFavouriteFormSaves(t *testing.T) {
 	next, cmd := m.submitForm()
 	m = next.(tuiModel)
 
-	f, ok := m.cmds.Favourite(7)
+	f, ok := m.runtime().Favourite(7)
 	if !ok || f.Command != "dump spoke-ha status" {
 		t.Fatalf("slot 7 = %+v, %v, want what the form said", f, ok)
 	}
@@ -189,10 +189,10 @@ func TestTheFavouriteFormSaves(t *testing.T) {
 func TestNumericTabSelectionIsRetired(t *testing.T) {
 	m, _ := favModel(t)
 	conn2 := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn2}, "2", "S0100-RTR-02", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn2}, "2", "S0100-RTR-02", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
-	m.sessions.Select(1)
+	m.sessions().Select(1)
 
 	before := m.currentTab()
 	m, _ = pressSessionKey(t, m, altKey('1'))
@@ -207,19 +207,19 @@ func TestNumericTabSelectionIsRetired(t *testing.T) {
 
 func TestFavouriteSlotsSurviveARestart(t *testing.T) {
 	m, _ := favModel(t)
-	if err := m.cmds.SetFavourite(5, "dump device status", "ion 1200"); err != nil {
+	if err := m.runtime().SetFavourite(5, "dump device status", "ion 1200"); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.store.SaveCommands(m.cmds); err != nil {
+	if err := m.runtime().SaveCommands(); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := m.store.Config()
+	cfg, err := m.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted := newTUIModel(context.Background(), m.store, cfg)
-	f, ok := restarted.cmds.Favourite(5)
+	restarted := newTUIModel(context.Background(), m.store(), cfg)
+	f, ok := restarted.runtime().Favourite(5)
 	if !ok || f.Command != "dump device status" {
 		t.Errorf("slot 5 after a restart = %+v, %v", f, ok)
 	}
@@ -245,7 +245,7 @@ func TestThePickerSaysHowToAddAndWhatWillBeAdded(t *testing.T) {
 	m.height = m.usableHeight()
 
 	conn.feed("store-0003-rtr-01# dump interface status all")
-	s := m.sessions.Active()
+	s := m.sessions().Active()
 	waitForTUI(t, func() bool { return s.Line() == "dump interface status all" })
 
 	next, _ := m.openFavourites()
@@ -266,14 +266,14 @@ func TestSavingAFavouriteTakesTheLineTheDeviceShows(t *testing.T) {
 	m, conn := favModel(t)
 
 	conn.feed("store-0003-rtr-01# dump interface status all")
-	s := m.sessions.Active()
+	s := m.sessions().Active()
 	waitForTUI(t, func() bool { return s.Line() == "dump interface status all" })
 
 	next, _ := m.openFavourites()
 	mm, _ := next.(tuiModel).Update(tea.KeyPressMsg(tea.Key{Code: '3', Text: "3"}))
 	m = mm.(tuiModel)
 
-	f, ok := m.cmds.Favourite(3)
+	f, ok := m.runtime().Favourite(3)
 	if !ok {
 		t.Fatalf("slot 3 was not saved: %q", m.status)
 	}

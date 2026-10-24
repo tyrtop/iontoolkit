@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"tyrtop.com/iontk/internal/config"
-	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/saseauth"
 	"tyrtop.com/iontk/internal/ui"
@@ -22,15 +21,10 @@ func signInModel(t *testing.T, tenant config.Tenant) tuiModel {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
 	cfg := &config.Config{Tenants: []config.Tenant{tenant}, LastTenant: tenant.Name}
-	return tuiModel{
-		cfg:       cfg,
-		store:     st,
-		tenant:    tenant,
-		hasTenant: true,
-		selected:  map[string]bool{},
-		width:     80,
-		height:    24,
-	}
+	return withWorkspace(withStore(tuiModel{
+		width:  80,
+		height: 24,
+	}, st, cfg), tenant, true, "", authBrowser)
 }
 
 func menuLabels(m tuiModel) []string {
@@ -74,7 +68,7 @@ func TestBrowserTenantIsSavedWithoutAClientSecret(t *testing.T) {
 		t.Fatalf("status = %q, want the form to submit cleanly", m.status)
 	}
 
-	saved, ok := m.cfg.Tenant("Acme Co")
+	saved, ok := m.cfg().Tenant("Acme Co")
 	if !ok {
 		t.Fatal("tenant was not saved")
 	}
@@ -84,7 +78,7 @@ func TestBrowserTenantIsSavedWithoutAClientSecret(t *testing.T) {
 	if saved.ClientID != "" {
 		t.Errorf("ClientID = %q, want empty for a browser tenant", saved.ClientID)
 	}
-	if v, err := m.store.Secrets.Get(config.ClientSecretKey("1984021017")); err == nil && v != "" {
+	if v, err := m.store().Secrets.Get(config.ClientSecretKey("1984021017")); err == nil && v != "" {
 		t.Errorf("a client secret was stored for a browser tenant: %q", v)
 	}
 }
@@ -138,14 +132,14 @@ func TestSignedInLandsOnAConfirmation(t *testing.T) {
 	if got.phase != phaseSignedIn {
 		t.Fatalf("phase = %v, want phaseSignedIn so the result is actually visible", got.phase)
 	}
-	if got.client == nil {
+	if got.pool().Get(got.tenant().TSGID) == nil {
 		t.Error("the verified client was discarded, so the next step would authenticate again")
 	}
-	if got.ident.Name != "Ben Hall" {
-		t.Errorf("ident.Name = %q, want it kept for the confirmation", got.ident.Name)
+	if got.rt.Identity().Name != "Ben Hall" {
+		t.Errorf("ident.Name = %q, want it kept for the confirmation", got.rt.Identity().Name)
 	}
-	if got.cacheState != cacheUpdating {
-		t.Errorf("cacheState = %v, want elements fetched behind the confirmation", got.cacheState)
+	if got.cacheState() != cacheUpdating {
+		t.Errorf("cacheState = %v, want elements fetched behind the confirmation", got.cacheState())
 	}
 	if cmd == nil {
 		t.Error("no command returned, want the element fetch started")
@@ -158,7 +152,7 @@ func TestSignInInTheMiddleOfAnActionSkipsTheConfirmation(t *testing.T) {
 		m.phase = phaseSignIn
 		m.signInResume = true
 		m.spinner = ui.NewSpinner("")
-		m.selected = map[string]bool{}
+		m.runtime().ForgetSelection()
 
 		mm, _ := m.Update(signedInMsg{client: liveClient()})
 		got := mm.(tuiModel)
@@ -174,8 +168,8 @@ func TestSignInInTheMiddleOfAnActionSkipsTheConfirmation(t *testing.T) {
 		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
 		m.phase = phaseSignIn
 		m.spinner = ui.NewSpinner("")
-		m.selected = map[string]bool{}
-		m.sessions = ionterm.NewManager()
+		m.runtime().ForgetSelection()
+		m.runtime().ResetSessions()
 		m.resumeSessions = []sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}}
 		setTestClient(&m, liveClient())
 
@@ -211,7 +205,7 @@ func TestDismissingTheConfirmation(t *testing.T) {
 			m.phase = phaseSignedIn
 			m.signInResume = tt.resume
 			m.spinner = ui.NewSpinner("")
-			m.selected = map[string]bool{}
+			m.runtime().ForgetSelection()
 
 			mm, _ := m.onKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 			got := mm.(tuiModel)
@@ -233,15 +227,14 @@ func TestSignedInConfirmationReportsWhatWasVerified(t *testing.T) {
 	m.phase = phaseSignedIn
 	m.spinner = ui.NewSpinner("")
 	m.width, m.height = 100, 30
-	m.ident = saseauth.Identity{
+	m.runtime().SetIdentity(saseauth.Identity{
 		Name:           "Ben Hall",
 		Email:          "ben@example.test",
 		TSG:            "1984021017",
 		SessionExpires: time.Now().Add(8 * time.Hour),
-	}
-	m.profile = api.Profile{Region: "hood", Roles: []string{"tenant_super"}}
-	m.tokenTTL = 899 * time.Second
-	m.cacheState, m.cacheCount, m.cacheAt = cacheUpdated, 5613, time.Now()
+	})
+	m.runtime().SignedIn(m.rt.Identity(), api.Profile{Region: "hood", Roles: []string{"tenant_super"}}, 899*time.Second)
+	m = withFleet(m, cacheUpdated, 5613, time.Now())
 
 	out := plain(m.viewSignedIn())
 	for _, want := range []string{
@@ -265,7 +258,7 @@ func TestSignedInConfirmationWhenTheTokenIsSilentAboutExpiry(t *testing.T) {
 	m.phase = phaseSignedIn
 	m.spinner = ui.NewSpinner("")
 	m.width, m.height = 100, 30
-	m.ident = saseauth.Identity{Name: "Ben Hall"}
+	m.runtime().SetIdentity(saseauth.Identity{Name: "Ben Hall"})
 
 	out := plain(m.viewSignedIn())
 	if !strings.Contains(out, "not stated") {
@@ -315,7 +308,7 @@ func TestEditingATenantKeepsItsRefreshToken(t *testing.T) {
 
 	tenant := config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser}
 	m := signInModel(t, tenant)
-	m.store = st
+	m.runtime().UseConfig(st, m.cfg())
 
 	mm, _ := m.openEditTenantForm(tenant)
 	m = mm.(tuiModel)
@@ -332,23 +325,6 @@ func TestEditingATenantKeepsItsRefreshToken(t *testing.T) {
 	}
 	if v, _ := st.Secrets.Get(config.RefreshTokenKey("1")); v != "" {
 		t.Errorf("refresh token still under the old tsg: %q", v)
-	}
-}
-
-func TestForgettingATenantDropsItsRefreshToken(t *testing.T) {
-	root := t.TempDir()
-	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
-	tenant := config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser}
-	if err := st.Secrets.Set(config.RefreshTokenKey("1"), "rt"); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	cfg := &config.Config{Tenants: []config.Tenant{tenant}}
-	if err := forgetTenant(st, cfg, tenant); err != nil {
-		t.Fatalf("forgetTenant() error = %v", err)
-	}
-	if v, _ := st.Secrets.Get(config.RefreshTokenKey("1")); v != "" {
-		t.Errorf("refresh token survived forgetTenant: %q", v)
 	}
 }
 
@@ -395,7 +371,7 @@ func TestMenuKeybinds(t *testing.T) {
 	t.Run("alt+t with nothing to reattach says so", func(t *testing.T) {
 		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1"})
 		m.phase = phaseMenu
-		m.sessions = ionterm.NewManager()
+		m.runtime().ResetSessions()
 		mm, _ := m.onMenuKey("alt+t")
 		got := mm.(tuiModel)
 		if !strings.Contains(got.status, "nothing to reattach") {
@@ -409,24 +385,24 @@ func TestMenuKeybinds(t *testing.T) {
 	t.Run("alt+t restores the elements list behind tab 1", func(t *testing.T) {
 		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1"})
 		m.phase = phaseMenu
-		m.sessions = ionterm.NewManager()
-		m.selected = map[string]bool{}
+		m.runtime().ResetSessions()
+		m.runtime().ForgetSelection()
 		m.table = newElementTable()
 		m.filter = newField("", "", false).input
 		m.width, m.height = 100, 30
 
-		m.cfg = &config.Config{Tenants: []config.Tenant{
+		m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 			{Name: "Acme Co", TSGID: "1", Added: true},
-		}}
+		}})
 		els := []api.Element{{ID: "e1", Name: "s0100-rtr-01"}, {ID: "e2", Name: "s0100-rtr-02"}}
-		if err := m.store.SaveCache(&config.ElementCache{TSGID: "1", FetchedAt: time.Now(), Elements: els}); err != nil {
+		if err := m.store().SaveCache(&config.ElementCache{TSGID: "1", FetchedAt: time.Now(), Elements: els}); err != nil {
 			t.Fatalf("SaveCache() error = %v", err)
 		}
 
 		mm, _ := m.onMenuKey("alt+t")
 		got := mm.(tuiModel)
-		if len(got.all) != len(els) {
-			t.Errorf("loaded %d elements, want %d restored from cache", len(got.all), len(els))
+		if len(got.rows()) != len(els) {
+			t.Errorf("loaded %d elements, want %d restored from cache", len(got.rows()), len(els))
 		}
 	})
 }
@@ -436,8 +412,8 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
 		m.phase = phaseSession
 		m.spinner = ui.NewSpinner("")
-		m.selected = map[string]bool{}
-		m.sessions = ionterm.NewManager()
+		m.runtime().ForgetSelection()
+		m.runtime().ResetSessions()
 		m.lastTargets = []sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}, {eid: "e2", name: "s0100-rtr-02", tsg: "1"}}
 
 		mm, cmd := m.Update(sessionErrMsg{
@@ -459,7 +435,7 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 	t.Run("an ordinary dial failure is left alone", func(t *testing.T) {
 		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
 		m.phase = phaseSession
-		m.sessions = ionterm.NewManager()
+		m.runtime().ResetSessions()
 		m.lastTargets = []sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}}
 
 		mm, _ := m.Update(sessionErrMsg{
@@ -479,7 +455,7 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
 		m.phase = phaseLoading
 		m.spinner = ui.NewSpinner("")
-		m.selected = map[string]bool{}
+		m.runtime().ForgetSelection()
 
 		mm, cmd := m.Update(elementsErrMsg("status 401 Unauthorized: "))
 		got := mm.(tuiModel)
@@ -498,10 +474,10 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
 		m.phase = phasePicking
 		m.spinner = ui.NewSpinner("")
-		m.selected = map[string]bool{}
-		m.sessions = ionterm.NewManager()
+		m.runtime().ForgetSelection()
+		m.runtime().ResetSessions()
 		setTestClient(&m, liveClient())
-		m.tokenDead = "sign-in expired"
+		m.runtime().TokenDied("sign-in expired", false)
 
 		mm, cmd := m.openSessions([]sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}})
 		got := mm.(tuiModel)
@@ -523,10 +499,10 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 		m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthServiceAccount})
 		m.phase = phasePicking
 		m.spinner = ui.NewSpinner("")
-		m.selected = map[string]bool{}
-		m.sessions = ionterm.NewManager()
+		m.runtime().ForgetSelection()
+		m.runtime().ResetSessions()
 		setTestClient(&m, liveClient())
-		m.tokenDead = "sign-in expired"
+		m.runtime().TokenDied("sign-in expired", false)
 
 		mm, _ := m.openSessions([]sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}})
 		got := mm.(tuiModel)

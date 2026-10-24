@@ -37,7 +37,7 @@ const wheelStep = 3
 func (m tuiModel) onWheel(up bool) (tea.Model, tea.Cmd) {
 	switch m.phase {
 	case phaseSession:
-		s := m.sessions.Active()
+		s := m.sessions().Active()
 		if s == nil {
 			return m, nil
 		}

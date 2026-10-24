@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"tyrtop.com/iontk/internal/runtime"
 
 	tea "charm.land/bubbletea/v2"
+	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
 )
 
@@ -31,12 +33,12 @@ tenants:
 func TestRichDataModeLoadsEveryViewOntoOnePage(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
 	next, cmd := m.openDataTabs([]sessionTarget{
-		{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID},
+		{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID},
 	})
 	m = next.(tuiModel)
 	if cmd == nil {
@@ -45,25 +47,25 @@ func TestRichDataModeLoadsEveryViewOntoOnePage(t *testing.T) {
 	if m.phase != phaseData {
 		t.Fatalf("phase = %v, want the data pane", m.phase)
 	}
-	if len(m.data) != 1 {
-		t.Fatalf("tabs = %+v, want one", m.data)
+	if len(m.dataTabs()) != 1 {
+		t.Fatalf("tabs = %+v, want one", m.dataTabs())
 	}
-	if got, want := len(m.data[0].panes), len(m.viewNames()); got != want {
+	if got, want := len(m.dataTabs()[0].Panes), len(m.viewNames()); got != want {
 		t.Fatalf("%d panes, want %d — one per view", got, want)
 	}
-	if !m.data[0].loading() {
+	if !m.dataTabs()[0].Loading() {
 		t.Error("the tab is not loading, so nothing was queued")
 	}
-	if m.data[0].siteID == "" || m.data[0].cluster == "" {
-		t.Errorf("tab = %+v, want the site and cluster ids filled in", m.data[0])
+	if m.dataTabs()[0].SiteID == "" || m.dataTabs()[0].Cluster == "" {
+		t.Errorf("tab = %+v, want the site and cluster ids filled in", m.dataTabs()[0])
 	}
 
 	m = runDataLoads(t, m, cmd)
-	if m.data[0].loading() {
+	if m.dataTabs()[0].Loading() {
 		t.Fatal("still loading after every fetch answered")
 	}
 
-	page := plain(m.dataPage(m.data[0]).String())
+	page := plain(m.dataPage(m.dataTabs()[0]).String())
 	for _, want := range []string{
 		"Overview", "Device", "ion 1200", "SPOKE",
 		"Controller", "Rebooted", "2026-10-01",
@@ -82,9 +84,9 @@ func TestRichDataModeLoadsEveryViewOntoOnePage(t *testing.T) {
 			t.Errorf("the pane is missing %q:\n%s", want, got)
 		}
 	}
-	for _, pane := range m.data[0].panes {
-		if pane.err != "" {
-			t.Errorf("view %s failed: %s", pane.view, pane.err)
+	for _, pane := range m.dataTabs()[0].Panes {
+		if pane.Err != "" {
+			t.Errorf("view %s failed: %s", pane.View, pane.Err)
 		}
 	}
 }
@@ -92,14 +94,14 @@ func TestRichDataModeLoadsEveryViewOntoOnePage(t *testing.T) {
 func TestInterfacesShowTheMACFromTheStatus(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	port := tableRow(t, paneFor(t, m.data[0], "Interfaces"), "1")
+	port := tableRow(t, paneFor(t, m.dataTabs()[0], "Interfaces"), "1")
 	joined := strings.Join(port, " | ")
 	mac := ""
 	for _, cell := range port {
@@ -118,19 +120,19 @@ func TestInterfacesShowTheMACFromTheStatus(t *testing.T) {
 func TestThePageTiesPortsToCircuits(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	port := tableRow(t, paneFor(t, m.data[0], "Interfaces"), "1")
+	port := tableRow(t, paneFor(t, m.dataTabs()[0], "Interfaces"), "1")
 	if !strings.Contains(strings.Join(port, " "), "ISP 1") {
 		t.Errorf("port 1 does not name its circuit: %q", port)
 	}
 
-	circuit := tableRow(t, paneFor(t, m.data[0], "Circuits"), "ISP 1")
+	circuit := tableRow(t, paneFor(t, m.dataTabs()[0], "Circuits"), "ISP 1")
 	joined := strings.Join(circuit, " | ")
 	for _, want := range []string{
 		"Circuit to ISP 1",
@@ -151,15 +153,15 @@ func TestThePageTiesPortsToCircuits(t *testing.T) {
 func TestAltUpDownJumpsBetweenHeadings(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.height = 20
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	page := m.dataPage(m.data[0])
+	page := m.dataPage(m.dataTabs()[0])
 	if len(page.heads) < len(m.viewNames()) {
 		t.Fatalf("%d headings on the page, want at least one per view", len(page.heads))
 	}
@@ -167,24 +169,24 @@ func TestAltUpDownJumpsBetweenHeadings(t *testing.T) {
 
 	nx, _ := m.onDataKey("alt+down")
 	m = nx.(tuiModel)
-	if got, want := m.data[0].scroll, clampScroll(page.heads[0], len(page.lines), rows); got != want {
+	if got, want := m.dataTabs()[0].Scroll, clampScroll(page.heads[0], len(page.lines), rows); got != want {
 		t.Fatalf("one alt+down put the pane at %d, want the first heading at %d", got, want)
 	}
 	nx, _ = m.onDataKey("alt+down")
 	m = nx.(tuiModel)
-	if got, want := m.data[0].scroll, clampScroll(page.heads[1], len(page.lines), rows); got != want {
+	if got, want := m.dataTabs()[0].Scroll, clampScroll(page.heads[1], len(page.lines), rows); got != want {
 		t.Fatalf("two alt+downs put the pane at %d, want the second heading at %d", got, want)
 	}
 
 	nx, _ = m.onDataKey("alt+up")
 	m = nx.(tuiModel)
-	if got, want := m.data[0].scroll, clampScroll(page.heads[0], len(page.lines), rows); got != want {
+	if got, want := m.dataTabs()[0].Scroll, clampScroll(page.heads[0], len(page.lines), rows); got != want {
 		t.Errorf("alt+up put the pane at %d, want back at %d", got, want)
 	}
 
-	m.data[0].scroll = len(page.lines)
+	m.runtime().ScrollData(len(page.lines))
 	nx, _ = m.onDataKey("alt+down")
-	if got := nx.(tuiModel).data[0].scroll; got == 0 {
+	if got := nx.(tuiModel).dataTabs()[0].Scroll; got == 0 {
 		t.Error("alt+down wrapped to the top from the end of the page")
 	}
 }
@@ -192,24 +194,24 @@ func TestAltUpDownJumpsBetweenHeadings(t *testing.T) {
 func TestRefreshKeepsTheScroll(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	m.data[0].scroll = 12
+	m.runtime().ScrollData(12)
 	next, cmd = m.onDataKey("r")
 	m = next.(tuiModel)
-	if !m.data[0].loading() {
+	if !m.dataTabs()[0].Loading() {
 		t.Fatal("r did not start a refetch")
 	}
-	if got := m.data[0].scroll; got != 12 {
+	if got := m.dataTabs()[0].Scroll; got != 12 {
 		t.Errorf("scroll = %d after r, want it kept at 12", got)
 	}
 	m = runDataLoads(t, m, cmd)
-	if got := m.data[0].scroll; got != 12 {
+	if got := m.dataTabs()[0].Scroll; got != 12 {
 		t.Errorf("scroll = %d once the refetch landed, want it kept", got)
 	}
 }
@@ -233,8 +235,8 @@ views:
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	Views = path
-	t.Cleanup(func() { Views = "" })
+	app.ViewsFolder = path
+	t.Cleanup(func() { app.ViewsFolder = "" })
 
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	names := m.viewNames()
@@ -243,10 +245,10 @@ views:
 	}
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	page := plain(m.dataPage(m.data[0]).String())
+	page := plain(m.dataPage(m.dataTabs()[0]).String())
 	for _, want := range []string{"Overview", "Ports only", "Just the ports", "NAME", "MTU", "1500"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page is missing %q:\n%s", want, page)
@@ -257,22 +259,22 @@ views:
 func TestReopeningAnElementReusesItsTab(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	target := []sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}}
+	target := []sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}}
 
 	next, cmd := m.openDataTabs(target)
 	m = runDataLoads(t, next.(tuiModel), cmd)
-	m.data[0].scroll = 7
+	m.runtime().ScrollData(7)
 
 	next, cmd = m.openDataTabs(target)
 	m = next.(tuiModel)
-	if len(m.data) != 1 {
-		t.Fatalf("%d tabs after reopening the same element, want 1", len(m.data))
+	if len(m.dataTabs()) != 1 {
+		t.Fatalf("%d tabs after reopening the same element, want 1", len(m.dataTabs()))
 	}
-	if got := m.data[0].scroll; got != 7 {
+	if got := m.dataTabs()[0].Scroll; got != 7 {
 		t.Errorf("scroll = %d after reopening, want the place it was at", got)
 	}
 	if cmd == nil {
@@ -280,16 +282,15 @@ func TestReopeningAnElementReusesItsTab(t *testing.T) {
 	}
 
 	other := set.Tenants[0].Elements[1]
-	next, _ = m.openDataTabs([]sessionTarget{{eid: other.ID, name: other.Name, tsg: m.tenant.TSGID}})
-	if got := len(next.(tuiModel).data); got != 2 {
+	next, _ = m.openDataTabs([]sessionTarget{{eid: other.ID, name: other.Name, tsg: m.tenant().TSGID}})
+	if got := len(next.(tuiModel).dataTabs()); got != 2 {
 		t.Errorf("%d tabs for two elements, want 2", got)
 	}
 }
 
 func TestDataTabsJoinTheTabRing(t *testing.T) {
 	m := pickModel(t)
-	m.data = []dataTab{{eid: "1", name: "S0100-RTR-01", tsg: "1"}}
-	m.dataActive = 0
+	m.runtime().SetDataTabs([]dataTab{{EID: "1", Name: "S0100-RTR-01", TSG: "1"}}, 0)
 	m.phase = phaseData
 
 	if got := m.tabCount(); got != 2 {
@@ -304,23 +305,23 @@ func TestDataTabsJoinTheTabRing(t *testing.T) {
 		t.Errorf("phase after alt+left = %v, want the list", got)
 	}
 
-	closed := m.closeDataTab()
-	if len(closed.data) != 0 || closed.phase != phasePicking {
-		t.Errorf("after close: %d tabs, phase %v", len(closed.data), closed.phase)
-	}
-
 	bar := plain(m.tabBar())
 	for _, want := range []string{"elements", "S0100-RTR-01 · data"} {
 		if !strings.Contains(bar, want) {
 			t.Errorf("tab bar missing %q: %q", want, bar)
 		}
 	}
+
+	closed := m.closeDataTab()
+	if len(closed.dataTabs()) != 0 || closed.phase != phasePicking {
+		t.Errorf("after close: %d tabs, phase %v", len(closed.dataTabs()), closed.phase)
+	}
 }
 
 func TestRichDataModeDoesNotAskForADeviceLogin(t *testing.T) {
 	m := pickModel(t)
-	m.mode = modeData
-	if err := m.store.Secrets.Delete(config.IONPassKey("1", "u")); err != nil {
+	m.setMode(modeData)
+	if err := m.store().Secrets.Delete(config.IONPassKey("1", "u")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -333,16 +334,15 @@ func TestRichDataModeDoesNotAskForADeviceLogin(t *testing.T) {
 func TestScrollingAPaneStaysInsideIt(t *testing.T) {
 	m := pickModel(t)
 	m.height = 12
-	m.data = []dataTab{{eid: "1", name: "e", tsg: "1"}}
-	m.dataActive = 0
+	m.runtime().SetDataTabs([]dataTab{{EID: "1", Name: "e", TSG: "1"}}, 0)
 	m.phase = phaseData
 
 	next, _ := m.onDataKey("end")
-	if got := next.(tuiModel).data[0].scroll; got != 0 {
+	if got := next.(tuiModel).dataTabs()[0].Scroll; got != 0 {
 		t.Errorf("scroll = %d with nothing loaded, want 0", got)
 	}
 	next, _ = next.(tuiModel).onDataKey("up")
-	if got := next.(tuiModel).data[0].scroll; got != 0 {
+	if got := next.(tuiModel).dataTabs()[0].Scroll; got != 0 {
 		t.Errorf("scroll = %d after up at the top, want 0", got)
 	}
 }
@@ -350,23 +350,23 @@ func TestScrollingAPaneStaysInsideIt(t *testing.T) {
 func TestABareArrowScrollsTheDataPage(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 	m.phase = phaseData
 	m.height = 12
 
 	next, _ = m.onDataKey("down")
 	down := next.(tuiModel)
-	at := down.data[0].scroll
+	at := down.dataTabs()[0].Scroll
 	if at == 0 {
 		t.Fatal("down did not scroll the page; the wheel has nothing else to arrive as")
 	}
 	next, _ = down.onDataKey("up")
-	if got := next.(tuiModel).data[0].scroll; got >= at {
+	if got := next.(tuiModel).dataTabs()[0].Scroll; got >= at {
 		t.Errorf("scroll = %d after up, want below %d", got, at)
 	}
 
@@ -383,12 +383,12 @@ func paneRows(m tuiModel) int {
 
 func paneFor(t *testing.T, tab dataTab, view string) dataPane {
 	t.Helper()
-	for _, p := range tab.panes {
-		if p.view != view {
+	for _, p := range tab.Panes {
+		if p.View != view {
 			continue
 		}
-		if p.err != "" {
-			t.Fatalf("view %s failed: %s", view, p.err)
+		if p.Err != "" {
+			t.Fatalf("view %s failed: %s", view, p.Err)
 		}
 		return p
 	}
@@ -398,21 +398,21 @@ func paneFor(t *testing.T, tab dataTab, view string) dataPane {
 
 func tableRow(t *testing.T, p dataPane, want string) []string {
 	t.Helper()
-	for _, sec := range p.rendered.Sections {
+	for _, sec := range p.Rendered.Sections {
 		for _, row := range sec.Table {
 			if len(row.Cells) > 0 && row.Cells[0] == want {
 				return row.Cells
 			}
 		}
 	}
-	t.Fatalf("no row starting %q in view %s", want, p.view)
+	t.Fatalf("no row starting %q in view %s", want, p.View)
 	return nil
 }
 
 func columnAt(t *testing.T, p dataPane, header string) int {
 	t.Helper()
 	var headers []string
-	for _, sec := range p.rendered.Sections {
+	for _, sec := range p.Rendered.Sections {
 		for i, h := range sec.Headers {
 			if h == header {
 				return i
@@ -463,8 +463,8 @@ func runDataLoads(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
 
 func TestAltUpDownJumpsTheElementList(t *testing.T) {
 	m := pickModel(t)
-	m.cfg.PageStep = 2
-	m.table.SetCursor(0)
+	m.cfg().PageStep = 2
+	m.moveCursorTo(0)
 
 	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown, Mod: tea.ModAlt}))
 	m = next.(tuiModel)
@@ -477,7 +477,7 @@ func TestAltUpDownJumpsTheElementList(t *testing.T) {
 		t.Errorf("cursor = %d after alt+up, want back at 0", got)
 	}
 
-	m.cfg.PageStep = 0
+	m.cfg().PageStep = 0
 	if got := m.pageStep(); got != DefaultPageStep {
 		t.Errorf("pageStep() = %d with nothing saved, want %d", got, DefaultPageStep)
 	}
@@ -497,7 +497,7 @@ func TestThePageStepSettingCycles(t *testing.T) {
 		t.Fatalf("pageStep() = %d after enter, want it moved on", m.pageStep())
 	}
 
-	cfg, err := m.store.Config()
+	cfg, err := m.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func TestThePageStepSettingCycles(t *testing.T) {
 		t.Errorf("saved step = %d, in-memory %d", cfg.PageStep, m.pageStep())
 	}
 
-	for i := 1; i < len(pageSteps); i++ {
+	for i := 1; i < len(runtime.PageSteps); i++ {
 		nx, _ := m.onGeneralKey("enter")
 		m = nx.(tuiModel)
 	}
@@ -517,18 +517,18 @@ func TestThePageStepSettingCycles(t *testing.T) {
 func TestInterfacesShowTheSecurityZone(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	pane := paneFor(t, m.data[0], "Interfaces")
-	if pane.err != "" {
-		t.Fatalf("the Interfaces view failed: %s", pane.err)
+	pane := paneFor(t, m.dataTabs()[0], "Interfaces")
+	if pane.Err != "" {
+		t.Fatalf("the Interfaces view failed: %s", pane.Err)
 	}
-	for _, e := range pane.rendered.Errs {
+	for _, e := range pane.Rendered.Errs {
 		t.Errorf("a fetch failed: %s", e)
 	}
 
@@ -548,16 +548,16 @@ func TestInterfacesShowTheSecurityZone(t *testing.T) {
 func TestInterfacesSayWhetherAnAddressIsStaticOrDHCP(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
 	m.phase = phasePicking
-	m.mode = modeData
+	m.setMode(modeData)
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	pane := paneFor(t, m.data[0], "Interfaces")
-	if pane.err != "" {
-		t.Fatalf("the Interfaces view failed: %s", pane.err)
+	pane := paneFor(t, m.dataTabs()[0], "Interfaces")
+	if pane.Err != "" {
+		t.Fatalf("the Interfaces view failed: %s", pane.Err)
 	}
 	at := columnAt(t, pane, "CONFIG")
 
@@ -578,15 +578,16 @@ func TestInterfacesSayWhetherAnAddressIsStaticOrDHCP(t *testing.T) {
 
 func TestTheDataPageCanBeFiltered(t *testing.T) {
 	m, set := fixtureTUIWith(t, haFixtureYAML)
-	m.phase, m.mode = phasePicking, modeData
+	m.phase = phasePicking
+	m.setMode(modeData)
 	m.width, m.height = 120, 30
 	m.rebuildRows()
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant.TSGID}})
+	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	whole := len(m.dataPage(m.data[0]).lines)
+	whole := len(m.dataPage(m.dataTabs()[0]).lines)
 	if whole < 20 {
 		t.Fatalf("the page is %d lines, want a long one to filter", whole)
 	}
@@ -604,7 +605,7 @@ func TestTheDataPageCanBeFiltered(t *testing.T) {
 		t.Fatalf("query = %q, want the typing to reach the input", got)
 	}
 
-	page := m.visiblePage(m.data[0])
+	page := m.visiblePage(m.dataTabs()[0])
 	if len(page.lines) >= whole {
 		t.Errorf("%d lines of %d after filtering, want fewer", len(page.lines), whole)
 	}
@@ -636,7 +637,7 @@ func TestTheDataPageCanBeFiltered(t *testing.T) {
 	if mm.(tuiModel).dataFilterOn {
 		t.Error("the filter is still open after backspacing the empty query")
 	}
-	if got := len(m.visiblePage(m.data[0]).lines); got != whole {
+	if got := len(m.visiblePage(m.dataTabs()[0]).lines); got != whole {
 		t.Errorf("%d lines with an empty query, want the whole page of %d", got, whole)
 	}
 }

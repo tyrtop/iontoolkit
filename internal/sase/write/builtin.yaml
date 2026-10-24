@@ -1,0 +1,21 @@
+writes:
+  # no HAR yet shows the portal saving an interface; PUT is a guess
+  - name: interface
+    title: Interface
+    list: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces
+    item: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces/{{ .item.id }}
+    method: PUT
+    label: "{{ .item.name }}{{ with .item.description }} · {{ . }}{{ end }}"
+    match: name
+    fields:
+      - key: description
+        label: Description
+      - key: admin_up
+        label: Admin up
+        type: bool
+      - key: mtu
+        label: MTU
+        type: int
+      - key: tags
+        label: Tags
+        type: list

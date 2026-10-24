@@ -4,32 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"tyrtop.com/iontk/internal/runtime"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/ionterm"
-	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
 )
-
-const (
-	defaultSessionCols = 200
-	defaultSessionRows = 50
-)
-
-type toolkitDialer struct{ c *api.Client }
-
-func (d toolkitDialer) DialToolkit(ctx context.Context, eid string, cols, rows int) (ionterm.Conn, error) {
-	return d.c.DialToolkit(ctx, eid, cols, rows)
-}
-
-func (m tuiModel) dialerFor(c *api.Client) ionterm.Dialer {
-	if app.Fixture != nil {
-		return app.Fixture.Dialer()
-	}
-	return toolkitDialer{c}
-}
 
 type sessionDirtyMsg string
 type sessionOpenedMsg string
@@ -49,9 +30,9 @@ func waitForSession(ch <-chan string) tea.Cmd {
 	}
 }
 
-func openSessionCmd(ctx context.Context, mgr *ionterm.Manager, d ionterm.Dialer, eid, name, tsg string, cols, rows int, creds ionterm.Credentials) tea.Cmd {
+func openSessionCmd(ctx context.Context, rt *runtime.Runtime, eid, name, tsg string) tea.Cmd {
 	return func() tea.Msg {
-		if _, err := mgr.Open(ctx, d, eid, name, cols, rows, creds); err != nil {
+		if _, err := rt.OpenSession(ctx, eid, name, tsg); err != nil {
 			return sessionErrMsg{
 				target: sessionTarget{eid: eid, name: name, tsg: tsg},
 				err:    err.Error(),
@@ -61,16 +42,7 @@ func openSessionCmd(ctx context.Context, mgr *ionterm.Manager, d ionterm.Dialer,
 	}
 }
 
-func (m tuiModel) sessionGeometry() (int, int) {
-	cols, rows := m.cfg.SessionCols, m.cfg.SessionRows
-	if cols <= 0 {
-		cols = defaultSessionCols
-	}
-	if rows <= 0 {
-		rows = defaultSessionRows
-	}
-	return cols, rows
-}
+func (m tuiModel) sessionGeometry() (int, int) { return m.runtime().Geometry() }
 
 func (m tuiModel) paneSize() (int, int) {
 	return max(20, m.width), max(3, m.height-5-m.slashHeight()-m.statsRows())
@@ -88,16 +60,14 @@ func (m tuiModel) openOneSession(t sessionTarget) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	cols, rows := m.sessionGeometry()
 	m.connecting = t.name
 	m.status = ""
 	m.phase = phaseSession
-	reportDialsTo(c, m.dialReports)
 	m.markDialing(t.eid)
 	return m, tea.Batch(
 		m.spinner.Tick,
-		waitForDial(m.dialReports),
-		openSessionCmd(m.ctx, m.sessions, m.dialerFor(c), t.eid, t.name, t.tsg, cols, rows, m.credsFor(t.tsg)),
+		waitForDial(m.runtime().DialReports()),
+		openSessionCmd(m.ctx, m.runtime(), t.eid, t.name, t.tsg),
 	)
 }
 
@@ -125,9 +95,7 @@ func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 		return m.openOneSession(targets[0])
 	}
 
-	cols, rows := m.sessionGeometry()
-
-	cmds := []tea.Cmd{m.spinner.Tick, waitForDial(m.dialReports)}
+	cmds := []tea.Cmd{m.spinner.Tick, waitForDial(m.runtime().DialReports())}
 	var unreachable []string
 	for _, t := range targets {
 		c := m.tenantClient(t.tsg)
@@ -135,10 +103,8 @@ func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 			unreachable = append(unreachable, t.name)
 			continue
 		}
-		reportDialsTo(c, m.dialReports)
 		m.markDialing(t.eid)
-		cmds = append(cmds, openSessionCmd(m.ctx, m.sessions, m.dialerFor(c),
-			t.eid, t.name, t.tsg, cols, rows, m.credsFor(t.tsg)))
+		cmds = append(cmds, openSessionCmd(m.ctx, m.runtime(), t.eid, t.name, t.tsg))
 	}
 	if len(cmds) == 2 {
 		m.status = "could not reach " + strings.Join(unreachable, ", ")
@@ -153,14 +119,14 @@ func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m tuiModel) tabCount() int { return 1 + m.sessions.Count() + len(m.data) }
+func (m tuiModel) tabCount() int { return 1 + m.sessions().Count() + len(m.dataTabs()) }
 
 func (m tuiModel) currentTab() int {
 	switch m.phase {
 	case phaseSession:
-		return 1 + m.sessions.ActiveIndex()
+		return 1 + m.sessions().ActiveIndex()
 	case phaseData:
-		return 1 + m.sessions.Count() + m.dataActive
+		return 1 + m.sessions().Count() + m.dataActive()
 	}
 	return 0
 }
@@ -172,13 +138,13 @@ func (m tuiModel) selectTab(i int) tuiModel {
 		m.phase = phasePicking
 		return m
 	}
-	if i <= m.sessions.Count() {
-		m.sessions.Select(i - 1)
+	if i <= m.sessions().Count() {
+		m.sessions().Select(i - 1)
 		m.phase = phaseSession
 		m.sesScroll = 0
 		return m
 	}
-	m.dataActive = i - 1 - m.sessions.Count()
+	m.runtime().SelectData(i - 1 - m.sessions().Count())
 	m.phase = phaseData
 	return m
 }
@@ -193,17 +159,17 @@ func (m tuiModel) onTabKey(key string) (tuiModel, bool) {
 		if m.phase == phaseData {
 			return m.closeDataTab(), true
 		}
-		if m.sessions.Count() == 0 {
+		if m.sessions().Count() == 0 {
 			return m, true
 		}
 		if key == "alt+w" {
-			if s, ok := m.sessions.Detach(); ok {
+			if s, ok := m.sessions().Detach(); ok {
 				m.status = "detached " + s.Name + " — alt+t to reattach"
 			}
 		} else {
-			m.sessions.CloseActive()
+			m.sessions().CloseActive()
 		}
-		if m.sessions.Count() == 0 {
+		if m.sessions().Count() == 0 {
 			m.phase = phasePicking
 		}
 		return m, true
@@ -239,7 +205,7 @@ func (m tuiModel) onSessionKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		return m.useFavourite(n)
 	}
 
-	s := m.sessions.Active()
+	s := m.sessions().Active()
 	if s == nil {
 		return m, nil
 	}
@@ -303,13 +269,13 @@ func (m tuiModel) onScrollKey(s *ionterm.Session, key string) (tuiModel, bool) {
 }
 
 func (m tuiModel) reopenLastTab() (tea.Model, tea.Cmd) {
-	if _, ok := m.sessions.Reattach(); ok {
+	if _, ok := m.sessions().Reattach(); ok {
 		m.status = ""
 		m.phase = phaseSession
-		return m, waitForSession(m.sessions.Dirty())
+		return m, waitForSession(m.sessions().Dirty())
 	}
 
-	eid, name, ok := m.sessions.LastClosed()
+	eid, name, ok := m.sessions().LastClosed()
 	if !ok {
 		m.status = "nothing to reattach"
 		return m, nil
@@ -318,14 +284,14 @@ func (m tuiModel) reopenLastTab() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) redialActive() (tea.Model, tea.Cmd) {
-	s := m.sessions.Active()
+	s := m.sessions().Active()
 	if s == nil {
 		return m, nil
 	}
 	eid, name := s.ElementID, s.Name
 	tsg := m.tsgForElement(eid)
 	if tsg == "" {
-		tsg = m.tenant.TSGID
+		tsg = m.tenant().TSGID
 	}
 
 	m.status = ""
@@ -345,7 +311,7 @@ func (m tuiModel) onSessionOpened(eid string) tuiModel {
 	if m.redialing == eid {
 		m.redialing = ""
 		m.status = ""
-		m.sessions.CloseDeadOn(eid)
+		m.sessions().CloseDeadOn(eid)
 		m.sesScroll = 0
 	}
 	m.rebuildRows()
@@ -358,8 +324,8 @@ func (m tuiModel) tabBar() string {
 		return ui.StyleTab(kind, ring, nth, ring == cur).Render(label)
 	}
 
-	parts := []string{render(ui.TabList, 0, 0, fmt.Sprintf(" elements (%s) ", m.mode))}
-	for i, s := range m.sessions.All() {
+	parts := []string{render(ui.TabList, 0, 0, fmt.Sprintf(" elements (%s) ", m.mode()))}
+	for i, s := range m.sessions().All() {
 		mark := ""
 		switch {
 		case s.Err() != nil:
@@ -369,16 +335,16 @@ func (m tuiModel) tabBar() string {
 		}
 		parts = append(parts, render(ui.TabShell, i+1, i, fmt.Sprintf(" %s%s ", mark, s.Name)))
 	}
-	for i, t := range m.data {
-		n := 1 + m.sessions.Count() + i
+	for i, t := range m.dataTabs() {
+		n := 1 + m.sessions().Count() + i
 		mark := ""
-		if t.failed() {
+		if t.Failed() {
 			mark = ui.MarkCross.String() + " "
 		}
-		parts = append(parts, render(ui.TabData, n, i, fmt.Sprintf(" %s%s · data ", mark, t.name)))
+		parts = append(parts, render(ui.TabData, n, i, fmt.Sprintf(" %s%s · data ", mark, t.Name)))
 	}
 	bar := strings.Join(parts, " ")
-	if n := m.sessions.DetachedCount(); n > 0 {
+	if n := m.sessions().DetachedCount(); n > 0 {
 		bar += ui.StyleDim.Render(fmt.Sprintf("  +%d detached", n))
 	}
 	return bar
@@ -389,7 +355,7 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 	b.WriteString(m.tabBar() + "\n")
 	b.WriteString(m.connectBar() + "\n")
 
-	s := m.sessions.Active()
+	s := m.sessions().Active()
 	if s == nil {
 		if m.connecting != "" {
 			b.WriteString(fmt.Sprintf("\n  %s connecting to %s\n", m.spinner.View(), m.connecting))
@@ -463,11 +429,11 @@ func (m tuiModel) signInThenSessions(targets []sessionTarget) (tea.Model, tea.Cm
 }
 
 func (m tuiModel) needsSignIn(tsgs []string) bool {
-	if m.tokenDead == "" {
+	if m.runtime().TokenDead() == "" {
 		return false
 	}
 	if len(tsgs) == 0 {
-		return m.tenant.UsesBrowser()
+		return m.tenant().UsesBrowser()
 	}
 	for _, tsg := range tsgs {
 		if t, ok := m.tenantOf(tsg); ok {
