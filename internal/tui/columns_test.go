@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -107,13 +108,8 @@ func TestACachedRowFollowsTheStateBehindIt(t *testing.T) {
 		t.Fatalf("ha before the sweep = %q, want loading", got)
 	}
 
-	cmd := loadHA(t.Context(), m.runtime(), m.tenant().TSGID, haClusters(elementsOf(m)).pairs)
-	msg, ok := cmd().(haStatesMsg)
-	if !ok {
-		t.Fatalf("message = %T, want the HA states", msg)
-	}
-	next, _ := m.Update(msg)
-	m = next.(tuiModel)
+	m.runtime().SweepHA(t.Context(), m.tenant().TSGID, runtime.HAClusters(elementsOf(m)), 0)
+	m = settle(t, m)
 
 	if got := plain(columnCell(t, &m, at, colHA)); got != haActive && got != haStandby {
 		t.Errorf("ha after the sweep = %q, want the state the sweep read", got)

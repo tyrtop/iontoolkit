@@ -57,7 +57,6 @@ themes:
     spinner_color: "#b48ead"
     tabs: ["#d8dee9", "#81a1c1", "#88c0d0", "#b48ead", "#5e81ac", "#8fbcbb", "#eceff4"]
 
-  # after vim's own schemes, not ports of them
   - name: desert
     blurb: wheat and khaki on warm grey, after vim's desert
     ok: "#98fb98"
@@ -160,7 +159,6 @@ themes:
     spinner_color: "#afafd7"
     tabs: ["#bcbcbc", "#afafd7", "#87afaf", "#d7afd7", "#a8a8a8", "#8787af", "#d7d7d7"]
 
-  # catppuccin mocha, off the palette the user's nvim loads
   - name: "Ben's Theme"
     blurb: catppuccin mocha, from Ben's nvim
     ok: "#a6e3a1"

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"tyrtop.com/iontk/internal/app"
 
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -15,8 +16,8 @@ func listModelFrom(t *testing.T, yaml string, n int) tuiModel {
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	Columns = path
-	t.Cleanup(func() { Columns = "" })
+	app.ColumnsFile = path
+	t.Cleanup(func() { app.ColumnsFile = "" })
 	return listModel(t, n)
 }
 
@@ -45,7 +46,7 @@ func TestAFileNamesTheColumnsAndTheirOrder(t *testing.T) {
 
 func TestAFileGetsTheColumnItAsksForWhateverTheFleetLooksLike(t *testing.T) {
 	m := listModelFrom(t, "columns:\n  - name\n  - tenant\n", 2)
-	if m.showTenantColumn() {
+	if tenantCountOf(m) > 1 {
 		t.Fatal("this fleet is one tenant, so the built-in set would hide the column")
 	}
 	if got := columnNames(&m); !strings.Contains(strings.Join(got, " "), colTenant) {

@@ -3,8 +3,11 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"io"
+	"path/filepath"
 	"strings"
 	"time"
+	"tyrtop.com/iontk/internal/logging"
 
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ionterm"
@@ -85,23 +88,28 @@ func (rt *Runtime) Login(tsg string) (string, string) {
 	return login(st, t, rt.RunAs(tsg))
 }
 
-func (rt *Runtime) CheckCommands(cmds []string) error {
+func (rt *Runtime) WritesAllowed() bool {
 	rt.mu.RLock()
 	flag := rt.dev.Writes
 	rt.mu.RUnlock()
 	if flag != nil && flag() {
-		return nil
+		return true
 	}
-	if v, _ := rt.Get("allow_writes"); v == "true" {
+	v, _ := rt.Get("allow_writes")
+	return v == "true"
+}
+
+func (rt *Runtime) CheckCommands(cmds []string) error {
+	if rt.WritesAllowed() {
 		return nil
 	}
 	return ioncli.CheckReadOnly(cmds)
 }
 
-func (rt *Runtime) BatchTargets(rows []Element) ([]sase.Target, error) {
+func (rt *Runtime) batchTargets(rows []Element, clients map[string]*api.Client) ([]sase.Target, error) {
 	out := make([]sase.Target, 0, len(rows))
 	for _, r := range rows {
-		t := rt.TargetFor(r)
+		t := rt.targetFor(r, clients[r.TSG])
 		if t.User == "" || t.Pass == "" {
 			return nil, fmt.Errorf("no ION login for %s", r.Tenant)
 		}
@@ -110,13 +118,13 @@ func (rt *Runtime) BatchTargets(rows []Element) ([]sase.Target, error) {
 	return out, nil
 }
 
-func (rt *Runtime) TargetFor(r Element) sase.Target {
+func (rt *Runtime) targetFor(r Element, c *api.Client) sase.Target {
 	rt.mu.RLock()
 	session := rt.dev.Session
 	rt.mu.RUnlock()
 	user, pass := rt.Login(r.TSG)
 	t := sase.Target{ElementID: r.ID, User: user, Pass: pass}
-	if c := rt.Clients().Get(r.TSG); c != nil {
+	if c != nil {
 		t.Client = c
 		if session != nil {
 			t.Client = session(c)
@@ -252,7 +260,15 @@ func NormalizeErr(s string) string {
 	return s
 }
 
-func (rt *Runtime) knownRows(c *Call, ids []string) []Element {
+func (rt *Runtime) ElementsArg(c *Call, arg string) []Element {
+	ids := SplitList(c.Arg(arg), ",")
+	if len(ids) == 0 {
+		return rt.Targets()
+	}
+	return rt.KnownRows(c.Ctx, ids, c.Out)
+}
+
+func (rt *Runtime) KnownRows(ctx context.Context, ids []string, out func(string)) []Element {
 	known := func() bool {
 		have := map[string]bool{}
 		for _, r := range rt.Elements() {
@@ -269,7 +285,7 @@ func (rt *Runtime) knownRows(c *Call, ids []string) []Element {
 		rt.LoadCache()
 	}
 	if !known() {
-		rt.Exec(&Call{Ctx: c.Ctx, Out: c.Out}, "fleet.refresh")
+		rt.Exec(&Call{Ctx: ctx, Out: out}, "fleet.refresh")
 	}
 	return rt.rowsFor(ids)
 }
@@ -323,26 +339,17 @@ func batchCommands() []Command {
 		},
 	}, {
 		Name: "batch.run", Slow: true,
-		Help: "run device CLI commands on elements: cmd=\"dump device status; show ip\" elements=ID,ID (default: the selection)",
+		Help: "run device CLI commands on elements: cmd=\"dump device status, show ip\" elements=ID,ID (default: the selection)",
 		Args: []Arg{
-			{Name: "cmd", Required: true, Help: "commands, separated by ;"},
+			{Name: "cmd", Required: true, Help: "commands, comma separated"},
 			{Name: "elements", Help: "element IDs, comma separated; the selection, else the row under the cursor, when empty"},
 		},
 		Run: func(rt *Runtime, c *Call) error {
-			cmds := splitCommands(c.Arg("cmd"))
+			cmds := SplitCommands(c.Arg("cmd"))
 			if err := rt.CheckCommands(cmds); err != nil {
 				return err
 			}
-			rows := rt.Targets()
-			if ids := c.Arg("elements"); ids != "" {
-				var list []string
-				for _, id := range strings.Split(ids, ",") {
-					if id = strings.TrimSpace(id); id != "" {
-						list = append(list, id)
-					}
-				}
-				rows = rt.rowsFor(list)
-			}
+			rows := rt.ElementsArg(c, "elements")
 			if len(rows) == 0 {
 				return fmt.Errorf("batch.run: no elements")
 			}
@@ -355,27 +362,63 @@ func (rt *Runtime) StartBatch(ctx context.Context, cmds []string, rows []Element
 	if err := rt.CheckCommands(cmds); err != nil {
 		return nil, err
 	}
+	ctx, stop := context.WithCancel(ctx)
+	clients := map[string]*api.Client{}
 	for _, tsg := range tenantsOf(rows) {
-		if rt.Clients().Get(tsg) != nil {
-			continue
-		}
-		t, ok := rt.TenantOf(tsg)
-		if !ok {
-			continue
-		}
-		if _, err := rt.Connect(ctx, t); err != nil {
+		t := rt.TenantFor(tsg)
+		c, err := rt.Connect(ctx, t)
+		if err != nil {
+			stop()
 			return nil, fmt.Errorf("%s: %s", t.Name, rt.explain(err))
 		}
+		clients[tsg] = c
+		if gone := rt.Clients().Gone(c); gone != nil {
+			go func() {
+				select {
+				case <-gone:
+					stop()
+				case <-ctx.Done():
+				}
+			}()
+		}
 	}
-	targets, err := rt.BatchTargets(rows)
+	targets, err := rt.batchTargets(rows, clients)
 	if err != nil {
+		stop()
 		return nil, err
 	}
 	opts, err := rt.RunOptions(cmds, targets)
 	if err != nil {
+		stop()
 		return nil, err
 	}
-	return rt.RunBatch(ctx, opts, targets), nil
+	rt.recordUse(cmds, rows)
+	events := rt.RunBatch(ctx, opts, targets)
+	out := make(chan sase.Event)
+	go func() {
+		defer stop()
+		defer close(out)
+		for ev := range events {
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+			}
+		}
+	}()
+	return out, nil
+}
+
+func (rt *Runtime) recordUse(cmds []string, rows []Element) {
+	seen := map[string]bool{}
+	for _, r := range rows {
+		if r.Model != "" && !seen[r.Model] {
+			seen[r.Model] = true
+			rt.RecordUse(r.Model, cmds...)
+		}
+	}
+	if err := rt.SaveCommands(); err != nil {
+		logging.L().Warn("save command history", "err", err)
+	}
 }
 
 func (rt *Runtime) RunBatch(ctx context.Context, opts sase.Options, targets []sase.Target) <-chan sase.Event {
@@ -404,6 +447,10 @@ func (rt *Runtime) runBatch(c *Call, cmds []string, rows []Element) error {
 	if err != nil {
 		return err
 	}
+	return rt.sayBatch(c, events)
+}
+
+func (rt *Runtime) sayBatch(c *Call, events <-chan sase.Event) error {
 	for ev := range events {
 		if !ev.Done {
 			continue
@@ -424,6 +471,34 @@ func (rt *Runtime) runBatch(c *Call, cmds []string, rows []Element) error {
 		return fmt.Errorf("%d of %d elements failed", b.Failed, b.Total())
 	}
 	return nil
+}
+
+func (rt *Runtime) Export(slug, ext, text string) (string, error) {
+	st := rt.Store()
+	if st == nil {
+		return "", fmt.Errorf("no config directory to write to")
+	}
+	text = strings.TrimRight(text, "\n")
+	if strings.TrimSpace(text) == "" {
+		return "", fmt.Errorf("nothing to export")
+	}
+	now := time.Now()
+	f, where, err := output.Open(filepath.Join(st.ExportsDir(), output.ExportName(slug, ext, now)), "", "", now)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.WriteString(f, text+"\n"); err != nil {
+		f.Close()
+		return "", err
+	}
+	return where, f.Close()
+}
+
+func (rt *Runtime) ExportsDir() string {
+	if st := rt.Store(); st != nil {
+		return st.ExportsDir()
+	}
+	return ""
 }
 
 func (rt *Runtime) SaveBatch(path, dir, format, orient string) (string, error) {

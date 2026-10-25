@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-const authURL = "https://auth.apps.paloaltonetworks.com/oauth2/access_token"
-
 type TokenSource interface {
 	Token(ctx context.Context) (string, time.Duration, error)
 }
@@ -35,7 +33,11 @@ func MintToken(ctx context.Context, client *http.Client, id, secret, tsg string)
 		"scope":      {"tsg_id:" + tsg},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authURL, strings.NewReader(form.Encode()))
+	u, err := controller.URL("service_token", nil)
+	if err != nil {
+		return "", 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", 0, fmt.Errorf("build with auth request: %w", err)
 	}
@@ -159,35 +161,12 @@ func (s *Client) refreshLoop(ctx context.Context, ttl, margin time.Duration) {
 	}
 }
 
-const profileURL = "https://api.sase.paloaltonetworks.com/sdwan/v2.1/api/profile"
-
 // Palo Alto needs an extra call to prime the token, or everything after it 403s
 func (s *Client) activate(ctx context.Context, tok string) error {
-	url := profileURL
-	if s.profileBase != "" {
-		url = s.profileBase
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	url, err := sdwanURL(controller, "profile", nil)
 	if err != nil {
-		return fmt.Errorf("build profile request: %w", err)
+		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", browserUA)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("profile: %w", err)
-	}
-	defer func() {
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("profile: status %s: %s", resp.Status, body)
-	}
-	return nil
+	_, err = s.callAs(ctx, tok, "profile", http.MethodGet, url, nil, false)
+	return err
 }

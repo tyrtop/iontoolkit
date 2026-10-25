@@ -11,11 +11,7 @@ import (
 	"time"
 )
 
-// Trimmed from what an ion 1200-s actually answered on 2026-10-18, with the
-// ids and addresses changed. The shape is the point: the channels are flat,
-// config_and_events counts in 100ns ticks while the others count in
-// milliseconds, and a dozen fields are null on an appliance without the
-// hardware for them.
+// trimmed from an ion 1200-s answer of 2026-10-18, ids changed
 const elementStatusBody = `{
   "id": "1655828640836018896",
   "_etag": 50647,
@@ -173,22 +169,20 @@ func TestUTCTimeWorksTheUnitOutFromTheMagnitude(t *testing.T) {
 }
 
 func TestPortalURLsCarryTheVersionEachResourceAnswersOn(t *testing.T) {
+	ids := vars{"element_id": "15", "site_id": "16", "interface_id": "17"}
 	tests := []struct {
 		name string
-		got  string
 		want string
 	}{
-		{"element status", elementStatusURL("15"),
-			"https://api.sase.paloaltonetworks.com/sdwan/v2.6/api/elements/15/status"},
-		{"interfaces", interfacesURL("16", "15"),
-			"https://api.sase.paloaltonetworks.com/sdwan/v4.21/api/sites/16/elements/15/interfaces"},
-		{"interface status", interfaceStatusURL("16", "15", "17"),
-			"https://api.sase.paloaltonetworks.com/sdwan/v3.9/api/sites/16/elements/15/interfaces/17/status"},
+		{"element_status", "https://api.sase.paloaltonetworks.com/sdwan/v2.6/api/elements/15/status"},
+		{"interfaces", "https://api.sase.paloaltonetworks.com/sdwan/v4.21/api/sites/16/elements/15/interfaces"},
+		{"interface_status", "https://api.sase.paloaltonetworks.com/sdwan/v3.9/api/sites/16/elements/15/interfaces/17/status"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.got != tt.want {
-				t.Errorf("url = %q, want %q", tt.got, tt.want)
+			got, err := sdwanURL(inspect, tt.name, ids)
+			if err != nil || got != tt.want {
+				t.Errorf("url = %q (%v), want %q", got, err, tt.want)
 			}
 		})
 	}
@@ -279,9 +273,7 @@ func TestSnapshotKeepsTheHalfThatAnswered(t *testing.T) {
 	}
 }
 
-// Trimmed from what the clustered ion 2000 answered on 2026-10-18. Every
-// field is real, and the interesting part is why a member's effective
-// priority is not its configured one.
+// trimmed from the clustered ion 2000's answer of 2026-10-18
 const clusterStatusBody = `{
   "id": null,
   "cluster_members": [
@@ -435,9 +427,7 @@ func TestSnapshotWithNoSiteDoesNotAskForInterfaces(t *testing.T) {
 	}
 }
 
-// the portal's own capture of 2026-10-19: a POST filtered by element id,
-// dest_page counting from one, answered with a flat row per element whose
-// status is "active" or "backup"
+// the portal's own capture of 2026-10-19; status is "active" or "backup"
 func TestSpokeClusterStatusesReadsTheAggregate(t *testing.T) {
 	const captured = `{"count":2,"items":[
 		{"id":"163241838","site_id":"1632417734","spoke_cluster_id":"1632417740",
@@ -482,7 +472,7 @@ func TestSpokeClusterStatusesReadsTheAggregate(t *testing.T) {
 				saw:   func(r *http.Request, b []byte) { seen, sent = r, b },
 			}
 
-			got, err := c.SpokeClusterStatuses(context.Background(), []string{"1632412620", "1632412630"})
+			got, err := c.SpokeClusterStatuses(context.Background(), clusterQueryPath, []string{"1632412620", "1632412630"})
 			if tc.wantErr != "" {
 				if err == nil {
 					t.Fatalf("SpokeClusterStatuses() = %v, want an error so the caller falls back", got)
@@ -545,7 +535,7 @@ func TestTheAggregateAsksAboutTheElementsItIsGiven(t *testing.T) {
 		saw:   func(_ *http.Request, b []byte) { sent, calls = b, calls+1 },
 	}
 
-	if _, err := c.SpokeClusterStatuses(context.Background(), []string{"e1", "e2", "e3"}); err != nil {
+	if _, err := c.SpokeClusterStatuses(context.Background(), clusterQueryPath, []string{"e1", "e2", "e3"}); err != nil {
 		t.Fatalf("SpokeClusterStatuses() error = %v", err)
 	}
 	if calls != 1 {
@@ -554,7 +544,7 @@ func TestTheAggregateAsksAboutTheElementsItIsGiven(t *testing.T) {
 	if !strings.Contains(string(sent), `"in":["e1","e2","e3"]`) {
 		t.Errorf("request body %s does not name exactly the elements asked about", sent)
 	}
-	if _, err := c.SpokeClusterStatuses(context.Background(), nil); err == nil {
+	if _, err := c.SpokeClusterStatuses(context.Background(), clusterQueryPath, nil); err == nil {
 		t.Error("asking about no elements should be an error, not a request")
 	}
 }
@@ -573,3 +563,5 @@ func (r recorder) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.saw(req, body)
 	return r.inner.RoundTrip(req)
 }
+
+const clusterQueryPath = "/sdwan/v2.0/api/spokeclusters/status/query"

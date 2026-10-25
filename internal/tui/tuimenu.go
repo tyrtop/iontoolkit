@@ -8,10 +8,9 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/logging"
-	"tyrtop.com/iontk/internal/output"
+	"tyrtop.com/iontk/internal/tmpl"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -33,38 +32,25 @@ type menuEntry struct {
 	label   string
 	action  menuAction
 	command string
+	when    *tmpl.T
 }
 
 func (m tuiModel) menuEntries() []menuEntry {
-	var e []menuEntry
 	if m.cfg() == nil {
 		return []menuEntry{{label: "Quit", action: actQuit}}
 	}
-	if m.menuSpec != nil {
-		return m.menuSpec
+	all := m.menuSpec
+	if all == nil {
+		all, _ = builtinMenu()
 	}
-
-	e = append(e, menuEntry{label: "Elements", action: actElements})
-
-	switch {
-	case m.authMode() == authTenant:
-		e = append(e, menuEntry{label: "Service Accounts", action: actSwitch})
-	case m.signedIn():
-		e = append(e,
-			menuEntry{label: "Browser Tenants", action: actSignIn},
-			menuEntry{label: "Refresh Browser Token", action: actRefreshToken},
-		)
-	default:
-		e = append(e, menuEntry{label: "Sign In with Browser", action: actSignIn})
+	at := map[string]any{"auth": m.runtime().AuthMode(), "signed_in": m.runtime().HasSignIn()}
+	var out []menuEntry
+	for _, e := range all {
+		if e.when == nil || tmpl.Truthy(e.when.Render(at)) {
+			out = append(out, e)
+		}
 	}
-
-	e = append(e,
-		menuEntry{label: "Macros", action: actMacros},
-		menuEntry{label: "Workflows", action: actWorkflows},
-		menuEntry{label: "Settings", action: actSettings},
-		menuEntry{label: "Quit", action: actQuit},
-	)
-	return e
+	return out
 }
 
 func (m tuiModel) cacheLine() string {
@@ -120,43 +106,12 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 		if m.menuCursor >= len(entries) {
 			return m, nil
 		}
-		switch entries[m.menuCursor].action {
-		case actCommand:
-			return m.execLine(entries[m.menuCursor].command)
-		case actElements:
-			if m.mode() == modeMacro {
-				mode := modeShell
-				if saved, ok := parseMode(m.cfg().DefaultMode); ok {
-					mode = saved
-				}
-				m.setMode(mode)
-			}
-			return m.startContinue()
-		case actSwitch:
-			m.switchCursor = 0
-			m.status = ""
-			m.phase = phaseSwitch
-			return m, nil
-		case actRefreshToken:
-			return m.startTokenRefresh()
-		case actSignIn:
-			m.switchCursor = 0
-			m.status = ""
-			if len(m.browserTenants()) > 0 {
-				m.phase = phaseSwitch
-				return m, nil
-			}
-			return m.startDiscover()
-		case actMacros:
-			return m.openMacros()
-		case actWorkflows:
-			return m.openWorkflows()
-		case actSettings:
-			m.setCursor = 0
-			m.phase = phaseSettings
-			return m.enteredSection(), m.spinner.Tick
-		case actQuit:
-			return m, tea.Quit
+		e := entries[m.menuCursor]
+		if e.action == actCommand {
+			return m.execLine(e.command)
+		}
+		if a, ok := builtinAt(scrMenu, menuActionName(e.action)); ok {
+			return a.run(m)
 		}
 	}
 	return m, nil
@@ -164,28 +119,14 @@ func (m tuiModel) onMenuKey(key string) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) startContinue() (tea.Model, tea.Cmd) {
 	m.status = m.columnsErr
-	m.setCacheState(cacheUpdating)
-
-	m.loadFromCache()
+	next, cmd := m.loadFleet()
+	m = next.(tuiModel)
 	if len(m.rows()) > 0 {
 		m.phase = phasePicking
 	} else {
 		m.phase = phaseLoading
 	}
-
-	f := app.TenantFlags(m.store(), m.tenant(), m.ionUser())
-	if err := f.ValidateCreds(); err != nil {
-		m.status = err.Error()
-		m.setCacheState(cacheFailed)
-		m.phase = phaseMenu
-		return m, nil
-	}
-	m.flags = f
-	if f.IONUsername != "" {
-		m.runtime().SetIONUser(f.IONUsername)
-	}
-
-	return m, tea.Batch(m.spinner.Tick, connect(m.ctx, m.store(), f))
+	return m, cmd
 }
 
 func (m tuiModel) onSwitchKey(key string) (tea.Model, tea.Cmd) {
@@ -378,12 +319,7 @@ func (m tuiModel) formValue(i int) string {
 func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 	switch m.formKind {
 	case formBatchDir:
-		dir, err := output.ExpandHome(m.formValue(0))
-		if err != nil {
-			m.status = err.Error()
-			return m, nil
-		}
-		if err := m.runtime().Set("batch_dir", dir); err != nil {
+		if err := m.runtime().Set("batch_dir", m.formValue(0)); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
@@ -453,11 +389,11 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 			m.status = "enter a number"
 			return m, nil
 		}
-		name, v := "session_cols", min(400, max(40, n))
+		name := "session_cols"
 		if m.formGeoRow != 0 {
-			name, v = "session_rows", min(200, max(10, n))
+			name = "session_rows"
 		}
-		if err := m.runtime().Set(name, strconv.Itoa(v)); err != nil {
+		if err := m.runtime().Set(name, strconv.Itoa(n)); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
@@ -806,7 +742,6 @@ func (m tuiModel) startSignInAuto() (tea.Model, tea.Cmd) {
 	}
 	logging.L().Info("automatic sign-in refused", "tsg", m.tenant().TSGID, "why", why)
 	m.signInResume = false
-	m.setCacheState(cacheFailed)
 	m.status = m.tenantName(m.tenant().TSGID) + ": " + why +
 		" — already signed in, so another browser sign-in will not help"
 	if m.phase == phaseLoading || m.phase == phaseSignIn {
@@ -821,11 +756,9 @@ func (m tuiModel) startSignIn() (tea.Model, tea.Cmd) {
 		m.phase = phaseMenu
 		return m, nil
 	}
-	f := app.TenantFlags(m.store(), m.tenant(), m.ionUser())
-	m.flags = f
 	m.status = ""
 	m.phase = phaseSignIn
-	return m, tea.Batch(m.spinner.Tick, signIn(m.ctx, f, m.store()))
+	return m, tea.Batch(m.spinner.Tick, signIn(m.ctx, m.runtime()))
 }
 
 func (m tuiModel) viewSignIn() string {

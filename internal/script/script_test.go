@@ -337,7 +337,7 @@ func TestAStoppedRunIsNotCalledOutOfBudget(t *testing.T) {
 func TestExportTakesATableAsJSON(t *testing.T) {
 	s := set(t, map[string]string{"x.lua": `return function(ctx) ctx.export({ a = 1, b = ctx.null, c = "R&D <lab>" }, "x") end`})
 	var got string
-	_, err := s.Run(context.Background(), Run{Name: "x", Export: func(text, slug string) (string, error) { got = text; return "f", nil }})
+	_, err := s.Run(context.Background(), Run{Name: "x", Export: func(text, slug, ext string) (string, error) { got = text; return "f", nil }})
 	if err != nil || got != "{\n  \"a\": 1,\n  \"b\": null,\n  \"c\": \"R&D <lab>\"\n}" {
 		t.Errorf("exported %q, err %v", got, err)
 	}

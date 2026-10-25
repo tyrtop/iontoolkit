@@ -20,8 +20,8 @@ func keysModel(t *testing.T, keybinds string, views map[string]string) tuiModel 
 		if err := os.WriteFile(path, []byte(keybinds), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		Keybinds = path
-		t.Cleanup(func() { Keybinds = "" })
+		app.KeybindsFile = path
+		t.Cleanup(func() { app.KeybindsFile = "" })
 	}
 	if len(views) > 0 {
 		dir := filepath.Join(root, view.DirName)
@@ -46,7 +46,7 @@ func pressOnList(m tuiModel, key string) tuiModel {
 
 func TestTheKeysIontkShipsAreBoundThroughTheTable(t *testing.T) {
 	m := keysModel(t, "", nil)
-	if got := m.binds().keyFor(scrElements, "filter"); got != "/" {
+	if got := firstKey(m.binds(), scrElements, "filter"); got != "/" {
 		t.Errorf("filter is on %q, want /", got)
 	}
 	if m2 := pressOnList(m, "/"); !m2.filterOn {
@@ -201,7 +201,7 @@ func TestTheShippedKeybindsExampleLoads(t *testing.T) {
 	if err := km.check(); err != nil {
 		t.Fatalf("examples/keybinds.yaml: %v", err)
 	}
-	if got := km.keyFor(scrElements, "filter"); got != "f" {
+	if got := firstKey(km, scrElements, "filter"); got != "f" {
 		t.Errorf("the example binds filter to %q, want f", got)
 	}
 }

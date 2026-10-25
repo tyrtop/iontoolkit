@@ -101,11 +101,11 @@ func TestSayingYesStartsTheShippedPages(t *testing.T) {
 	if len(m.tut.steps) < 2 {
 		t.Errorf("the run has %d steps, want the pages the file ships", len(m.tut.steps))
 	}
-	if !m.real.rt.Config().TutorialSeen {
+	if !m.real.testing.Real().Config().TutorialSeen {
 		t.Error("the answer was not remembered")
 	}
 
-	saved, err := m.real.rt.Store().Config()
+	saved, err := m.real.testing.Real().Store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,16 +471,16 @@ func runTenantLoads(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
 	}
 	loaded := 0
 	for _, msg := range msgs {
-		els, ok := msg.(tenantElementsMsg)
+		done, ok := msg.(fleetDoneMsg)
 		if !ok {
 			continue
 		}
 		loaded++
-		next, _ := m.Update(els)
-		m = next.(tuiModel)
+		next, _ := m.Update(done)
+		m = settle(t, next.(tuiModel))
 	}
 	if loaded == 0 {
-		t.Fatalf("none of the %d commands loaded a tenant", len(msgs))
+		t.Fatalf("none of the %d commands loaded the fleet", len(msgs))
 	}
 	return m
 }
@@ -520,7 +520,7 @@ func TestStartingTheTutorialBorrowsAFakeFleet(t *testing.T) {
 	if m.tenant().Name != "Acme Co" {
 		t.Errorf("tenant = %q, want the fixture tenant", m.tenant().Name)
 	}
-	if m.flags.IONPassword == "" {
+	if _, pass := m.runtime().Login(m.tenant().TSGID); pass == "" {
 		t.Error("no device password for the fake tenant, so a shell step could not log in")
 	}
 
@@ -591,7 +591,7 @@ func TestEvenAFixturesRunGetsTheBlankTutorialWorld(t *testing.T) {
 	if m.tenant().Name != "Acme Co" {
 		t.Errorf("tenant = %q, want the tutorial's own", m.tenant().Name)
 	}
-	if m.real.fixture != set {
+	if m.real.testing.Held() != set {
 		t.Error("the launched fixture set was not held for afterwards")
 	}
 

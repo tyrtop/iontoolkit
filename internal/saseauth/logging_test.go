@@ -60,7 +60,7 @@ func TestNoSecretReachesTheLogFile(t *testing.T) {
 
 			var saved string
 			src := NewSource("1436146912", tt.stored,
-				Options{TokenURL: srv.URL, Client: srv.Client(), Seed: NewSeed(seed)},
+				Options{Host: srv.URL, Client: srv.Client(), Seed: NewSeed(seed)},
 				func(rt string) error { saved = rt; return nil })
 
 			if _, _, err := src.Token(context.Background()); err != nil {

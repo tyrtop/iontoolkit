@@ -50,10 +50,8 @@ type cell struct {
 var goProviders = map[string]elementColumn{
 	colCaret:  {name: colCaret, paint: paintCaret},
 	colStatus: {name: colStatus, live: true, value: valueStatus, paint: paintStatus},
-	colHA:     {name: colHA, value: valueHA, paint: paintHA},
+	colHA:     {name: colHA, paint: paintHA},
 }
-
-func goProviderNames() []string { return []string{colCaret, colStatus, colHA} }
 
 var (
 	defaultOnce sync.Once
@@ -68,7 +66,7 @@ func defaultColumns() ([]elementColumn, error) {
 			defaultErr = err
 			return
 		}
-		defaultCols, defaultErr = buildColumns(set, nil)
+		defaultCols = buildColumns(set, nil)
 	})
 	return defaultCols, defaultErr
 }
@@ -78,7 +76,7 @@ func (m *tuiModel) columns() []elementColumn {
 	if cols == nil {
 		cols, _ = defaultColumns()
 	}
-	when := m.fleetWhen()
+	when := m.runtime().ListWhen()
 	out := make([]elementColumn, 0, len(cols))
 	for _, c := range cols {
 		if c.shown != nil && !tmpl.Truthy(c.shown.Render(when)) {
@@ -87,15 +85,6 @@ func (m *tuiModel) columns() []elementColumn {
 		out = append(out, c)
 	}
 	return markColumns(out)
-}
-
-func (m *tuiModel) fleetWhen() map[string]any {
-	return map[string]any{
-		"elements":  len(m.rows()),
-		"tenants":   m.tenantCount,
-		"serials":   m.showSerialColumn(),
-		"clustered": m.showHAColumn(),
-	}
 }
 
 func markColumns(cols []elementColumn) []elementColumn {
@@ -126,14 +115,6 @@ func sameColumns(a, b []elementColumn) bool {
 func valueStatus(m *tuiModel, el elementRow) string {
 	glyph, _ := m.rowStatusOf(el)
 	return glyph
-}
-
-func valueHA(m *tuiModel, el elementRow) string {
-	word, cached := m.haState(el)
-	if cached {
-		return word + "*"
-	}
-	return word
 }
 
 func paintCaret(_ *tuiModel, c cell) string {
@@ -205,13 +186,10 @@ func cellText(m *tuiModel, c elementColumn, el elementRow) string {
 	return c.value(m, el)
 }
 
-func (m *tuiModel) forgetRows() { m.listCache, m.rowCtx = nil, rowContext{} }
+func (m *tuiModel) forgetRows() { m.listCache = nil }
 
 func (m *tuiModel) forgetRow(key string) {
 	delete(m.listCache, key)
-	if m.rowCtx.key == key {
-		m.rowCtx = rowContext{}
-	}
 }
 
 func truncCell(text string, width, limit int) string {

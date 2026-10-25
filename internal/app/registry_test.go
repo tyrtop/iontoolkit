@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,10 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"tyrtop.com/iontk/internal/column"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/write"
+	"tyrtop.com/iontk/internal/tutorial"
 	"tyrtop.com/iontk/internal/workflow"
 )
 
@@ -48,13 +52,6 @@ func (p *portal) Send(_ context.Context, method, path string, body []byte) ([]by
 	return []byte(`{"id":"777"}`), nil
 }
 
-func (p *portal) LookupElement(_ context.Context, eid string) (api.Element, error) {
-	if eid == "e1" {
-		return api.Element{ID: "e1", Name: "S0224-RTR-01", SiteID: "s1"}, nil
-	}
-	return api.Element{}, errors.New("404 element " + eid)
-}
-
 func registryRuntime(t *testing.T, workflows map[string]map[string]string) (*runtime.Runtime, *portal, *config.Store) {
 	t.Helper()
 	root := t.TempDir()
@@ -73,6 +70,7 @@ func registryRuntime(t *testing.T, workflows map[string]map[string]string) (*run
 	t.Cleanup(func() { WorkflowsFolder, WritesFile = "", "" })
 
 	rt := NewRuntime(st, cfg)
+	rt.SetElements([]runtime.Element{{Element: api.Element{ID: "e1", Name: "S0224-RTR-01", SiteID: "s1"}, TSG: "t1", Tenant: "Tractor Supply"}})
 	p := &portal{}
 	rt.UsePortal(func(context.Context) (runtime.Portal, runtime.Tenant, error) {
 		return p, runtime.Tenant{TSG: "t1", Name: "Tractor Supply"}, nil
@@ -91,7 +89,7 @@ inputs:
 const newSiteMain = `
 return function(ctx)
   local name = ctx.input.site .. "-REPL"
-  ctx.run("site.push", {model = {site = {name = name, admin_state = "disabled"}}})
+  ctx.run("write what=interface elements=e1 match=1 description=" .. name)
   ctx.status("planned " .. name)
 end
 `
@@ -121,7 +119,7 @@ func TestAWorkflowIsACommandWithItsInputsAsArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := strings.Join(lines, "\n")
-	if !strings.Contains(out, "planned S0272-REPL") || !strings.Contains(out, "1 write(s) planned") || len(p.sent) != 0 {
+	if !strings.Contains(out, "planned S0272-REPL") || !strings.Contains(out, "dry run: 1 change(s)") || len(p.sent) != 0 {
 		t.Errorf("dry run said:\n%s\nsent %v", out, p.sent)
 	}
 	if r, ok := res.(workflow.Result); !ok || len(r.Writes) != 1 {
@@ -154,9 +152,10 @@ func TestWriteIsOneCommandForEveryFrontEnd(t *testing.T) {
 		t.Errorf("doit on an unverified spec = %v", err)
 	}
 
-	verified := strings.Replace(write.BuiltinYAML(), "    method: PUT\n", "    method: PUT\n    verified: true\n", 1)
+	verified := strings.Replace(write.BuiltinYAML(), "    title: Interface\n", "    title: Interface\n    verified: true\n", 1)
 	WritesFile = filepath.Join(st.Root, "writes.yaml")
 	os.WriteFile(WritesFile, []byte(verified), 0o600)
+	ReloadWrites(rt)
 	lines, _, err = exec(rt, "write", args, []string{"description=uplink"}, true)
 	if err != nil || len(p.sent) != 1 || p.sent[0] != "PUT /sdwan/v4.21/api/sites/s1/elements/e1/interfaces/i1" {
 		t.Errorf("doit: %v, sent %v\n%s", err, p.sent, strings.Join(lines, "\n"))
@@ -185,6 +184,9 @@ func TestAWorkflowRunsOncePerEntryInAFileOfInputs(t *testing.T) {
 	rt, p, _ := registryRuntime(t, map[string]map[string]string{
 		"new-site": {workflow.ManifestName: newSite + "  - name: suffix\n    default: -REPL\n", "main.lua": newSiteMain},
 	})
+	WritesFile = filepath.Join(t.TempDir(), "writes.yaml")
+	os.WriteFile(WritesFile, []byte(strings.Replace(write.BuiltinYAML(), "    title: Interface\n", "    title: Interface\n    verified: true\n", 1)), 0o600)
+	ReloadWrites(rt)
 	runs := filepath.Join(t.TempDir(), "sites.csv")
 	os.WriteFile(runs, []byte("site,suffix\nS0272,\nS9999,-X\nS0272,-NEW\n"), 0o600)
 
@@ -269,5 +271,151 @@ func TestABlankValueInAFileOfInputsLeavesTheCommandLineOne(t *testing.T) {
 	lines, _, err := exec(rt, "workflow.echo", map[string]string{EachInput: runs, "suffix": "-FLAG"}, nil, false)
 	if err != nil || !strings.Contains(strings.Join(lines, "\n"), "S1 | S1-FLAG") {
 		t.Errorf("err %v:\n%s", err, strings.Join(lines, "\n"))
+	}
+}
+
+const endpointFlow = `
+title: Endpoint flow
+inputs:
+  - name: site
+    required: true
+endpoints:
+  - name: interfaces
+    path: /sdwan/v4.21/api/sites/{site}/elements/e1/interfaces
+  - name: drop
+    method: DELETE
+    path: /sdwan/v4.21/api/sites/{site}/elements/e1/interfaces/{id}
+`
+
+const endpointFlowMain = `
+return function(ctx)
+  local _, ifs = ctx.run("endpoint.interfaces", {site = ctx.input.site})
+  for _, i in ipairs(ifs.items) do
+    ctx.run("endpoint.drop", {site = ctx.input.site, id = i.id})
+  end
+  ctx.status("read " .. #ifs.items)
+end
+`
+
+func TestAWorkflowCallsOnlyTheEndpointsItsOwnFileDeclares(t *testing.T) {
+	rt, p, _ := registryRuntime(t, map[string]map[string]string{
+		"flow": {workflow.ManifestName: endpointFlow, "main.lua": endpointFlowMain},
+	})
+	lines, res, err := exec(rt, "workflow.flow", map[string]string{"site": "s1"}, nil, false)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
+	}
+	out := strings.Join(lines, "\n")
+	if !strings.Contains(out, "read 2") || !strings.Contains(out, "plan DELETE /sdwan/v4.21/api/sites/s1/elements/e1/interfaces/i2") || len(p.sent) != 0 {
+		t.Errorf("dry run said:\n%s\nsent %v", out, p.sent)
+	}
+	if r, ok := res.(workflow.Result); !ok || len(r.Writes) != 2 {
+		t.Errorf("result = %#v, want both deletes listed", res)
+	}
+
+	if _, _, err := exec(rt, "workflow.flow", map[string]string{"site": "s1"}, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.sent) != 2 || p.sent[1] != "DELETE /sdwan/v4.21/api/sites/s1/elements/e1/interfaces/i2" {
+		t.Errorf("sent %v, want the two deletes", p.sent)
+	}
+
+	if _, _, err := exec(rt, "workflow.flow", map[string]string{"site": "s1/../../tenancy"}, nil, false); err == nil ||
+		!strings.Contains(err.Error(), "would change the path") {
+		t.Errorf("a site that walks the path = %v, want it refused", err)
+	}
+}
+
+func TestConfigSaveWritesOnlyWhereIontkReads(t *testing.T) {
+	rt, _, st := registryRuntime(t, nil)
+	inside := filepath.Join(st.Root, "views", "elements.yaml")
+	if _, _, err := exec(rt, "config.save", map[string]string{"file": inside, "text": column.BuiltinYAML()}, nil, false); err != nil {
+		t.Fatalf("a file under the config folder was refused: %v", err)
+	}
+	if b, _ := os.ReadFile(inside); string(b) != column.BuiltinYAML() {
+		t.Errorf("saved %q", b)
+	}
+	broken := "kind: list\ncolumns:\n  - name: zone\n    go: nope\n"
+	if _, _, err := exec(rt, "config.save", map[string]string{"file": inside, "text": broken}, nil, false); err == nil ||
+		!strings.Contains(err.Error(), "go:") {
+		t.Errorf("a list naming no go: column = %v, want it refused", err)
+	}
+	if b, _ := os.ReadFile(inside); string(b) != column.BuiltinYAML() {
+		t.Error("the refused file was written over the good one")
+	}
+	outside := filepath.Join(t.TempDir(), "elsewhere.yaml")
+	if _, _, err := exec(rt, "config.save", map[string]string{"file": outside, "text": "x: 1\n"}, nil, false); err == nil {
+		t.Error("a file outside the config folder was written")
+	}
+	if _, err := os.Stat(outside); err == nil {
+		t.Error("the refused file exists")
+	}
+	sneaky := filepath.Join(st.Root, "..", "escaped.yaml")
+	if _, _, err := exec(rt, "config.save", map[string]string{"file": sneaky, "text": "x: 1\n"}, nil, false); err == nil {
+		t.Error("a path climbing out of the config folder was written")
+	}
+}
+
+func TestConfigSaveWritesTheTutorialTheFlagNames(t *testing.T) {
+	rt, _, _ := registryRuntime(t, nil)
+	dir := t.TempDir()
+	for _, flag := range []string{filepath.Join(dir, "one.yaml"), dir} {
+		TutorialFile = flag
+		file := filepath.Join(dir, "one.yaml")
+		if _, _, err := exec(rt, "config.save", map[string]string{"file": file, "text": tutorial.BuiltinYAML()}, nil, false); err != nil {
+			t.Errorf("--tutorial %s: %v", flag, err)
+		}
+	}
+	TutorialFile = ""
+}
+
+type tenantWire struct {
+	mu   sync.Mutex
+	sent []string
+}
+
+func (w *tenantWire) RoundTrip(req *http.Request) (*http.Response, error) {
+	body := `{}`
+	if req.Method == http.MethodGet {
+		body = `{"items":[{"id":"i1","name":"1","description":"old"}]}`
+	} else {
+		w.mu.Lock()
+		w.sent = append(w.sent, req.Method+" "+req.URL.Path)
+		w.mu.Unlock()
+	}
+	return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: http.Header{},
+		Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+}
+
+func TestAWriteAcrossTenantsGoesThroughEachTenantsPortal(t *testing.T) {
+	root := t.TempDir()
+	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
+	cfg, _ := st.Config()
+	WritesFile = filepath.Join(root, "writes.yaml")
+	t.Cleanup(func() { WritesFile = "" })
+	os.WriteFile(WritesFile, []byte(strings.Replace(write.BuiltinYAML(), "    title: Interface\n", "    title: Interface\n    verified: true\n", 1)), 0o600)
+	rt := NewRuntime(st, cfg)
+	rt.SetElements([]runtime.Element{
+		{Element: api.Element{ID: "e1", Name: "S0224-RTR-01", SiteID: "s1"}, TSG: "t1", Tenant: "Tractor Supply"},
+		{Element: api.Element{ID: "e2", Name: "S0300-RTR-01", SiteID: "s2"}, TSG: "t2", Tenant: "Other Co"},
+	})
+	wires := map[string]*tenantWire{"t1": {}, "t2": {}}
+	for tsg, w := range wires {
+		c := &http.Client{Transport: w}
+		rt.Clients().Set(tsg, api.NewClient(c, c, "fixture", false, 100, 100))
+	}
+	lines, _, err := exec(rt, "write", map[string]string{"what": "interface", "elements": "e1,e2", "match": "1"}, []string{"description=uplink"}, true)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
+	}
+	if got := wires["t1"].sent; len(got) != 1 || !strings.Contains(got[0], "/sites/s1/elements/e1/") {
+		t.Errorf("Tractor Supply's portal was sent %v", got)
+	}
+	if got := wires["t2"].sent; len(got) != 1 || !strings.Contains(got[0], "/sites/s2/elements/e2/") {
+		t.Errorf("Other Co's portal was sent %v", got)
+	}
+	log, _ := os.ReadFile(filepath.Join(root, write.LogName))
+	if !strings.Contains(string(log), "Tractor Supply") || !strings.Contains(string(log), "Other Co") {
+		t.Errorf("writes.log names one tenant: %s", log)
 	}
 }

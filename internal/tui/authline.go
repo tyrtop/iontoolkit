@@ -4,12 +4,11 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"tyrtop.com/iontk/internal/runtime"
 
 	tea "charm.land/bubbletea/v2"
 
 	"tyrtop.com/iontk/internal/app"
-	"tyrtop.com/iontk/internal/config"
-	"tyrtop.com/iontk/internal/saseauth"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -99,19 +98,12 @@ func (m tuiModel) tenantElementCount() int {
 }
 
 type tokenRefreshedMsg struct {
-	ident saseauth.Identity
-	ttl   time.Duration
-	err   error
+	err error
 }
 
-func refreshToken(ctx context.Context, f app.Flags, st *config.Store) tea.Cmd {
+func refreshToken(ctx context.Context, rt *runtime.Runtime) tea.Cmd {
 	return func() tea.Msg {
-		src := app.BrowserSource(f, httpClientFor(f), st)
-		if _, ttl, err := src.Token(ctx); err != nil {
-			return tokenRefreshedMsg{err: err}
-		} else {
-			return tokenRefreshedMsg{ident: src.Identity(), ttl: ttl}
-		}
+		return tokenRefreshedMsg{err: rt.Exec(&runtime.Call{Ctx: ctx}, "auth.refresh")}
 	}
 }
 
@@ -120,19 +112,6 @@ func (m tuiModel) startTokenRefresh() (tea.Model, tea.Cmd) {
 		m.status = "no tenant selected"
 		return m, nil
 	}
-	f := app.TenantFlags(m.store(), m.tenant(), m.ionUser())
-	m.flags = f
 	m.status = "refreshing token"
-	return m, tea.Batch(m.spinner.Tick, refreshToken(m.ctx, f, m.store()))
-}
-
-func (m tuiModel) signedIn() bool {
-	if c, err := m.store().TenantCache(); err == nil && c != nil && len(c.Tenants) > 0 {
-		return true
-	}
-	if !m.hasTenant() || m.store() == nil {
-		return false
-	}
-	v, err := m.store().Secrets.Get(config.RefreshTokenKey(m.tenant().TSGID))
-	return err == nil && v != ""
+	return m, tea.Batch(m.spinner.Tick, refreshToken(m.ctx, m.runtime()))
 }

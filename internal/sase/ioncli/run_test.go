@@ -339,9 +339,7 @@ func TestCleanDropsPagerLinesAndTheirErase(t *testing.T) {
 			want: "kept text",
 		},
 		{
-			// Word for word from an ion 1200-s on 6.3.4. It matches two of the
-			// patterns, and cutting the later one left "--More--(4%)[" in
-			// every paged command's output.
+			// word for word from an ion 1200-s on 6.3.4
 			name: "a real ION pager line goes entirely",
 			raw:  "ion# help\r\nfirst\r\n--More--(4%)[Press space to continue, 'q' to quit.]\r      \rsecond\r\nion#",
 			want: "first\nsecond",

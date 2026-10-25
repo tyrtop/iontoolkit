@@ -393,7 +393,7 @@ func overlayUnder(content, box string, height int) string {
 }
 
 func (m tuiModel) raiseTutorialAsk() tuiModel {
-	if m.cfg() == nil || m.cfg().TutorialSeen {
+	if m.cfg() == nil || m.option("tutorial_seen") == "true" {
 		return m
 	}
 	m.askTutorial = true
@@ -437,14 +437,11 @@ func (m tuiModel) onTutorialAskKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) rememberTutorialAsked() tuiModel {
-	if m.cfg() == nil || m.cfg().TutorialSeen {
+	if m.cfg() == nil || m.option("tutorial_seen") == "true" {
 		return m
 	}
-	m.cfg().TutorialSeen = true
-	if m.store() != nil {
-		if err := m.store().SaveConfig(m.cfg()); err != nil {
-			m.status = err.Error()
-		}
+	if err := m.runtime().Set("tutorial_seen", "true"); err != nil {
+		m.status = err.Error()
 	}
 	return m
 }

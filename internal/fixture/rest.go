@@ -2,15 +2,20 @@ package fixture
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"path"
-	"strings"
 
+	"tyrtop.com/iontk/internal/endpoint"
 	"tyrtop.com/iontk/internal/sase/api"
 )
+
+//go:embed routes.yaml
+var routesYAML []byte
+
+var routes = endpoint.MustParse("fixture routes", routesYAML)
 
 func (s *Set) Transport(tsg string) http.RoundTripper {
 	return &transport{set: s, tsg: tsg}
@@ -23,149 +28,89 @@ type transport struct {
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	p := req.URL.Path
-	switch req.Method {
-	case http.MethodPut, http.MethodPatch:
-		if strings.Contains(p, "/elements/") && strings.Contains(p, "/interfaces/") {
-			return t.editInterface(req, p)
+	name, v, ok := routes.Match(req.Method, p)
+	if !ok {
+		switch req.Method {
+		case http.MethodPut, http.MethodPatch, http.MethodDelete:
+			return t.refuseWrite(req, p)
 		}
-		return t.refuseWrite(req, p)
-	case http.MethodDelete:
-		return t.refuseWrite(req, p)
+		return t.json(req, http.StatusNotFound,
+			map[string]string{"error": fmt.Sprintf("fixture mode serves no %s", p)})
 	}
 
-	switch {
-	case strings.HasSuffix(p, "/api/profile"):
+	switch name {
+	case "profile":
 		return t.json(req, http.StatusOK, t.profile())
-
-	case strings.HasSuffix(p, "/api/sites"):
+	case "sites":
 		return t.json(req, http.StatusOK, items(t.set.apiSites(t.tsg)))
-
-	case strings.HasSuffix(p, "/api/elements"):
+	case "elements":
 		return t.json(req, http.StatusOK, items(t.set.apiElements(t.tsg)))
-
-	case strings.HasSuffix(p, "/api/waninterfacelabels"):
+	case "wan_labels":
 		return t.json(req, http.StatusOK, items(fixtureLabels()))
-
-	case strings.HasSuffix(p, "/api/wannetworks"):
+	case "wan_networks":
 		return t.json(req, http.StatusOK, items(fixtureNetworks()))
-
-	case strings.HasSuffix(p, "/api/securityzones"):
+	case "zones":
 		return t.json(req, http.StatusOK, items(fixtureZones()))
-
-	case strings.Contains(p, "/elements/") && strings.HasSuffix(p, "/securityzones"):
-		eid := path.Base(strings.TrimSuffix(p, "/securityzones"))
-		el := t.element(eid)
-		if el == nil {
-			return t.noElement(req, eid)
-		}
-		return t.json(req, http.StatusOK, items(el.apiZoneBindings()))
-
-	case strings.Contains(p, "/waninterfaces"):
-		return t.circuits(req, p)
-
-	case strings.HasSuffix(p, "/spokeclusters/status/query"):
+	case "cluster_query":
 		return t.json(req, http.StatusOK, items(t.set.apiClusterStatuses(t.tsg)))
-
-	case strings.Contains(p, "/spokeclusters/") && strings.HasSuffix(p, "/status"):
-		cid := path.Base(strings.TrimSuffix(p, "/status"))
-		st := t.set.apiClusterStatus(t.tsg, cid)
+	case "cluster_status":
+		st := t.set.apiClusterStatus(t.tsg, v["cluster_id"])
 		if st == nil {
 			return t.json(req, http.StatusNotFound,
-				map[string]string{"error": "no spoke cluster " + cid + " in this tenant"})
+				map[string]string{"error": "no spoke cluster " + v["cluster_id"] + " in this tenant"})
 		}
 		return t.json(req, http.StatusOK, st)
-
-	case strings.Contains(p, "/elements/") && strings.Contains(p, "/interfaces"):
-		return t.interfaces(req, p)
-
-	case strings.HasSuffix(p, "/status") && strings.Contains(p, "/api/elements/"):
-		eid := path.Base(strings.TrimSuffix(p, "/status"))
-		el := t.element(eid)
-		if el == nil {
-			return t.noElement(req, eid)
-		}
-		return t.json(req, http.StatusOK, el.apiStatus())
-
-	case strings.Contains(p, "/api/elements/"):
-		eid := path.Base(p)
-		el := t.element(eid)
-		if el == nil {
-			return t.noElement(req, eid)
-		}
-		return t.json(req, http.StatusOK, el.apiElement())
+	case "site_circuits", "circuit_status", "circuit_state":
+		return t.circuits(req, name, v)
 	}
 
-	return t.json(req, http.StatusNotFound,
-		map[string]string{"error": fmt.Sprintf("fixture mode serves no %s", p)})
-}
-
-func interfaceIDs(p string) (eid, iid string) {
-	seg := strings.Split(strings.Trim(p, "/"), "/")
-	for i, s := range seg {
-		switch s {
-		case "elements":
-			if i+1 < len(seg) {
-				eid = seg[i+1]
-			}
-		case "interfaces":
-			if i+1 < len(seg) {
-				iid = seg[i+1]
-			}
-		}
-	}
-	return eid, iid
-}
-
-func (t *transport) interfaces(req *http.Request, p string) (*http.Response, error) {
-	eid, iid := interfaceIDs(p)
+	eid := v["element_id"]
 	el := t.element(eid)
 	if el == nil {
 		return t.noElement(req, eid)
 	}
-	if iid == "" {
+	switch name {
+	case "element":
+		return t.json(req, http.StatusOK, el.apiElement())
+	case "element_status":
+		return t.json(req, http.StatusOK, el.apiStatus())
+	case "element_zones":
+		return t.json(req, http.StatusOK, items(el.apiZoneBindings()))
+	case "interfaces":
 		return t.json(req, http.StatusOK, items(t.set.withEdits(eid, el.apiInterfaces())))
+	case "interface_status":
+		st := el.apiInterfaceStatus(v["interface_id"])
+		if st == nil {
+			return t.json(req, http.StatusNotFound,
+				map[string]string{"error": "interface " + v["interface_id"] + " not found on element " + eid})
+		}
+		return t.json(req, http.StatusOK, st)
+	case "interface_put", "interface_patch":
+		return t.editInterface(req, el, v["interface_id"])
 	}
-	st := el.apiInterfaceStatus(iid)
-	if st == nil {
-		return t.json(req, http.StatusNotFound,
-			map[string]string{"error": "interface " + iid + " not found on element " + eid})
-	}
-	return t.json(req, http.StatusOK, st)
+	return t.json(req, http.StatusNotFound,
+		map[string]string{"error": fmt.Sprintf("fixture mode serves no %s", p)})
 }
 
-func (t *transport) circuits(req *http.Request, p string) (*http.Response, error) {
-	seg := strings.Split(strings.Trim(p, "/"), "/")
-	var eid, cid string
-	for i, s := range seg {
-		switch s {
-		case "elements":
-			if i+1 < len(seg) {
-				eid = seg[i+1]
-			}
-		case "waninterfaces":
-			if i+1 < len(seg) {
-				cid = seg[i+1]
-			}
-		}
-	}
-
-	el := t.element(eid)
+func (t *transport) circuits(req *http.Request, name string, v map[string]string) (*http.Response, error) {
+	el := t.element(v["element_id"])
 	if el == nil {
-		el = t.siteElementFor(p)
+		el = t.siteElement(v["site_id"])
 	}
 	if el == nil {
 		return t.json(req, http.StatusNotFound,
 			map[string]string{"error": "no element of this tenant on that site"})
 	}
 
-	switch {
-	case cid == "":
+	cid := v["circuit_id"]
+	switch name {
+	case "site_circuits":
 		return t.json(req, http.StatusOK, items(el.apiCircuits()))
-	case strings.HasSuffix(p, "/state"):
+	case "circuit_state":
 		if st := el.apiCircuitState(cid); st != nil {
 			return t.json(req, http.StatusOK, st)
 		}
-	case strings.HasSuffix(p, "/status"):
+	case "circuit_status":
 		if st := el.apiCircuitStatus(cid); st != nil {
 			return t.json(req, http.StatusOK, st)
 		}
@@ -174,17 +119,7 @@ func (t *transport) circuits(req *http.Request, p string) (*http.Response, error
 		map[string]string{"error": "no circuit " + cid + " on that site"})
 }
 
-func (t *transport) siteElementFor(p string) *Element {
-	seg := strings.Split(strings.Trim(p, "/"), "/")
-	site := ""
-	for i, s := range seg {
-		if s == "sites" && i+1 < len(seg) {
-			site = seg[i+1]
-		}
-	}
-	if site == "" {
-		return nil
-	}
+func (t *transport) siteElement(site string) *Element {
 	ten := t.set.tenant(t.tsg)
 	if ten == nil {
 		return nil
@@ -248,15 +183,8 @@ func (t *transport) json(req *http.Request, status int, v any) (*http.Response, 
 	}, nil
 }
 
-func (t *transport) editInterface(req *http.Request, p string) (*http.Response, error) {
-	eid, iid := interfaceIDs(p)
-	el := t.element(eid)
-	if el == nil {
-		return t.noElement(req, eid)
-	}
-	if strings.HasSuffix(p, "/status") || iid == "" {
-		return t.refuseWrite(req, p)
-	}
+func (t *transport) editInterface(req *http.Request, el *Element, iid string) (*http.Response, error) {
+	eid := el.ID
 	known := false
 	for _, in := range el.apiInterfaces() {
 		known = known || in.ID == iid

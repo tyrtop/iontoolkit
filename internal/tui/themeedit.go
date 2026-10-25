@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -305,17 +306,19 @@ func (m tuiModel) submitColor() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) saveDraft() (tea.Model, tea.Cmd) {
-	path := app.ThemesPath(m.store())
-	if err := ui.SaveUserTheme(path, m.themeDraft); err != nil {
+	if err := m.saveTheme(m.themeDraft); err != nil {
 		m.status = "save failed: " + err.Error()
 		return m, nil
 	}
-	m.cfg().Theme = m.themeDraft.Name
-	if err := m.store().SaveConfig(m.cfg()); err != nil {
-		m.status = err.Error()
-		return m, nil
-	}
 	return m.applyTheme(m.themeDraft)
+}
+
+func (m tuiModel) saveTheme(t ui.Theme) error {
+	text, err := ui.ThemeYAML(t)
+	if err != nil {
+		return err
+	}
+	return m.runtime().Exec(&runtime.Call{Args: map[string]string{"text": text}}, "theme.save")
 }
 
 func (m tuiModel) themeEditContent() []string {

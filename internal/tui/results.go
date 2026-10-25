@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/output"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -97,25 +98,13 @@ func (m tuiModel) completedCount() int {
 func (m *tuiModel) applyResultFilter() {
 	was := m.cursorResultID()
 
-	q := strings.ToLower(strings.TrimSpace(m.resFilter.Value()))
-	m.resMatches = m.resMatches[:0]
+	m.runtime().SetResultsFilter(m.resFilter.Value())
+	m.resMatches = m.runtime().ResultMatches()
 
 	var names []string
-	for i, r := range m.batch().Results {
-		if r.ElementID == "" {
-			continue
-		}
-		name := r.Name
-		if name == "" {
-			name = r.ElementID
-		}
-		names = append(names, name)
-
-		if q == "" ||
-			strings.Contains(strings.ToLower(name), q) ||
-			strings.Contains(strings.ToLower(r.ElementID), q) ||
-			strings.Contains(strings.ToLower(r.Model), q) {
-			m.resMatches = append(m.resMatches, i)
+	for _, r := range m.batch().Results {
+		if r.ElementID != "" {
+			names = append(names, runtime.ResultName(r))
 		}
 	}
 	m.resFilter.SetSuggestions(names)
@@ -197,27 +186,48 @@ func (m tuiModel) currentResult() (int, bool) {
 	return m.resMatches[c], true
 }
 
-func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "esc", "q":
-		if key == "q" && m.resFilterOn {
-			break
-		}
-		switch {
-		case m.resOpen:
-			m.resOpen = false
-			m.resScroll, m.resLine = 0, 0
-			m.rebuildResultRows()
-		case m.resFilterOn || m.resFilter.Value() != "":
-			m.resFilterOn = false
-			m.resFilter.SetValue("")
-			m.resFilter.Blur()
-			m.applyResultFilter()
-		default:
-			m.phase = phasePicking
-		}
-		return m, nil
+func (m tuiModel) resultsBack() (tea.Model, tea.Cmd) {
+	switch {
+	case m.resOpen:
+		m.resOpen = false
+		m.resScroll, m.resLine = 0, 0
+		m.rebuildResultRows()
+	case m.resFilterOn || m.resFilter.Value() != "":
+		m.resFilterOn = false
+		m.resFilter.SetValue("")
+		m.resFilter.Blur()
+		m.applyResultFilter()
+	default:
+		m.phase = phasePicking
+	}
+	return m, nil
+}
 
+func (m tuiModel) toggleResult() (tea.Model, tea.Cmd) {
+	if _, ok := m.currentResult(); ok {
+		m.resOpen = !m.resOpen
+		m.resScroll, m.resLine = 0, 0
+		m.rebuildResultRows()
+	}
+	return m, nil
+}
+
+func (m tuiModel) openResultsFilter() (tea.Model, tea.Cmd) {
+	if m.resFilterOn {
+		return m, nil
+	}
+	m.resFilter.SetValue("")
+	m.resFilterOn = true
+	m.resOpen = false
+	m.applyResultFilter()
+	return m, m.resFilter.Focus()
+}
+
+func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
+	if next, cmd, ran := m.bindingOn(scrResults, key); ran {
+		return next, cmd
+	}
+	switch key {
 	case "up", "down", "k", "j", "home", "end":
 		if key == "k" || key == "j" {
 			if m.resFilterOn {
@@ -261,31 +271,6 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		}
 		m.moveResultCursor(step)
 		return m, nil
-
-	case "enter":
-		if _, ok := m.currentResult(); ok {
-			m.resOpen = !m.resOpen
-			m.resScroll, m.resLine = 0, 0
-			m.rebuildResultRows()
-		}
-		return m, nil
-
-	case exportKey:
-		return m.exportResults()
-
-	case "f", "o", "s":
-		if !m.resFilterOn {
-			return m.onResultsOutputKey(key)
-		}
-
-	case "/":
-		if !m.resFilterOn {
-			m.resFilter.SetValue("")
-			m.resFilterOn = true
-			m.resOpen = false
-			m.applyResultFilter()
-			return m, m.resFilter.Focus()
-		}
 	}
 
 	if m.resFilterOn {

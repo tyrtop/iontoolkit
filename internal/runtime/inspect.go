@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,30 +9,6 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-func (rt *Runtime) elementClient(ctx context.Context, eid string) (*api.Client, error) {
-	for _, el := range rt.Elements() {
-		if el.ID != eid {
-			continue
-		}
-		if t, ok := rt.TenantOf(el.TSG); ok {
-			c, err := rt.Connect(ctx, t)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %s", t.Name, rt.explain(err))
-			}
-			return c, nil
-		}
-	}
-	p, _, err := rt.Portal(ctx)
-	if err != nil {
-		return nil, err
-	}
-	c, ok := p.(*api.Client)
-	if !ok {
-		return nil, fmt.Errorf("no portal client to read %s with", eid)
-	}
-	return c, nil
-}
-
 func inspectCommands() []Command {
 	return []Command{{
 		Name: "element.inspect", Slow: true,
@@ -41,16 +16,22 @@ func inspectCommands() []Command {
 		Args: []Arg{{Name: "id", Required: true}, {Name: "raw", Bool: true, Help: "each response as it came"}},
 		Run: func(rt *Runtime, c *Call) error {
 			eid := c.Arg("id")
-			client, err := rt.elementClient(c.Ctx, eid)
+			var tsg string
+			if rows := rt.KnownRows(c.Ctx, []string{eid}, nil); len(rows) > 0 {
+				tsg = rows[0].TSG
+			}
+			p, _, err := rt.PortalFor(c.Ctx, tsg)
 			if err != nil {
 				return err
 			}
-			body, el, err := client.ElementRecord(c.Ctx, eid)
+			client, ok := p.(*api.Client)
+			if !ok {
+				return fmt.Errorf("no portal client to read %s with", eid)
+			}
+			snap, err := client.InspectElement(c.Ctx, eid)
 			if err != nil {
 				return err
 			}
-			snap := client.ElementSnapshot(c.Ctx, el)
-			snap.Raw[api.ElementURL(eid)] = body
 			var out any = InspectOut(snap)
 			if c.Arg("raw") == "yes" {
 				out = snap.Raw

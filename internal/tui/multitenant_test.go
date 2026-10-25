@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"tyrtop.com/iontk/internal/runtime"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -33,28 +34,28 @@ func multiModel(t *testing.T) tuiModel {
 func TestElementsFromSeveralTenantsAreOneList(t *testing.T) {
 	m := multiModel(t)
 
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "a", Name: "s0100-rtr-01"},
 		{ID: "b", Name: "s0100-rtr-02"},
 	})
 	if len(m.rows()) != 2 {
 		t.Fatalf("got %d elements, want 2", len(m.rows()))
 	}
-	if m.showTenantColumn() {
+	if tenantCountOf(m) > 1 {
 		t.Error("the tenant column showed with only one tenant loaded")
 	}
 
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{
 		{ID: "c", Name: "ord-gw-01"},
 	})
 	if len(m.rows()) != 3 {
 		t.Fatalf("got %d elements, want 3 across both tenants", len(m.rows()))
 	}
-	if !m.showTenantColumn() {
+	if !(tenantCountOf(m) > 1) {
 		t.Error("the tenant column did not show with two tenants loaded")
 	}
 
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "a", Name: "s0100-rtr-01"},
 	})
 	if len(m.rows()) != 2 {
@@ -71,8 +72,8 @@ func TestElementsFromSeveralTenantsAreOneList(t *testing.T) {
 
 func TestSameElementIDInTwoTenantsStaysDistinct(t *testing.T) {
 	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "same", Name: "a"}})
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{{ID: "same", Name: "b"}})
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "same", Name: "a"}})
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "same", Name: "b"}})
 
 	if len(m.rows()) != 2 {
 		t.Fatalf("got %d elements, want both kept", len(m.rows()))
@@ -91,33 +92,6 @@ func TestSameElementIDInTwoTenantsStaysDistinct(t *testing.T) {
 	}
 	if m.isSelected(m.rows()[1].Key()) {
 		t.Error("selecting one tenant's element also selected the other's")
-	}
-}
-
-func TestEachElementDialsWithItsOwnTenantsClient(t *testing.T) {
-	m := multiModel(t)
-	first := liveClient()
-	second := liveClient()
-	m.pool().Set("111", first)
-	m.pool().Set("222", second)
-
-	rows := []elementRow{
-		{Element: api.Element{ID: "a"}, TSG: "111", Tenant: "Tractor Supply"},
-		{Element: api.Element{ID: "c"}, TSG: "222", Tenant: "Niagara Bottling"},
-		{Element: api.Element{ID: "x"}, TSG: "333", Tenant: "Unloaded"},
-	}
-	got := m.targetsFor(rows)
-	if len(got) != 3 {
-		t.Fatalf("got %d targets, want 3", len(got))
-	}
-	if got[0].Client != first {
-		t.Error("the first element did not get its own tenant's client")
-	}
-	if got[1].Client != second {
-		t.Error("the second element did not get its own tenant's client")
-	}
-	if got[2].Client != nil {
-		t.Error("an unloaded tenant handed out a client")
 	}
 }
 
@@ -201,7 +175,7 @@ func TestLoadFromCacheKeepsSiteNames(t *testing.T) {
 	if len(m.rows()) != 1 {
 		t.Fatalf("loaded %d elements, want 1", len(m.rows()))
 	}
-	if got := m.siteName(m.rows()[0]); got != "Store 0100" {
+	if got := m.runtime().SiteName(m.rows()[0]); got != "Store 0100" {
 		t.Errorf("siteName() = %q, want the cached name rather than the raw id", got)
 	}
 	m.filter.SetValue("store 0100")
@@ -275,9 +249,9 @@ func TestAggregateFinishesOnlyWhenEveryTenantHasAnswered(t *testing.T) {
 	m.runtime().SetPending(2)
 	m.setCacheState(cacheUpdating)
 
-	mm, _ := m.Update(tenantElementsMsg{
-		tsg: "111", tenant: "Tractor Supply",
-		elements: []api.Element{{ID: "a", Name: "s0100-rtr-01"}},
+	mm := land(t, m, runtime.Load{
+		TSG: "111", Tenant: "Tractor Supply",
+		Elements: []api.Element{{ID: "a", Name: "s0100-rtr-01"}},
 	})
 	m = mm.(tuiModel)
 	if m.cacheState() != cacheUpdating {
@@ -287,9 +261,9 @@ func TestAggregateFinishesOnlyWhenEveryTenantHasAnswered(t *testing.T) {
 		t.Errorf("got %d elements, want the first tenant's already shown", len(m.rows()))
 	}
 
-	mm, _ = m.Update(tenantElementsMsg{
-		tsg: "222", tenant: "Niagara Bottling",
-		elements: []api.Element{{ID: "c", Name: "ord-gw-01"}},
+	mm = land(t, m, runtime.Load{
+		TSG: "222", Tenant: "Niagara Bottling",
+		Elements: []api.Element{{ID: "c", Name: "ord-gw-01"}},
 	})
 	m = mm.(tuiModel)
 	if m.cacheState() != cacheUpdated {
@@ -305,14 +279,14 @@ func TestOneTenantFailingDoesNotLoseTheOthers(t *testing.T) {
 	m.spinner = ui.NewSpinner("")
 	m.runtime().SetPending(2)
 
-	mm, _ := m.Update(tenantElementsMsg{
-		tsg: "111", tenant: "Tractor Supply",
-		elements: []api.Element{{ID: "a", Name: "s0100-rtr-01"}},
+	mm := land(t, m, runtime.Load{
+		TSG: "111", Tenant: "Tractor Supply",
+		Elements: []api.Element{{ID: "a", Name: "s0100-rtr-01"}},
 	})
 	m = mm.(tuiModel)
-	mm, _ = m.Update(tenantElementsMsg{
-		tsg: "222", tenant: "Niagara Bottling",
-		err: errTokenTest,
+	mm = land(t, m, runtime.Load{
+		TSG: "222", Tenant: "Niagara Bottling",
+		Err: errTokenTest,
 	})
 	got := mm.(tuiModel)
 
@@ -332,14 +306,14 @@ func TestATenantTheAccountCannotReachIsNotCalledASignInProblem(t *testing.T) {
 	m.spinner = ui.NewSpinner("")
 	m.runtime().SetPending(2)
 
-	mm, _ := m.Update(tenantElementsMsg{
-		tsg: "111", tenant: "Tractor Supply",
-		elements: []api.Element{{ID: "a", Name: "s0100-rtr-01"}},
+	mm := land(t, m, runtime.Load{
+		TSG: "111", Tenant: "Tractor Supply",
+		Elements: []api.Element{{ID: "a", Name: "s0100-rtr-01"}},
 	})
 	m = mm.(tuiModel)
-	mm, _ = m.Update(tenantElementsMsg{
-		tsg: "222", tenant: "CIS_LAB",
-		err: errInteractionRequired,
+	mm = land(t, m, runtime.Load{
+		TSG: "222", Tenant: "CIS_LAB",
+		Err: errInteractionRequired,
 	})
 	got := mm.(tuiModel)
 
@@ -359,7 +333,7 @@ func TestATenantTheAccountCannotReachIsNotCalledASignInProblem(t *testing.T) {
 		t.Error("the problem tenant was not recorded for settings to flag")
 	}
 
-	mm, _ = got.Update(tenantElementsMsg{tsg: "222", tenant: "CIS_LAB", elements: nil})
+	mm = land(t, got, runtime.Load{TSG: "222", Tenant: "CIS_LAB", Elements: nil})
 	if cleared := mm.(tuiModel); cleared.tenantIssues()["222"] != "" {
 		t.Error("the issue survived a successful fetch")
 	}
@@ -397,20 +371,20 @@ func TestATenantRejectingTheTokenRoutesToSignIn(t *testing.T) {
 	m.spinner = ui.NewSpinner("")
 	m.runtime().SetPending(1)
 
-	mm, _ := m.Update(tenantElementsMsg{
-		tsg: "222", tenant: "Niagara Bottling",
-		err: errAuthTest,
+	mm := land(t, m, runtime.Load{
+		TSG: "111", Tenant: "Tractor Supply",
+		Err: errAuthTest,
 	})
 	got := mm.(tuiModel)
 	if got.rt.TokenDead() == "" {
-		t.Error("an auth failure from one tenant did not mark the credential dead")
+		t.Error("an auth failure from the tenant in use did not mark the credential dead")
 	}
 }
 
 func TestFilterNarrowsByTenant(t *testing.T) {
 	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
 
 	m.filter.SetValue("niagara")
 	m.applyFilter()
@@ -427,10 +401,10 @@ func TestRenderCrossTenantElementList(t *testing.T) {
 	m.width, m.height = 110, 30
 	m.spinner = ui.NewSpinner("")
 	m.runtime().MergeSites(map[string]string{"111/s1": "Site 0100", "222/s9": "ORD"})
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "a", Name: "s0100-rtr-01", SiteID: "s1", Model: "ion1200", Connected: true},
 	})
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{
 		{ID: "c", Name: "ord-gw-01", SiteID: "s9", Model: "ion3200", Connected: true},
 	})
 	m = withFleet(m, cacheUpdated, 2, time.Now())
@@ -450,45 +424,6 @@ var errAuthTest = errTokenAuth{}
 type errTokenAuth struct{}
 
 func (errTokenAuth) Error() string { return "status 401 Unauthorized: " }
-
-func TestModeCycling(t *testing.T) {
-	seen := map[pickMode]bool{}
-	mode := modeShell
-	for range pickModes {
-		seen[mode] = true
-		mode = mode.next()
-	}
-	if mode != modeShell {
-		t.Errorf("cycling ended at %v, want to wrap to shell", mode)
-	}
-	if len(seen) != len(pickModes) {
-		t.Errorf("visited %d modes, want all %d", len(seen), len(pickModes))
-	}
-	if got := pickMode(99).next(); got != modeShell {
-		t.Errorf("next() on an unknown mode = %v, want shell", got)
-	}
-}
-
-func TestParseMode(t *testing.T) {
-	tests := []struct {
-		in   string
-		want pickMode
-		ok   bool
-	}{
-		{"shell", modeShell, true},
-		{"batch", modeBatch, true},
-		{"", modeShell, false},
-		{"portal", modeShell, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
-			got, ok := parseMode(tt.in)
-			if ok != tt.ok || got != tt.want {
-				t.Errorf("parseMode(%q) = %v, %v; want %v, %v", tt.in, got, ok, tt.want, tt.ok)
-			}
-		})
-	}
-}
 
 func TestTheMenuOnlySwitchesTheCredentialMode(t *testing.T) {
 	for _, key := range []string{"alt+m", "alt+a"} {
@@ -556,8 +491,8 @@ func TestDefaultModeSettingPersistsAndApplies(t *testing.T) {
 
 func TestSettingsChecklistControlsTheAggregate(t *testing.T) {
 	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
 	m.phase = phaseSettings
 	m.setSection = secTenants
 	m.setFocus = focusContent
@@ -660,19 +595,19 @@ func TestTheTenantColumnCanAppearAndDisappear(t *testing.T) {
 	m := multiModel(t)
 	m.width, m.height = 110, 30
 
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "a", Name: "one"}})
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{{ID: "c", Name: "two"}})
-	if !m.showTenantColumn() {
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a", Name: "one"}})
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c", Name: "two"}})
+	if !(tenantCountOf(m) > 1) {
 		t.Fatal("two tenants did not produce a tenant column")
 	}
 
-	m.mergeTenantElements("222", "Niagara Bottling", nil)
-	if m.showTenantColumn() {
+	mergeForTest(&m, "222", "Niagara Bottling", nil)
+	if tenantCountOf(m) > 1 {
 		t.Error("the tenant column stayed after the second tenant emptied")
 	}
 
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{{ID: "c", Name: "two"}})
-	if !m.showTenantColumn() {
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c", Name: "two"}})
+	if !(tenantCountOf(m) > 1) {
 		t.Error("the tenant column did not come back")
 	}
 }
@@ -687,8 +622,8 @@ func TestMenuSecondEntryFollowsTheCredentialMode(t *testing.T) {
 		{authTenant, "Service Accounts", "browser"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.mode.String(), func(t *testing.T) {
-			for _, listMode := range pickModes {
+		t.Run(tt.mode.Label(), func(t *testing.T) {
+			for _, listMode := range []string{modeShell, modeBatch, modeData} {
 				m := multiModel(t)
 				m.setAuthMode(tt.mode)
 				m.setMode(listMode)
@@ -728,12 +663,12 @@ func TestScopeLabelDescribesWhatIsLoaded(t *testing.T) {
 		t.Errorf("scopeLabel() = %q, want the current tenant with nothing loaded", got)
 	}
 
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "a"}})
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a"}})
 	if got := m.scopeLabel(); got != "Tractor Supply" {
 		t.Errorf("scopeLabel() = %q, want the single tenant named", got)
 	}
 
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{{ID: "c"}})
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c"}})
 	if got := m.scopeLabel(); got != "2 tenants" {
 		t.Errorf("scopeLabel() = %q, want a count rather than one tenant's name", got)
 	}
@@ -847,11 +782,11 @@ func TestPickerSelectAllToggles(t *testing.T) {
 func TestSearchSpansTheWholeWorkingSet(t *testing.T) {
 	m := multiModel(t)
 	m.setAuthMode(authBrowser)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "a", Name: "s0100-rtr-01"},
 		{ID: "b", Name: "s0200-rtr-01"},
 	})
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{
 		{ID: "c", Name: "s0100-gw-01"},
 	})
 
@@ -876,12 +811,12 @@ func TestAggregateSpansTheWorkingSetNotJustTheCurrentTenant(t *testing.T) {
 	m.cfg().Tenants[1].Added = true
 	m.runtime().ReplaceTenant(m.cfg().Tenants[0])
 
-	if got := m.aggregateTenants(); len(got) != 2 {
+	if got := m.runtime().FleetTenants(); len(got) != 2 {
 		t.Errorf("aggregate has %d tenants, want the whole working set: %+v", len(got), got)
 	}
 
 	m.setAuthMode(authTenant)
-	if got := m.aggregateTenants(); len(got) != 1 {
+	if got := m.runtime().FleetTenants(); len(got) != 1 {
 		t.Errorf("tenant mode aggregate has %d tenants, want 1", len(got))
 	}
 }
@@ -1006,8 +941,8 @@ func credsModel(t *testing.T) tuiModel {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
 	return m
 }
 
@@ -1021,7 +956,7 @@ func TestRunAsIsChosenPerTenant(t *testing.T) {
 		t.Errorf("runAsFor(222) = %q, want the default", got)
 	}
 
-	m.setRunAs("111", "tsc-ro")
+	m.runtime().SetRunAs("111", "tsc-ro")
 	if got := m.runAsFor("111"); got != "tsc-ro" {
 		t.Errorf("runAsFor(111) = %q, want the chosen user", got)
 	}
@@ -1038,7 +973,7 @@ func TestRunAsIsChosenPerTenant(t *testing.T) {
 		t.Errorf("credsFor(222) = %+v, want its own pair", b)
 	}
 
-	m.setRunAs("111", "")
+	m.runtime().SetRunAs("111", "")
 	if got := m.runAsFor("111"); got != "tsc-ops" {
 		t.Errorf("runAsFor(111) = %q, want the default back", got)
 	}
@@ -1176,7 +1111,7 @@ func TestPasswordIsSavedAgainstTheTenantThatWasAsked(t *testing.T) {
 
 func TestSessionsUseEachTenantsOwnLogin(t *testing.T) {
 	m := credsModel(t)
-	m.setRunAs("111", "tsc-ro")
+	m.runtime().SetRunAs("111", "tsc-ro")
 
 	a := m.credsFor("111")
 	b := m.credsFor("222")
@@ -1269,11 +1204,11 @@ func TestAltWClosesWhatYouAreIn(t *testing.T) {
 func TestAddingAUserToATenantWithNoRecordYet(t *testing.T) {
 	m := multiModel(t)
 	m.runtime().UseConfig(m.store(), &config.Config{})
-	m.mergeTenantElements("333", "Synovus", []api.Element{{ID: "s1", Name: "syn-rtr-01"}})
+	mergeForTest(&m, "333", "Synovus", []api.Element{{ID: "s1", Name: "syn-rtr-01"}})
 	m.phase = phaseUsers
 	m.usersTSG = "333"
 
-	if _, ok := m.tenantOf("333"); ok {
+	if _, ok := m.runtime().TenantOf("333"); ok {
 		t.Fatal("the tenant should have no record for this test to mean anything")
 	}
 	if name := m.usersPanelTenant().Name; name != "Synovus" {
@@ -1318,41 +1253,6 @@ func TestAddingAUserToATenantWithNoRecordYet(t *testing.T) {
 	}
 }
 
-func TestCrossTenantBatchPairsEachElementWithItsTenantsLogin(t *testing.T) {
-	m := credsModel(t)
-	m.setMode(modeBatch)
-	setTestClient(&m, liveClient())
-	m.pool().Set("222", liveClient())
-	for _, r := range m.rows() {
-		m.runtime().Select(r.Key())
-	}
-
-	var picked []elementRow
-	for _, r := range m.rows() {
-		if m.isSelected(r.Key()) {
-			picked = append(picked, r)
-		}
-	}
-	targets := m.targetsFor(picked)
-	if len(targets) != 2 {
-		t.Fatalf("got %d targets, want 2", len(targets))
-	}
-
-	byElement := map[string][2]string{}
-	for _, tg := range targets {
-		byElement[tg.ElementID] = [2]string{tg.User, tg.Pass}
-	}
-	if got := byElement["a"]; got != [2]string{"tsc-ops", "pw-tsc-ops"} {
-		t.Errorf("element a paired with %v, want Tractor Supply's login", got)
-	}
-	if got := byElement["c"]; got != [2]string{"nb-ops", "pw-nb"} {
-		t.Errorf("element c paired with %v, want Niagara's login", got)
-	}
-	if byElement["a"] == byElement["c"] {
-		t.Error("both tenants were given the same login")
-	}
-}
-
 func TestCrossTenantBatchRefusesWhenATenantHasNoLogin(t *testing.T) {
 	m := credsModel(t)
 	m.setMode(modeBatch)
@@ -1367,8 +1267,8 @@ func TestCrossTenantBatchRefusesWhenATenantHasNoLogin(t *testing.T) {
 		m.runtime().Select(r.Key())
 	}
 
-	mm, _ := m.startRun([]string{"dump device status"})
-	got := mm.(tuiModel)
+	mm, cmd := m.startRun([]string{"dump device status"})
+	got := afterStart(t, mm.(tuiModel), cmd)
 	if got.phase == phaseRunning {
 		t.Error("the run started with a tenant that has no login")
 	}
@@ -1430,96 +1330,11 @@ func TestSelectingFromACachedListConnectsItsTenant(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("no command returned, want the tenant connected")
 	}
-	if got.connectWait != 1 {
-		t.Errorf("connectWait = %d, want one outstanding connection", got.connectWait)
-	}
-	if len(got.resumeSessions) != 1 {
-		t.Errorf("resumeSessions = %v, want the request held for replay", got.resumeSessions)
-	}
 	if strings.Contains(got.status, "not connected") || strings.Contains(got.status, "skipped") {
 		t.Errorf("status = %q, want no complaint about connectivity", got.status)
 	}
 	if got.connecting == "" {
 		t.Error("nothing reported as connecting")
-	}
-}
-
-func TestAConnectedTenantReplaysWhatWasWaiting(t *testing.T) {
-	m := credsModel(t)
-	m.runtime().ResetClients()
-	m.phase = phaseSession
-	m.spinner = ui.NewSpinner("")
-	m.runtime().ResetSessions()
-	m.connectWait = 1
-	m.resumeSessions = []sessionTarget{{eid: "a", name: "s0100-rtr-01", tsg: "111"}}
-
-	mm, cmd := m.Update(tenantConnectedMsg{tsg: "111", client: liveClient()})
-	got := mm.(tuiModel)
-
-	if got.pool().Get("111") == nil {
-		t.Error("the connected client was not pooled")
-	}
-	if got.connectWait != 0 {
-		t.Errorf("connectWait = %d, want 0", got.connectWait)
-	}
-	if len(got.resumeSessions) != 0 {
-		t.Error("resumeSessions was not consumed, so it would replay again")
-	}
-	if cmd == nil {
-		t.Error("no command returned, want the held request carried out")
-	}
-	if got.connecting != "s0100-rtr-01" {
-		t.Errorf("connecting = %q, want the replayed session", got.connecting)
-	}
-}
-
-func TestSeveralTenantsAreAwaitedBeforeReplaying(t *testing.T) {
-	m := credsModel(t)
-	m.runtime().ResetClients()
-	m.phase = phaseSession
-	m.spinner = ui.NewSpinner("")
-	m.runtime().ResetSessions()
-	m.connectWait = 2
-	m.resumeSessions = []sessionTarget{
-		{eid: "a", name: "s0100-rtr-01", tsg: "111"},
-		{eid: "c", name: "ord-gw-01", tsg: "222"},
-	}
-
-	mm, cmd := m.Update(tenantConnectedMsg{tsg: "111", client: liveClient()})
-	half := mm.(tuiModel)
-	if cmd != nil {
-		t.Error("replayed with a tenant still connecting")
-	}
-	if len(half.resumeSessions) != 2 {
-		t.Error("the held request was dropped early")
-	}
-
-	mm, cmd = half.Update(tenantConnectedMsg{tsg: "222", client: liveClient()})
-	done := mm.(tuiModel)
-	if cmd == nil {
-		t.Error("no command returned once every tenant was connected")
-	}
-	if len(done.resumeSessions) != 0 {
-		t.Error("resumeSessions survived the replay")
-	}
-}
-
-func TestAFailedConnectionIsReportedNotSwallowed(t *testing.T) {
-	m := credsModel(t)
-	m.runtime().ResetClients()
-	m.phase = phaseSession
-	m.spinner = ui.NewSpinner("")
-	m.runtime().ResetSessions()
-	m.connectWait = 1
-	m.resumeSessions = []sessionTarget{{eid: "c", name: "ord-gw-01", tsg: "222"}}
-
-	mm, _ := m.Update(tenantConnectedMsg{tsg: "222", err: errInteractionRequired})
-	got := mm.(tuiModel)
-	if !strings.Contains(got.status, "Niagara Bottling") {
-		t.Errorf("status = %q, want the tenant named", got.status)
-	}
-	if got.tenantIssues()["222"] == "" {
-		t.Error("the failure was not recorded")
 	}
 }
 
@@ -1542,12 +1357,6 @@ func TestBatchWaitsForItsTenantsToConnect(t *testing.T) {
 	if got.phase == phaseRunning {
 		t.Error("the run started before its tenants were connected")
 	}
-	if got.connectWait != 2 {
-		t.Errorf("connectWait = %d, want both tenants awaited", got.connectWait)
-	}
-	if len(got.resumeRun) != 1 {
-		t.Errorf("resumeRun = %v, want the commands held", got.resumeRun)
-	}
 	if !strings.Contains(got.status, "connecting") {
 		t.Errorf("status = %q, want the wait reported", got.status)
 	}
@@ -1557,11 +1366,11 @@ func TestEnsureClientsSkipsWhatIsAlreadyConnected(t *testing.T) {
 	m := credsModel(t)
 	m.pool().Set("111", liveClient())
 
-	cmds := m.ensureClients([]string{"111", "222", "222", ""})
+	cmds := needsConnect(m, []string{"111", "222", "222", ""})
 	if len(cmds) != 1 {
 		t.Errorf("got %d connect commands, want 1 for the unconnected tenant", len(cmds))
 	}
-	if len(m.ensureClients([]string{"111"})) != 0 {
+	if len(needsConnect(m, []string{"111"})) != 0 {
 		t.Error("a connected tenant was asked to connect again")
 	}
 }
@@ -1572,7 +1381,7 @@ func TestEnsureClientsSkipsTenantsWithNoCredential(t *testing.T) {
 	m.cfg().Tenants[1].TSGID = ""
 	m.cfg().Tenants[1].Name = "Broken"
 
-	cmds := m.ensureClients([]string{"111", ""})
+	cmds := needsConnect(m, []string{"111", ""})
 	if len(cmds) != 1 {
 		t.Errorf("got %d connect commands, want only the usable tenant", len(cmds))
 	}
@@ -1586,10 +1395,10 @@ func TestAFailedTenantIsNotRetriedForever(t *testing.T) {
 	m.runtime().ClearIssues()
 	m.runtime().SetIssue("222", "not accessible with this sign-in")
 
-	if cmds := m.ensureClients([]string{"222"}); len(cmds) != 0 {
+	if cmds := needsConnect(m, []string{"222"}); len(cmds) != 0 {
 		t.Errorf("got %d connect commands, want none for a tenant that just failed", len(cmds))
 	}
-	if cmds := m.ensureClients([]string{"111"}); len(cmds) != 1 {
+	if cmds := needsConnect(m, []string{"111"}); len(cmds) != 1 {
 		t.Errorf("got %d connect commands for a healthy tenant, want 1", len(cmds))
 	}
 }
@@ -1617,9 +1426,6 @@ func TestPressingEnterAgainRetriesAFailedTenant(t *testing.T) {
 	if cmd == nil {
 		t.Error("no command returned, want the retry to connect")
 	}
-	if got.connectWait != 1 {
-		t.Errorf("connectWait = %d, want the tenant connecting again", got.connectWait)
-	}
 }
 
 func liveClient() *api.Client {
@@ -1638,7 +1444,7 @@ func TestEnsureClientsRenewsATokenThatWillNotOutlastTheOperation(t *testing.T) {
 	spent := spentClient(t)
 	m.pool().Set("111", spent)
 
-	cmds := m.ensureClients([]string{"111"})
+	cmds := needsConnect(m, []string{"111"})
 	if len(cmds) != 1 {
 		t.Fatalf("got %d commands, want the spent token renewed before use", len(cmds))
 	}
@@ -1653,7 +1459,7 @@ func TestEnsureClientsLeavesAHealthyTokenAlone(t *testing.T) {
 	c.SetExpiryForTest(15 * time.Minute)
 	m.pool().Set("111", c)
 
-	if cmds := m.ensureClients([]string{"111"}); len(cmds) != 0 {
+	if cmds := needsConnect(m, []string{"111"}); len(cmds) != 0 {
 		t.Errorf("got %d commands, want none for a token with life left", len(cmds))
 	}
 }
@@ -1665,7 +1471,7 @@ func TestEnsureClientsRenewsOnlyTheTenantsThatNeedIt(t *testing.T) {
 	m.pool().Set("111", good)
 	m.pool().Set("222", spentClient(t))
 
-	if cmds := m.ensureClients([]string{"111", "222"}); len(cmds) != 1 {
+	if cmds := needsConnect(m, []string{"111", "222"}); len(cmds) != 1 {
 		t.Errorf("got %d commands, want 1 for the one spent tenant", len(cmds))
 	}
 }
@@ -1696,4 +1502,64 @@ func withFleet(m tuiModel, state cacheState, count int, at time.Time) tuiModel {
 func withStore(m tuiModel, st *config.Store, cfg *config.Config) tuiModel {
 	m.runtime().UseConfig(st, cfg)
 	return m
+}
+
+func needsConnect(m tuiModel, tsgs []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, tsg := range tsgs {
+		if !seen[tsg] && m.runtime().NeedsConnect(tsg) {
+			seen[tsg] = true
+			out = append(out, tsg)
+		}
+	}
+	return out
+}
+
+func TestAFailedConnectionIsReportedNotSwallowed(t *testing.T) {
+	m := credsModel(t)
+	m.runtime().ResetClients()
+	m.phase = phasePicking
+	m.setMode(modeShell)
+	m.spinner = ui.NewSpinner("")
+	m.runtime().ResetSessions()
+	m.runtime().UseConnector(runtime.Connector{
+		Connect: func(context.Context, *config.Store, config.Tenant) (*api.Client, error) {
+			return nil, errInteractionRequired
+		},
+	})
+
+	mm, cmd := m.openSessions([]sessionTarget{{eid: "c", name: "ord-gw-01", tsg: "222"}})
+	m = mm.(tuiModel)
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("opening a session returned no batch of commands")
+	}
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		done := make(chan tea.Msg, 1)
+		go func() { done <- c() }()
+		var msg tea.Msg
+		select {
+		case msg = <-done:
+		case <-time.After(5 * time.Second):
+			continue
+		}
+		if failed, ok := msg.(sessionErrMsg); ok {
+			next, _ := m.Update(failed)
+			if got := next.(tuiModel).status; !strings.Contains(got, "Niagara Bottling") {
+				t.Errorf("status = %q, want the tenant named", got)
+			}
+			return
+		}
+	}
+	t.Fatal("the failed connection was swallowed")
+}
+
+func land(t *testing.T, m tuiModel, l runtime.Load) tea.Model {
+	t.Helper()
+	m.runtime().ApplyLoad(l)
+	return settle(t, m)
 }

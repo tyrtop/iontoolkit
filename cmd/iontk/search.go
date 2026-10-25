@@ -4,13 +4,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
-	"sync"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -19,8 +16,6 @@ import (
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/runtime"
-	"tyrtop.com/iontk/internal/sase/api"
-	"tyrtop.com/iontk/internal/saseauth"
 	"tyrtop.com/iontk/internal/search"
 	"tyrtop.com/iontk/internal/tui"
 	"tyrtop.com/iontk/internal/ui"
@@ -33,12 +28,6 @@ const (
 )
 
 var searchFormats = []string{searchTable, searchIDs, searchJSON}
-
-type hit struct {
-	element api.Element
-	tenant  config.Tenant
-	record  search.Record
-}
 
 func runSearch(ctx context.Context) error {
 	if flagElement != "" || flagElementsPath != "" {
@@ -53,7 +42,8 @@ func runSearch(ctx context.Context) error {
 		}
 	}
 
-	st := app.OpenStore()
+	rt := cliRuntime()
+	st := rt.Store()
 	if st == nil {
 		return fmt.Errorf("--search needs the config store, which could not be opened")
 	}
@@ -62,32 +52,38 @@ func runSearch(ctx context.Context) error {
 		fmt.Fprintln(os.Stderr, "themes: "+err)
 	}
 
-	tenants, err := searchScope(st)
+	tenants, err := rt.SearchScope(flagTenant, app.Defaults.TSGID)
 	if err != nil {
+		if cfg := rt.Config(); cfg != nil && flagTenant != "" {
+			return fmt.Errorf("%w; %s", err, app.TenantChoices(cfg))
+		}
 		return err
 	}
 
-	fl := newFleet(st, os.Stdin, os.Stderr, showProgress(), canSignIn())
-	hits, err := fl.find(ctx, tenants, search.Parse(flagSearch))
-	if err != nil {
+	q := search.Parse(flagSearch)
+	found := find(ctx, rt, tenants, q, flagRefresh, os.Stderr)
+	if len(found.SignIn) > 0 && renew(ctx, rt, found.SignIn, os.Stdin, os.Stderr, canSignIn()) {
+		found = find(ctx, rt, tenants, q, false, os.Stderr)
+	}
+	if err := found.Err(); err != nil {
 		return err
 	}
-	if len(hits) == 0 {
+	if len(found.Hits) == 0 {
 		return fmt.Errorf("no elements match %q", flagSearch)
 	}
 
 	if len(flagCommands) == 0 {
-		return printHits(os.Stdout, hits, format)
+		return printHits(os.Stdout, found.Hits, format)
 	}
 
-	if err := confirmRun(os.Stdin, os.Stderr, term.IsTerminal(int(os.Stdin.Fd())), hits); err != nil {
+	if err := confirmRun(os.Stdin, os.Stderr, term.IsTerminal(int(os.Stdin.Fd())), found.Hits); err != nil {
 		return err
 	}
-	sel, err := fl.selection(ctx, hits)
-	if err != nil {
-		return err
+	ids := make([]string, 0, len(found.Hits))
+	for _, h := range found.Hits {
+		ids = append(ids, h.Element.ID)
 	}
-	return runBatch(ctx, sel)
+	return runBatch(ctx, selection{rt: rt, elements: ids, rows: found.Rows()})
 }
 
 func canSignIn() bool {
@@ -113,210 +109,64 @@ func searchFormat() (string, error) {
 	}
 }
 
-func searchScope(st *config.Store) ([]config.Tenant, error) {
-	cfg, err := st.Config()
-	if err != nil {
-		return nil, err
-	}
-
-	if flagTenant != "" {
-		t, ok := cfg.Tenant(flagTenant)
-		if !ok {
-			return nil, fmt.Errorf("no saved tenant named %q; %s", flagTenant, app.TenantChoices(cfg))
-		}
-		return []config.Tenant{t}, nil
-	}
-
-	scope := cfg.AddedTenants()
-	if len(scope) == 0 {
-		t, ok := app.ResolveTenant(cfg, "")
-		if !ok {
-			return nil, fmt.Errorf("no tenants to search: %s", app.TenantChoices(cfg))
-		}
-		scope = []config.Tenant{t}
-	}
-
-	if tsg := app.Defaults.TSGID; tsg != "" {
-		var kept []config.Tenant
-		for _, t := range scope {
-			if t.TSGID == tsg {
-				kept = append(kept, t)
-			}
-		}
-		if len(kept) == 0 {
-			return nil, fmt.Errorf("--tsg %s is not in the working set (%s)", tsg, tenantNames(scope))
-		}
-		scope = kept
-	}
-	return scope, nil
-}
-
-func tenantNames(ts []config.Tenant) string {
-	names := make([]string, 0, len(ts))
-	for _, t := range ts {
-		names = append(names, t.Name)
-	}
-	return strings.Join(names, ", ")
-}
-
-type fleet struct {
-	store       *config.Store
-	rt          *runtime.Runtime
-	log         io.Writer
-	progress    bool
-	interactive bool
-	in          io.Reader
-}
-
-func newFleet(st *config.Store, in io.Reader, log io.Writer, progress, interactive bool) *fleet {
-	cfg, _ := st.Config()
-	rt := app.NewRuntime(st, cfg)
-	runAsFromEnv(rt)
-	return &fleet{store: st, rt: rt, in: in, log: log, progress: progress, interactive: interactive}
-}
-
-type loaded struct {
-	tenant config.Tenant
-	els    []api.Element
-	sites  search.SiteMap
-	note   string
-	err    error
-	stale  error
-}
-
-func (l loaded) wantsSignIn() bool {
-	return errors.Is(l.err, saseauth.ErrInteractiveRequired) ||
-		errors.Is(l.stale, saseauth.ErrInteractiveRequired)
-}
-
-func (fl *fleet) find(ctx context.Context, tenants []config.Tenant, q search.Query) ([]hit, error) {
-	results := fl.load(ctx, tenants)
-
-	var again []config.Tenant
-	for _, r := range results {
-		if r.wantsSignIn() {
-			again = append(again, r.tenant)
-		}
-	}
-	if len(again) > 0 && fl.renew(ctx, again) {
-		for _, r := range fl.load(ctx, again) {
-			for i := range results {
-				if results[i].tenant.TSGID == r.tenant.TSGID {
-					results[i] = r
-				}
-			}
-		}
-	}
-
-	var hits []hit
-	var failed []string
-	for _, r := range results {
-		if r.err != nil {
-			failed = append(failed, r.tenant.Name+": "+app.ShortAuthError(r.err))
-			continue
-		}
-		for _, el := range r.els {
-			rec := search.Of(el, r.tenant.TSGID, r.tenant.Name, r.sites)
-			if q.Match(rec) {
-				hits = append(hits, hit{element: el, tenant: r.tenant, record: rec})
-			}
-		}
-	}
-	if len(failed) == len(tenants) {
-		return nil, fmt.Errorf("no tenant could be searched:\n  %s", strings.Join(failed, "\n  "))
-	}
-
-	sort.Slice(hits, func(i, j int) bool {
-		a, b := hits[i], hits[j]
-		if a.record.Name != b.record.Name {
-			return a.record.Name < b.record.Name
-		}
-		return a.tenant.TSGID < b.tenant.TSGID
-	})
-	return hits, nil
-}
-
-func (fl *fleet) load(ctx context.Context, tenants []config.Tenant) []loaded {
-	results := make([]loaded, len(tenants))
-	events := make(chan tui.TenantLoad, 2*len(tenants))
-
-	var wg sync.WaitGroup
-	for i, t := range tenants {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			events <- tui.TenantLoad{Tenant: t.Name}
-			r := fl.elements(ctx, t)
-			results[i] = r
-			events <- tui.TenantLoad{
-				Tenant: t.Name, Count: len(r.els), Note: r.note,
-				Err: r.err, Warn: r.stale != nil, Done: true,
-			}
-		}()
-	}
+func find(ctx context.Context, rt *runtime.Runtime, tenants []config.Tenant, q search.Query, refresh bool, log io.Writer) runtime.Found {
+	events := make(chan runtime.TenantLoad, 2*len(tenants))
+	done := make(chan struct{})
 	go func() {
-		wg.Wait()
-		close(events)
+		defer close(done)
+		if showProgress() {
+			tui.DrainTenants(ctx, events, len(tenants))
+			return
+		}
+		for ev := range events {
+			switch {
+			case !ev.Done:
+			case ev.Err != nil:
+				fmt.Fprintf(log, "%s: unreachable, %s\n", ev.Tenant, app.ShortAuthError(ev.Err))
+			default:
+				fmt.Fprintf(log, "%s: %d elements %s\n", ev.Tenant, ev.Count, ev.Note)
+			}
+		}
 	}()
-
-	if fl.progress {
-		tui.DrainTenants(ctx, events, len(tenants))
-	} else {
-		fl.report(events)
-	}
-	return results
+	found := rt.Search(ctx, tenants, q, refresh, events)
+	close(events)
+	<-done
+	return found
 }
 
-func (fl *fleet) renew(ctx context.Context, needed []config.Tenant) bool {
-	if !fl.interactive {
-		fmt.Fprintf(fl.log, "%s need a credential — run `iontk auth login`, or this on a terminal\n",
-			tenantNames(needed))
+func renew(ctx context.Context, rt *runtime.Runtime, needed []config.Tenant, in io.Reader, log io.Writer, interactive bool) bool {
+	if !interactive {
+		fmt.Fprintf(log, "%s need a credential — run `iontk auth login`, or this on a terminal\n",
+			runtime.TenantNames(needed))
 		return false
 	}
-
-	ok, err := askYesNo(fl.in, fl.log, fmt.Sprintf(
-		"the sign-in for %s has expired; refresh it now?", tenantNames(needed)))
+	ok, err := askYesNo(in, log, fmt.Sprintf(
+		"the sign-in for %s has expired; refresh it now?", runtime.TenantNames(needed)))
 	if err != nil {
-		fmt.Fprintln(fl.log, err)
+		fmt.Fprintln(log, err)
 		return false
 	}
 	if !ok {
 		return false
 	}
-
-	if _, err := app.SignIn(ctx, fl.store, fl.log); err != nil {
-		fmt.Fprintln(fl.log, "sign-in failed:", app.ShortAuthError(err))
-		return false
+	names := make([]string, len(needed))
+	for i, t := range needed {
+		names[i] = t.Name
 	}
-	if err := app.WarmTenants(ctx, fl.store, needed, fl.log); err != nil {
-		fmt.Fprintln(fl.log, err)
+	err = rt.Exec(&runtime.Call{Ctx: ctx, Args: map[string]string{"tenants": strings.Join(names, ",")},
+		Out: func(l string) { fmt.Fprintln(log, l) }}, "auth.login")
+	if err != nil {
+		fmt.Fprintln(log, "sign-in failed:", app.ShortAuthError(err))
 		return false
 	}
 	return true
 }
 
-func (fl *fleet) report(events <-chan tui.TenantLoad) {
-	for ev := range events {
-		switch {
-		case !ev.Done:
-		case ev.Err != nil:
-			fmt.Fprintf(fl.log, "%s: unreachable, %s\n", ev.Tenant, app.ShortAuthError(ev.Err))
-		default:
-			fmt.Fprintf(fl.log, "%s: %d elements %s\n", ev.Tenant, ev.Count, ev.Note)
-		}
-	}
-}
-
-func (fl *fleet) elements(ctx context.Context, t config.Tenant) loaded {
-	l := fl.rt.LoadTenant(ctx, t, flagRefresh)
-	return loaded{tenant: t, els: l.Elements, sites: search.SiteMap(l.Sites), note: l.Note, err: l.Err, stale: l.Stale}
-}
-
-func printHits(w io.Writer, hits []hit, format string) error {
+func printHits(w io.Writer, hits []runtime.Hit, format string) error {
 	switch format {
 	case searchIDs:
 		for _, h := range hits {
-			fmt.Fprintln(w, h.element.ID)
+			fmt.Fprintln(w, h.Element.ID)
 		}
 		return nil
 
@@ -334,9 +184,9 @@ func printHits(w io.Writer, hits []hit, format string) error {
 		rows := make([]out, 0, len(hits))
 		for _, h := range hits {
 			rows = append(rows, out{
-				ID: h.element.ID, Name: h.record.Name, Site: h.record.SiteLabel(),
-				Model: h.element.Model, Software: h.element.Software,
-				Connected: h.element.Connected, Tenant: h.tenant.Name, TSGID: h.tenant.TSGID,
+				ID: h.Element.ID, Name: h.Record.Name, Site: h.Record.SiteLabel(),
+				Model: h.Element.Model, Software: h.Element.Software,
+				Connected: h.Element.Connected, Tenant: h.Tenant.Name, TSGID: h.Tenant.TSGID,
 			})
 		}
 		enc := json.NewEncoder(w)
@@ -352,21 +202,21 @@ func printHits(w io.Writer, hits []hit, format string) error {
 	fmt.Fprintln(tw, header)
 	for _, h := range hits {
 		row := strings.Join([]string{
-			label(h), h.record.SiteLabel(), dash(h.element.Model), h.record.State(), h.element.ID,
+			label(h), h.Record.SiteLabel(), dash(h.Element.Model), h.Record.State(), h.Element.ID,
 		}, "\t")
 		if multiTenant(hits) {
-			row += "\t" + h.tenant.Name
+			row += "\t" + h.Tenant.Name
 		}
 		fmt.Fprintln(tw, row)
 	}
 	return tw.Flush()
 }
 
-func label(h hit) string {
-	if h.record.Name != "" {
-		return h.record.Name
+func label(h runtime.Hit) string {
+	if h.Record.Name != "" {
+		return h.Record.Name
 	}
-	return h.element.ID
+	return h.Element.ID
 }
 
 func dash(s string) string {
@@ -376,9 +226,9 @@ func dash(s string) string {
 	return s
 }
 
-func multiTenant(hits []hit) bool {
+func multiTenant(hits []runtime.Hit) bool {
 	for _, h := range hits[1:] {
-		if h.tenant.TSGID != hits[0].tenant.TSGID {
+		if h.Tenant.TSGID != hits[0].Tenant.TSGID {
 			return true
 		}
 	}
@@ -398,7 +248,7 @@ func askYesNo(in io.Reader, w io.Writer, question string) (bool, error) {
 	return false, nil
 }
 
-func confirmRun(in io.Reader, w io.Writer, tty bool, hits []hit) error {
+func confirmRun(in io.Reader, w io.Writer, tty bool, hits []runtime.Hit) error {
 	if flagNoValidate {
 		return nil
 	}
@@ -407,7 +257,7 @@ func confirmRun(in io.Reader, w io.Writer, tty bool, hits []hit) error {
 			len(hits), flagSearch)
 	}
 
-	cmds := app.SplitCommands(flagCommands)
+	cmds := runtime.SplitCommands(flagCommands...)
 	fmt.Fprintf(w, "\nrunning %s on %s:\n", plural(len(cmds), "command"), plural(len(hits), "element"))
 	for _, c := range cmds {
 		fmt.Fprintf(w, "  $ %s\n", c)
@@ -431,22 +281,6 @@ func plural(n int, word string) string {
 		return "1 " + word
 	}
 	return fmt.Sprintf("%d %ss", n, word)
-}
-
-func (fl *fleet) selection(ctx context.Context, hits []hit) (selection, error) {
-	sel := selection{rt: fl.rt, elements: make([]string, 0, len(hits))}
-	seen := map[string]bool{}
-	for _, h := range hits {
-		if !seen[h.tenant.TSGID] {
-			seen[h.tenant.TSGID] = true
-			if _, err := fl.rt.Connect(ctx, h.tenant); err != nil {
-				return selection{}, fmt.Errorf("tenant %s: %w", h.tenant.Name, err)
-			}
-		}
-		sel.elements = append(sel.elements, h.element.ID)
-		sel.rows = append(sel.rows, runtime.Element{Element: h.element, TSG: h.tenant.TSGID, Tenant: h.tenant.Name})
-	}
-	return sel, nil
 }
 
 var fleetSearchCmd = &cobra.Command{

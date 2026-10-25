@@ -70,24 +70,6 @@ func TestNormalizeFormat(t *testing.T) {
 	}
 }
 
-func TestNextFormatCyclesThroughEveryFormat(t *testing.T) {
-	seen := map[string]bool{}
-	f := FormatJSON
-	for range outputFormats {
-		seen[f] = true
-		f = NextFormat(f)
-	}
-	if f != FormatJSON {
-		t.Errorf("cycling returned to %q, want to wrap around to %q", f, FormatJSON)
-	}
-	if len(seen) != len(outputFormats) {
-		t.Errorf("cycle visited %d formats, want all %d", len(seen), len(outputFormats))
-	}
-	if got := NextFormat("nonsense"); got != FormatJSON {
-		t.Errorf("NextFormat(%q) = %q, want it to fall back to %q", "nonsense", got, FormatJSON)
-	}
-}
-
 func TestFormatExt(t *testing.T) {
 	tests := map[string]string{
 		FormatJSON:  "json",

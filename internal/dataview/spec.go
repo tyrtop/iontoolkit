@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"tyrtop.com/iontk/internal/endpoint"
 	"tyrtop.com/iontk/internal/sase/ioncli"
-	"tyrtop.com/iontk/internal/tmpl"
 )
 
 //go:embed builtin.yaml
@@ -24,12 +24,14 @@ type View struct {
 	Keys    map[string]string `yaml:"keys,omitempty"`
 	Actions map[string]any    `yaml:"actions,omitempty"`
 
-	Name     string            `yaml:"name"`
-	Fetch    map[string]string `yaml:"fetch,omitempty"`
-	Sections []Section         `yaml:"sections"`
-	Compare  *Compare          `yaml:"compare,omitempty"`
+	Name      string              `yaml:"name"`
+	Endpoints []endpoint.Endpoint `yaml:"endpoints,omitempty"`
+	Fetch     map[string]string   `yaml:"fetch,omitempty"`
+	Sections  []Section           `yaml:"sections"`
+	Compare   *Compare            `yaml:"compare,omitempty"`
 
-	Source string `yaml:"-"`
+	Source string        `yaml:"-"`
+	calls  *endpoint.Set `yaml:"-"`
 }
 
 type Compare struct {
@@ -211,24 +213,35 @@ func (s *Set) normalize() error {
 		if len(v.Sections) == 0 {
 			return fmt.Errorf("view %q has no sections", v.Name)
 		}
-		for name, p := range v.Fetch {
-			if err := checkPath(p); err != nil {
+		calls, err := endpoint.Build(v.Name, "", nil, v.Endpoints)
+		if err != nil {
+			return err
+		}
+		v.calls = calls
+		for name, e := range v.Fetch {
+			if err := v.check(e); err != nil {
 				return fmt.Errorf("view %q fetch %q: %w", v.Name, name, err)
 			}
 		}
 		for j := range v.Sections {
-			if err := v.Sections[j].normalize(v.Name); err != nil {
+			if err := v.Sections[j].normalize(*v); err != nil {
 				return err
 			}
 		}
-		if err := v.Compare.normalize(v.Name); err != nil {
+		if err := v.Compare.normalize(*v); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (sec *Section) normalize(view string) error {
+func (v View) check(name string) error {
+	_, err := v.calls.SDWAN(name)
+	return err
+}
+
+func (sec *Section) normalize(v View) error {
+	view := v.Name
 	where := fmt.Sprintf("view %q section %q", view, sec.Title)
 	switch {
 	case sec.ForEach != "" && len(sec.Rows) > 0:
@@ -244,7 +257,7 @@ func (sec *Section) normalize(view string) error {
 		if sec.ForEach == "" {
 			return fmt.Errorf("%s fetches %q but has no for_each; per-element fetches belong on the view", where, name)
 		}
-		if err := checkPath(p); err != nil {
+		if err := v.check(p); err != nil {
 			return fmt.Errorf("%s fetch %q: %w", where, name, err)
 		}
 	}
@@ -254,10 +267,11 @@ func (sec *Section) normalize(view string) error {
 	return nil
 }
 
-func (c *Compare) normalize(view string) error {
+func (c *Compare) normalize(v View) error {
 	if c == nil {
 		return nil
 	}
+	view := v.Name
 	if len(c.Rows) == 0 {
 		return fmt.Errorf("view %q compares nothing: a compare block with no rows is a dial for no answer", view)
 	}
@@ -280,13 +294,9 @@ func (c *Compare) normalize(view string) error {
 		}
 	}
 	for name, p := range c.Fetch {
-		if err := checkPath(p); err != nil {
+		if err := v.check(p); err != nil {
 			return fmt.Errorf("view %q compare fetch %q: %w", view, name, err)
 		}
 	}
 	return nil
 }
-
-func checkPath(p string) error { return tmpl.CheckPath(p) }
-
-func CheckPath(p string) error { return tmpl.CheckPath(p) }

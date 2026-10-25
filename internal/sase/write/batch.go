@@ -11,7 +11,6 @@ import (
 type Client interface {
 	Getter
 	Sender
-	LookupElement(ctx context.Context, eid string) (api.Element, error)
 }
 
 type ElementPlans struct {
@@ -45,23 +44,22 @@ func ElementVars(el api.Element) map[string]string {
 	return map[string]string{"element_id": el.ID, "site_id": el.SiteID, "el": el.ID, "site": el.SiteID}
 }
 
-func PlanElements(ctx context.Context, c Client, w Spec, eids, match []string, set map[string]string) []ElementPlans {
-	out := make([]ElementPlans, 0, len(eids))
-	for _, eid := range eids {
-		out = append(out, planElement(ctx, c, w, eid, match, set))
+func PlanElements(ctx context.Context, c Client, w Spec, els []api.Element, match []string, set map[string]string) []ElementPlans {
+	out := make([]ElementPlans, 0, len(els))
+	for _, el := range els {
+		out = append(out, planElement(ctx, c, w, el, match, set))
 	}
 	return out
 }
 
-func planElement(ctx context.Context, c Client, w Spec, eid string, match []string, set map[string]string) ElementPlans {
-	ep := ElementPlans{Element: eid}
-	el, err := c.LookupElement(ctx, eid)
-	if err != nil {
-		ep.Err = err.Error()
-		return ep
-	}
+func planElement(ctx context.Context, c Client, w Spec, el api.Element, match []string, set map[string]string) ElementPlans {
+	ep := ElementPlans{Element: el.ID}
 	if el.Name != "" {
 		ep.Element = el.Name
+	}
+	if el.SiteID == "" {
+		ep.Err = "not on a site in the fleet list"
+		return ep
 	}
 	vars := ElementVars(el)
 	recs, err := w.Records(ctx, c, vars)

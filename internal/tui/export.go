@@ -6,10 +6,9 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/output"
-	"tyrtop.com/iontk/internal/ui"
+	"tyrtop.com/iontk/internal/runtime"
 )
 
 const (
@@ -24,7 +23,7 @@ func (m tuiModel) exportText(what, slug, ext, text string) (tuiModel, tea.Cmd) {
 		return m, nil
 	}
 
-	where, err := m.writeExport(slug, ext, text)
+	where, err := m.runtime().Export(slug, ext, text)
 	if err != nil {
 		m.status = "export failed: " + err.Error()
 		logging.L().Warn("export failed", "what", what, "err", err)
@@ -36,10 +35,6 @@ func (m tuiModel) exportText(what, slug, ext, text string) (tuiModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m tuiModel) writeExport(slug, ext, text string) (string, error) {
-	return app.Export(m.store(), slug, ext, text)
-}
-
 func size(n int) string {
 	if n < 1024 {
 		return fmt.Sprintf("%d bytes", n)
@@ -47,64 +42,36 @@ func size(n int) string {
 	return fmt.Sprintf("%.1f kB", float64(n)/1024)
 }
 
-func (m tuiModel) exportSession() (tea.Model, tea.Cmd) {
-	s := m.sessions().Active()
-	if s == nil {
-		m.status = "nothing to export here"
-		return m, nil
-	}
-	return m.exportText(s.Name+" scrollback", s.Name, "txt", s.Buffer())
-}
+func (m tuiModel) exportSession() (tea.Model, tea.Cmd) { return m.exportCommand("session.export", nil) }
 
-func (m tuiModel) exportDataPage() (tea.Model, tea.Cmd) {
-	tab, ok := m.activeData()
-	if !ok {
-		m.status = "nothing to export here"
+func (m tuiModel) exportDataPage() (tea.Model, tea.Cmd) { return m.exportCommand("data.export", nil) }
+
+func (m tuiModel) exportCommand(name string, args map[string]string) (tea.Model, tea.Cmd) {
+	var said []string
+	if err := m.runtime().Exec(&runtime.Call{Args: args, Out: func(l string) { said = append(said, l) }}, name); err != nil {
+		m.status = "nothing to export here: " + err.Error()
 		return m, nil
 	}
-	page := m.visiblePage(tab)
-	lines := make([]string, 0, len(page.lines)+1)
-	lines = append(lines, tab.Name)
-	for _, ln := range page.lines {
-		lines = append(lines, strings.TrimRight(ui.Plain(ln), " "))
-	}
-	return m.exportText(tab.Name+" data", tab.Name, "txt", strings.Join(lines, "\n"))
+	m.status = strings.Join(said, " ")
+	return m, nil
 }
 
 func (m tuiModel) exportResults() (tea.Model, tea.Cmd) {
 	idx, ok := m.currentResult()
 	if ok && m.resOpen {
-		r := m.batch().Results[idx]
-		name := r.Name
-		if name == "" {
-			name = r.ElementID
-		}
-		lines := make([]string, 0, len(m.resultDetail(idx)))
-		for _, ln := range m.resultDetail(idx) {
-			lines = append(lines, strings.TrimRight(ui.Plain(ln), " "))
-		}
-		return m.exportText(name+" output", name, "txt", strings.Join(lines, "\n"))
+		return m.exportCommand("batch.export", map[string]string{"element": m.batch().Results[idx].ElementID})
 	}
 	return m.exportRunJSON()
 }
 
 func (m tuiModel) exportRunJSON() (tea.Model, tea.Cmd) {
-	var b strings.Builder
-	sink := output.NewSink(&b, output.FormatJSON, output.WithOrientation(m.batchOrient()))
-	for i, r := range m.batch().Results {
-		if r.ElementID == "" {
-			continue
-		}
-		if err := sink.Add(i, r); err != nil {
-			m.status = "export failed: " + err.Error()
-			return m, nil
-		}
-	}
-	if err := sink.Close(); err != nil {
+	where, err := m.runtime().SaveBatch("", m.runtime().ExportsDir(), output.FormatJSON, "")
+	if err != nil {
 		m.status = "export failed: " + err.Error()
 		return m, nil
 	}
-	return m.exportText(fmt.Sprintf("%d results as json", m.completedCount()), "run", "json", b.String())
+	m.status = fmt.Sprintf("exported %d results as json to %s", m.completedCount(), where)
+	return m, nil
 }
 
 func pasteCommands(text string) []string {

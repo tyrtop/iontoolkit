@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/saseauth"
 	"tyrtop.com/iontk/internal/ui"
@@ -87,7 +88,8 @@ func TestNeedsSignInOpensTheWaitingScreen(t *testing.T) {
 	m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser})
 	m.phase = phaseLoading
 
-	mm, cmd := m.Update(needsSignInMsg{})
+	m.runtime().TokenDied("sign-in expired", false)
+	mm, cmd := m.Update(fleetDoneMsg{err: errors.New("1 of 1 tenants failed to load")})
 	got := mm.(tuiModel)
 	if got.phase != phaseSignIn {
 		t.Fatalf("phase = %v, want phaseSignIn", got.phase)
@@ -123,11 +125,9 @@ func TestSignedInLandsOnAConfirmation(t *testing.T) {
 	m.phase = phaseSignIn
 	m.spinner = ui.NewSpinner("")
 
-	mm, cmd := m.Update(signedInMsg{
-		client: liveClient(),
-		ident:  saseauth.Identity{Name: "Ben Hall", Email: "ben@example.test", TSG: "1"},
-		ttl:    899 * time.Second,
-	})
+	setTestClient(&m, liveClient())
+	m.runtime().SignedIn(saseauth.Identity{Name: "Ben Hall", Email: "ben@example.test", TSG: "1"}, api.Profile{}, 899*time.Second)
+	mm, cmd := m.Update(signedInMsg{})
 	got := mm.(tuiModel)
 	if got.phase != phaseSignedIn {
 		t.Fatalf("phase = %v, want phaseSignedIn so the result is actually visible", got.phase)
@@ -154,7 +154,7 @@ func TestSignInInTheMiddleOfAnActionSkipsTheConfirmation(t *testing.T) {
 		m.spinner = ui.NewSpinner("")
 		m.runtime().ForgetSelection()
 
-		mm, _ := m.Update(signedInMsg{client: liveClient()})
+		mm, _ := m.Update(signedInMsg{})
 		got := mm.(tuiModel)
 		if got.phase == phaseSignedIn {
 			t.Error("a mid-action sign-in stopped to show a confirmation")
@@ -173,7 +173,7 @@ func TestSignInInTheMiddleOfAnActionSkipsTheConfirmation(t *testing.T) {
 		m.resumeSessions = []sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}}
 		setTestClient(&m, liveClient())
 
-		mm, cmd := m.Update(signedInMsg{client: liveClient()})
+		mm, cmd := m.Update(signedInMsg{})
 		got := mm.(tuiModel)
 		if got.phase == phaseSignedIn {
 			t.Error("a mid-action sign-in stopped to show a confirmation")
@@ -416,10 +416,11 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 		m.runtime().ResetSessions()
 		m.lastTargets = []sessionTarget{{eid: "e1", name: "s0100-rtr-01", tsg: "1"}, {eid: "e2", name: "s0100-rtr-02", tsg: "1"}}
 
-		mm, cmd := m.Update(sessionErrMsg{
-			target: sessionTarget{eid: "e1", name: "s0100-rtr-01", tsg: "1"},
-			err:    "dial: failed to WebSocket dial: expected handshake response status code 101 but got 401",
-		})
+		dial := "dial: failed to WebSocket dial: expected handshake response status code 101 but got 401"
+		if !m.runtime().Refused("1", errors.New(dial)) {
+			t.Fatal("the runtime did not take a 401 dial as a refused sign-in")
+		}
+		mm, cmd := m.Update(sessionErrMsg{target: sessionTarget{eid: "e1", name: "s0100-rtr-01", tsg: "1"}, err: dial})
 		got := mm.(tuiModel)
 		if got.phase != phaseSignIn {
 			t.Fatalf("phase = %v, want phaseSignIn so the browser opens", got.phase)
@@ -457,7 +458,8 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 		m.spinner = ui.NewSpinner("")
 		m.runtime().ForgetSelection()
 
-		mm, cmd := m.Update(elementsErrMsg("status 401 Unauthorized: "))
+		m.runtime().ApplyLoad(runtime.Load{TSG: "1", Tenant: "Acme Co", Err: errors.New("status 401 Unauthorized: ")})
+		mm, cmd := m.Update(fleetDoneMsg{err: errors.New("1 of 1 tenants failed to load")})
 		got := mm.(tuiModel)
 		if got.phase != phaseSignIn {
 			t.Fatalf("phase = %v, want phaseSignIn", got.phase)

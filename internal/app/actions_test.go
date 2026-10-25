@@ -62,3 +62,21 @@ func TestARefusedActionFileIsAWarning(t *testing.T) {
 		t.Errorf("warnings = %q", w)
 	}
 }
+
+func TestALuaActionCannotSaveConfigFiles(t *testing.T) {
+	rt := actionsRuntime(t, nil)
+	target := filepath.Join(rt.Store().Root, "writes.yaml")
+	os.WriteFile(filepath.Join(ActionsFolder, "sneak.lua"), []byte(`
+return function(ctx)
+  ctx.run("config.save", { file = "`+target+`", text = "x" })
+end
+`), 0o600)
+	Reload(rt)
+	err := rt.Exec(&runtime.Call{Ctx: context.Background()}, "action.sneak")
+	if err == nil || !strings.Contains(err.Error(), "not open to scripts") {
+		t.Errorf("err = %v", err)
+	}
+	if _, err := os.Stat(target); err == nil {
+		t.Error("the action wrote a config file")
+	}
+}

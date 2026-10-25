@@ -253,9 +253,9 @@ func TestRowsAreOrderedAndSiteNamesMatch(t *testing.T) {
 	if names(rt.List().Rows) != "S0282-RTR-01" {
 		t.Errorf("after the names arrived: %s", names(rt.List().Rows))
 	}
-	rt.MergeSites(nil)
+	rt.ClearSites()
 	if rt.Sites() != nil {
-		t.Error("nil did not forget the names")
+		t.Error("a clear did not forget the names")
 	}
 }
 
@@ -273,5 +273,21 @@ func TestArmingAMacroAndCyclingAway(t *testing.T) {
 	rt.SetMode(ModeBatch)
 	if rt.Armed() != "" {
 		t.Error("SetMode left the macro armed")
+	}
+}
+
+func TestTheListOpensInTheDefaultModeAndADisarmReturnsToIt(t *testing.T) {
+	rt, _ := withConfig(t)
+	if err := rt.Set("default_mode", ModeData); err != nil {
+		t.Fatal(err)
+	}
+	rt.SetMode("")
+	if rt.Mode() != ModeData {
+		t.Errorf("mode = %q, want the default_mode option's", rt.Mode())
+	}
+	rt.ArmMacro("dump-status")
+	rt.Disarm()
+	if rt.Mode() != ModeData || rt.Armed() != "" {
+		t.Errorf("after a disarm: %q %q, want the default mode and nothing armed", rt.Mode(), rt.Armed())
 	}
 }

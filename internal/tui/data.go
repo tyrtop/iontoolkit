@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/dataview"
 	"tyrtop.com/iontk/internal/runtime"
-	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -18,18 +17,11 @@ type (
 	dataPane = runtime.DataPane
 )
 
-type dataLoadedMsg struct {
-	eid      string
-	view     string
-	rendered dataview.Rendered
-	err      string
-}
+type dataDoneMsg struct{ err error }
 
 func (m tuiModel) viewNames() []string { return m.runtime().ViewNames() }
 
 func (m tuiModel) dataTabs() []dataTab { return m.runtime().DataTabs() }
-
-func (m tuiModel) dataActive() int { return m.runtime().DataActive() }
 
 func (m tuiModel) openDataTabs(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	if len(targets) == 0 {
@@ -42,60 +34,24 @@ func (m tuiModel) openDataTabs(targets []sessionTarget) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-
-	if m.needsSignIn(tsgsOf(targets)) {
+	if m.runtime().NeedsSignIn(tsgsOf(targets)) {
 		m.resumeData = targets
 		return m.startSignIn()
 	}
-	if conn := m.ensureClients(tsgsOf(targets)); len(conn) > 0 {
-		m.resumeData = targets
-		m.connectWait = len(conn)
-		m.status = ""
-		return m, tea.Batch(append(conn, m.spinner.Tick)...)
-	}
-
-	var cmds []tea.Cmd
-	var unreachable []string
-	for _, t := range targets {
-		c := m.tenantClient(t.tsg)
-		if c == nil {
-			unreachable = append(unreachable, t.name)
-			continue
-		}
-		cmds = append(cmds, m.loadTab(m.runtime().OpenData(t.eid, t.name, t.tsg), c)...)
-	}
-	if len(cmds) == 0 {
-		m.status = "could not reach " + strings.Join(unreachable, ", ")
+	rows, note := m.runtime().Reach(rowsOf(targets))
+	if len(rows) == 0 {
+		m.status = note
 		return m, nil
 	}
-	if len(unreachable) > 0 {
-		m.status = "skipped " + strings.Join(unreachable, ", ") + ": tenant unreachable"
-	}
-
+	tabs := m.runtime().OpenDataTabs(rows)
 	m.phase = phaseData
-	m.status = ""
-	return m, tea.Batch(append(cmds, m.spinner.Tick)...)
+	m.status = note
+	return m, tea.Batch(m.loadTabs(tabs), m.spinner.Tick)
 }
 
-func (m tuiModel) loadTab(tab dataTab, c *api.Client) []tea.Cmd {
-	set := m.runtime().Views()
-	if set == nil {
-		return nil
-	}
+func (m tuiModel) loadTabs(tabs []dataTab) tea.Cmd {
 	rt, ctx := m.runtime(), m.ctx
-	cmds := make([]tea.Cmd, 0, len(set.Views))
-	for _, v := range set.Views {
-		cmds = append(cmds, func() tea.Msg {
-			r, problem := rt.LoadView(ctx, c, tab, v)
-			return dataLoadedMsg{eid: tab.EID, view: v.Name, rendered: r, err: problem}
-		})
-	}
-	return cmds
-}
-
-func (m tuiModel) onDataLoaded(msg dataLoadedMsg) (tea.Model, tea.Cmd) {
-	m.runtime().ApplyView(msg.eid, msg.view, msg.rendered, msg.err)
-	return m, nil
+	return func() tea.Msg { return dataDoneMsg{err: rt.LoadTabs(ctx, tabs)} }
 }
 
 func (m tuiModel) activeData() (dataTab, bool) { return m.runtime().ActiveData() }
@@ -105,20 +61,20 @@ func (m tuiModel) refreshData() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	c := m.tenantClient(tab.TSG)
-	if c == nil {
+	if !m.runtime().Reachable(tab.TSG) {
 		m.status = "could not reach " + m.tenantName(tab.TSG)
 		return m, nil
 	}
 	tab, _ = m.runtime().RefreshData()
-	return m, tea.Batch(append(m.loadTab(tab, c), m.spinner.Tick)...)
+	return m, tea.Batch(m.loadTabs([]dataTab{tab}), m.spinner.Tick)
 }
 
 func (m tuiModel) closeDataTab() tuiModel {
 	if _, ok := m.activeData(); !ok {
 		return m
 	}
-	if m.runtime().CloseData() == 0 {
+	_ = m.runtime().Run("data.close", nil)
+	if len(m.dataTabs()) == 0 {
 		m.phase = phasePicking
 	}
 	return m
@@ -129,46 +85,10 @@ func (m tuiModel) onDataKey(key string) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 
-	if next, handled := m.onTabKey(key); handled {
-		return next, nil
-	}
-
-	switch key {
-	case "esc", "q", "ctrl+]":
-		if m.dataFilterOn || m.dataFilter.Value() != "" {
-			m.dataFilterOn = false
-			m.dataFilter.SetValue("")
-			m.dataFilter.Blur()
-			return m, nil
-		}
-		m.phase = phasePicking
+	if key == "enter" && m.dataFilterOn {
+		m.dataFilterOn = false
+		m.dataFilter.Blur()
 		return m, nil
-	case "/":
-		if !m.dataFilterOn {
-			m.dataFilter.SetValue("")
-			m.dataFilterOn = true
-			return m, m.dataFilter.Focus()
-		}
-	case "enter":
-		if m.dataFilterOn {
-			m.dataFilterOn = false
-			m.dataFilter.Blur()
-			return m, nil
-		}
-	case "r":
-		if !m.dataFilterOn {
-			return m.refreshData()
-		}
-	case "c":
-		if !m.dataFilterOn {
-			return m.startCompare()
-		}
-	case writeKey:
-		if !m.dataFilterOn {
-			return m.startWrite()
-		}
-	case exportKey:
-		return m.exportDataPage()
 	}
 
 	tab, ok := m.activeData()
@@ -237,47 +157,17 @@ func clampScroll(at, total, rows int) int {
 
 func (m *tuiModel) visiblePage(tab dataTab) dataPage {
 	page := m.dataPage(tab)
-	q := strings.ToLower(strings.TrimSpace(m.dataFilter.Value()))
-	if q == "" {
+	if strings.TrimSpace(m.runtime().DataFilter()) == "" {
 		return page
 	}
-
-	head, hdr := make([]int, len(page.lines)), make([]int, len(page.lines))
-	at, under := -1, -1
-	headAt, hdrAt := 0, 0
-	for i := range page.lines {
-		for headAt < len(page.heads) && page.heads[headAt] <= i {
-			at = page.heads[headAt]
-			headAt++
-		}
-		for hdrAt < len(page.hdrs) && page.hdrs[hdrAt] <= i {
-			under = page.hdrs[hdrAt]
-			hdrAt++
-		}
-		head[i], hdr[i] = at, under
+	plain := make([]string, len(page.lines))
+	for i, l := range page.lines {
+		plain[i] = ui.Plain(l)
 	}
-
-	var out dataPage
-	kept := map[int]bool{}
-	add := func(i int) {
-		if i < 0 || kept[i] {
-			return
-		}
-		kept[i] = true
+	keep, heads := runtime.FilterPage(plain, page.heads, page.hdrs, m.runtime().DataFilter())
+	out := dataPage{heads: heads}
+	for _, i := range keep {
 		out.lines = append(out.lines, page.lines[i])
-	}
-	for i, line := range page.lines {
-		if !strings.Contains(strings.ToLower(ui.Plain(line)), q) {
-			continue
-		}
-		if h := head[i]; h >= 0 && !kept[h] {
-			out.heads = append(out.heads, len(out.lines))
-			add(h)
-		}
-		if d := hdr[i]; d >= 0 && d != i && d > head[i] {
-			add(d)
-		}
-		add(i)
 	}
 	return out
 }
@@ -515,9 +405,32 @@ func (m tuiModel) onDataFilterKey(msg tea.KeyPressMsg, key string) (tea.Model, t
 
 	var cmd tea.Cmd
 	m.dataFilter, cmd = m.dataFilter.Update(msg)
+	m.runtime().SetDataFilter(m.dataFilter.Value())
 	if tab, ok := m.activeData(); ok {
 		_, rows := m.dataPaneSize()
 		m.runtime().ScrollData(clampScroll(tab.Scroll, len(m.visiblePage(tab).lines), rows))
 	}
 	return m, cmd, true
+}
+
+func (m tuiModel) dataBack() (tea.Model, tea.Cmd) {
+	if m.dataFilterOn || m.dataFilter.Value() != "" {
+		m.dataFilterOn = false
+		m.dataFilter.SetValue("")
+		m.dataFilter.Blur()
+		m.runtime().SetDataFilter("")
+		return m, nil
+	}
+	m.phase = phasePicking
+	return m, nil
+}
+
+func (m tuiModel) openDataFilter() (tea.Model, tea.Cmd) {
+	if m.dataFilterOn {
+		return m, nil
+	}
+	m.dataFilter.SetValue("")
+	m.runtime().SetDataFilter("")
+	m.dataFilterOn = true
+	return m, m.dataFilter.Focus()
 }

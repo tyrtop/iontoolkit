@@ -1,13 +1,16 @@
 package tui
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	"gopkg.in/yaml.v3"
+	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/tutorial"
 	"tyrtop.com/iontk/internal/ui"
@@ -20,11 +23,9 @@ const (
 	unbound          = "none"
 )
 
-var Keybinds string
-
 func KeybindsPath(st *config.Store) string {
-	if Keybinds != "" {
-		return Keybinds
+	if app.KeybindsFile != "" {
+		return app.KeybindsFile
 	}
 	if st == nil {
 		return ""
@@ -80,15 +81,44 @@ func (s *actionStep) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
+//go:embed keys.yaml
+var keysYAML []byte
+
 func defaultKeymap() keymap {
 	km := keymap{bound: map[string]map[string]string{}, actions: map[string][]actionStep{}}
-	for _, a := range builtinActions() {
-		for _, k := range a.keys {
-			km.bind(a.screen, k, a.name)
-		}
+	if err := km.readBytes(keysYAML, scrAny, "keys.yaml"); err != nil {
+		panic(err)
 	}
+	km.from = ""
 	return km
 }
+
+var shippedOrder = sync.OnceValue(func() map[string][]string {
+	out := map[string][]string{}
+	var doc yaml.Node
+	if yaml.Unmarshal(keysYAML, &doc) != nil || len(doc.Content) == 0 {
+		return out
+	}
+	add := func(screen string, pairs *yaml.Node) {
+		for i := 0; i+1 < len(pairs.Content); i += 2 {
+			at := screen + "\x00" + pairs.Content[i+1].Value
+			out[at] = append(out[at], pairs.Content[i].Value)
+		}
+	}
+	top := doc.Content[0]
+	for i := 0; i+1 < len(top.Content); i += 2 {
+		switch top.Content[i].Value {
+		case "keys":
+			add(scrAny, top.Content[i+1])
+		case "screens":
+			list := top.Content[i+1]
+			for j := 0; j+1 < len(list.Content); j += 2 {
+				add(list.Content[j].Value, list.Content[j+1])
+			}
+		}
+	}
+	return out
+})
 
 func (km *keymap) bind(screen, key, action string) {
 	if km.bound[screen] == nil {
@@ -110,13 +140,6 @@ func (km keymap) action(screen, key string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func (km keymap) keyFor(screen, action string) string {
-	if keys := km.keysFor(screen, action); len(keys) > 0 {
-		return keys[0]
-	}
-	return ""
 }
 
 func sortedBindings(m map[string]string) []string {
@@ -196,7 +219,7 @@ func (km *keymap) readBytes(b []byte, screen, what string) error {
 	for s, keys := range f.Screens {
 		if !contains(screens(), s) {
 			return fmt.Errorf("%s: %q is not a screen (%s)", what, s,
-				strings.Join([]string{scrMenu, scrElements, scrData}, ", "))
+				strings.Join(screens()[1:], ", "))
 		}
 		for key, action := range keys {
 			km.bind(s, key, action)
@@ -414,7 +437,7 @@ func keybindsSeed(km keymap) string {
 		b.WriteString("  " + quoteKey(key) + ": " + km.bound[scrAny][key] + "\n")
 	}
 	b.WriteString("\nscreens:\n")
-	for _, s := range []string{scrMenu, scrElements} {
+	for _, s := range screens()[1:] {
 		if len(km.bound[s]) == 0 {
 			continue
 		}
@@ -529,13 +552,14 @@ func (km keymap) keysFor(screen, action string) []string {
 		}
 		out = append(out, key)
 	}
-	if a, ok := builtinAt(screen, action); ok {
-		for _, k := range a.keys {
-			for _, s := range []string{screen, scrAny} {
-				if km.bound[s][k] == action {
-					add(k)
-				}
+	for _, s := range []string{screen, scrAny} {
+		for _, k := range shippedOrder()[s+"\x00"+action] {
+			if km.bound[s][k] == action {
+				add(k)
 			}
+		}
+		if s == scrAny {
+			break
 		}
 	}
 	for _, s := range []string{screen, scrAny} {

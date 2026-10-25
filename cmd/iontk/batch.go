@@ -2,17 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"time"
 
 	"golang.org/x/term"
-	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase"
-	"tyrtop.com/iontk/internal/sase/api"
+	"tyrtop.com/iontk/internal/sase/ioncli"
 	"tyrtop.com/iontk/internal/tui"
 )
 
@@ -22,8 +21,6 @@ type selection struct {
 	rt       *runtime.Runtime
 	stdin    bool
 }
-
-func (s selection) crossTenant() bool { return len(s.rows) > 0 }
 
 func flagSelection() (selection, error) {
 	els, err := gatherElements(flagElement, flagElementsPath)
@@ -37,35 +34,16 @@ func runBatch(ctx context.Context, sel selection) error {
 	if len(flagCommands) == 0 {
 		return fmt.Errorf("--cmd is required for batch mode")
 	}
+	if len(sel.elements) == 0 {
+		return fmt.Errorf("no elements: give --element, --elements-path or --search")
+	}
 	rt := sel.rt
 	if rt == nil {
 		rt = cliRuntime()
 	}
-
-	var f app.Flags
-	var err error
-	if sel.crossTenant() {
-		f = app.BaseFlags()
-	} else if f, err = resolveFlags(os.Stderr); err != nil {
-		return err
-	}
-	f.Elements = sel.elements
-	f.Commands = app.SplitCommands(flagCommands)
-
-	if err := rt.CheckCommands(f.Commands); err != nil {
-		return fmt.Errorf("%w; override with --allow-writes or set allow_writes", err)
-	}
-
-	if sel.crossTenant() {
-		err = f.ValidateRun()
-	} else {
-		err = f.Validate()
-	}
-	if err != nil {
-		return err
-	}
-
-	format, orient, dest, err := batchOutput()
+	noteTenant()
+	cmds := runtime.SplitCommands(flagCommands...)
+	format, orient, dest, err := batchOutput(rt)
 	if err != nil {
 		return err
 	}
@@ -73,41 +51,16 @@ func runBatch(ctx context.Context, sel selection) error {
 	ctx, stopRun := context.WithCancel(ctx)
 	defer stopRun()
 
-	var events <-chan sase.Event
-	var clients []*api.Client
-	if sel.crossTenant() {
-		if events, err = rt.StartBatch(ctx, f.Commands, sel.rows); err != nil {
-			return err
-		}
-		seen := map[string]bool{}
-		for _, r := range sel.rows {
-			if c := rt.Clients().Get(r.TSG); c != nil && !seen[r.TSG] {
-				seen[r.TSG] = true
-				clients = append(clients, c)
-			}
-		}
-	} else {
-		opts := f.Options()
-		client, cerr := app.NewClient(ctx, app.OpenStore(), f, os.Stderr)
-		if cerr != nil {
-			return cerr
-		}
-		targets := sase.Targets(client, f.Elements)
-		if err := opts.ValidateFor(targets); err != nil {
-			return err
-		}
-		if app.Fixture != nil {
-			playback := app.Fixture.SessionClient(f.PagerOff, f.PagerPrompts)
-			for i := range targets {
-				targets[i].Client = playback
-			}
-		}
-		events = rt.RunBatch(ctx, opts, targets)
-		clients = []*api.Client{client}
+	rows := sel.rows
+	if len(rows) == 0 {
+		rows = rt.KnownRows(ctx, sel.elements, func(l string) { fmt.Fprintln(os.Stderr, l) })
 	}
-
-	for _, c := range clients {
-		go watchCredential(c.TokenErrors(), c.RefreshStopped, stopRun, os.Stderr)
+	events, err := rt.StartBatch(ctx, cmds, rows)
+	if errors.Is(err, ioncli.ErrNotReadOnly) {
+		return fmt.Errorf("%w; override with --allow-writes or set allow_writes", err)
+	}
+	if err != nil {
+		return err
 	}
 
 	out, where, err := output.Open(flagOut, dest, format, time.Now())
@@ -130,9 +83,9 @@ func runBatch(ctx context.Context, sel selection) error {
 	var failed int
 
 	if !flagNoProgress && term.IsTerminal(int(os.Stderr.Fd())) {
-		total, failed, err = tui.DrainLive(ctx, events, f.Commands, len(f.Elements), sink, sel.stdin)
+		total, failed, err = tui.DrainLive(ctx, events, cmds, len(rows), sink, sel.stdin)
 	} else {
-		total, failed, err = drainPlain(events, len(f.Elements), sink)
+		total, failed, err = drainPlain(events, len(rows), sink)
 	}
 	if err != nil {
 		return err
@@ -144,18 +97,19 @@ func runBatch(ctx context.Context, sel selection) error {
 	if err := out.Close(); err != nil {
 		return fmt.Errorf("close %s: %w", where, err)
 	}
+	if dead := rt.TokenDead(); dead != "" {
+		fmt.Fprintf(os.Stderr, "%s — run `iontk auth login` and try again\n", dead)
+	}
 	if failed > 0 {
 		return fmt.Errorf("%d of %d elements failed", failed, total)
 	}
 	return nil
 }
 
-func batchOutput() (format, orient, dir string, err error) {
+func batchOutput(rt *runtime.Runtime) (format, orient, dir string, err error) {
 	format, orient, dir = output.FormatJSON, output.OrientION, ""
-	if st := app.OpenStore(); st != nil {
-		if cfg, cerr := st.Config(); cerr == nil {
-			format, orient, dir = cfg.BatchFormat, cfg.BatchOrient, cfg.BatchOutDir()
-		}
+	if cfg := rt.Config(); cfg != nil {
+		format, orient, dir = cfg.BatchFormat, cfg.BatchOrient, cfg.BatchOutDir()
 	}
 	if flagFormat != "" {
 		format = flagFormat
@@ -187,14 +141,4 @@ func drainPlain(events <-chan sase.Event, total int, sink output.Sink) (int, int
 		}
 	}
 	return total, failed, nil
-}
-
-func watchCredential(ch <-chan error, dead func() bool, stop func(), w io.Writer) {
-	for err := range ch {
-		fmt.Fprintln(w, err)
-	}
-	if dead() {
-		fmt.Fprintln(w, "sign-in expired and could not be renewed — stopping; run `iontk auth login` and try again")
-		stop()
-	}
 }

@@ -66,10 +66,10 @@ func TestAFileThatCouldNotDrawIsRefusedByName(t *testing.T) {
 		{"two of one name", "columns:\n  - name\n  - name\n", `two columns are called "name"`},
 		{"an unknown subject", "columns:\n  - name: x\n    from: tenant\n    value: \"{{ .id }}\"\n", `reads "tenant"`},
 		{"a site with no value", "columns:\n  - name: x\n    from: site\n", "reads the site but says no value"},
-		{"a fetch with no value", "columns:\n  - name: x\n    fetch: /sdwan/v2.0/api/elements\n", "fetches and says no value"},
-		{"a fetch and a from", "columns:\n  - name: x\n    fetch: /sdwan/v2.0/api/e\n    from: site\n    value: \"{{ .id }}\"\n", "drop the from:"},
-		{"a bulk with no fetch", "columns:\n  - name: x\n    bulk: /sdwan/v2.0/api/e/query\n    value: \"{{ .id }}\"\n", "no fetch: to fall back on"},
-		{"a fetch off the api", "columns:\n  - name: x\n    fetch: /api/elements\n    value: \"{{ .id }}\"\n", "does not start with /sdwan/"},
+		{"a fetch with no value", "endpoints:\n  - name: elements\n    path: /sdwan/v2.0/api/elements\ncolumns:\n  - name: x\n    fetch: elements\n", "fetches and says no value"},
+		{"a fetch and a from", "endpoints:\n  - name: e\n    path: /sdwan/v2.0/api/e\ncolumns:\n  - name: x\n    fetch: e\n    from: site\n    value: \"{{ .id }}\"\n", "drop the from:"},
+		{"a bulk with no fetch", "endpoints:\n  - name: query\n    method: POST\n    path: /sdwan/v2.0/api/e/query\ncolumns:\n  - name: x\n    bulk: query\n    value: \"{{ .id }}\"\n", "no fetch: to fall back on"},
+		{"a fetch off the api", "endpoints:\n  - name: elements\n    path: /api/elements\ncolumns:\n  - name: x\n    fetch: elements\n    value: \"{{ .id }}\"\n", "does not start with /sdwan/"},
 		{"a role nothing draws", "columns:\n  - name: x\n    value: \"{{ .id }}\"\n    style:\n      - role: puce\n", `styled "puce"`},
 		{"a value that will not parse", "columns:\n  - name: x\n    value: \"{{ .id\"\n", "value:"},
 		{"a width inside out", "columns:\n  - name: site\n    min: 20\n    max: 8\n", "min 20 above max 8"},
@@ -90,11 +90,17 @@ func TestAFileThatCouldNotDrawIsRefusedByName(t *testing.T) {
 }
 
 func TestAFetchedColumnKeepsItsPathsAndKeys(t *testing.T) {
-	set, err := Parse([]byte(`columns:
+	set, err := Parse([]byte(`endpoints:
+  - name: status
+    path: /sdwan/v2.6/api/elements/{element_id}/status
+  - name: query
+    method: POST
+    path: /sdwan/v2.6/api/elements/status/query
+columns:
   - name: uptime
     header: Uptime
-    fetch: /sdwan/v2.6/api/elements/{element_id}/status
-    bulk: POST /sdwan/v2.6/api/elements/status/query
+    fetch: status
+    bulk: query
     value: "{{ ago .last_rebooted_time }}"
 `))
 	if err != nil {
@@ -104,8 +110,8 @@ func TestAFetchedColumnKeepsItsPathsAndKeys(t *testing.T) {
 	if !c.Fetches() {
 		t.Error("the column does not report that it fetches")
 	}
-	if c.Bulk != "/sdwan/v2.6/api/elements/status/query" {
-		t.Errorf("bulk = %q, want the path with POST taken off the front", c.Bulk)
+	if c.BulkEndpoint.Path != "/sdwan/v2.6/api/elements/status/query" || c.BulkEndpoint.Method != "POST" {
+		t.Errorf("bulk = %+v, want the POST query the file declares", c.BulkEndpoint)
 	}
 	if c.Key != DefaultKey {
 		t.Errorf("key = %q, want %q by default", c.Key, DefaultKey)

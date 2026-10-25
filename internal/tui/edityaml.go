@@ -13,6 +13,7 @@ import (
 	"tyrtop.com/iontk/internal/dataview"
 	"tyrtop.com/iontk/internal/fixture"
 	"tyrtop.com/iontk/internal/logging"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/tutorial"
 	"tyrtop.com/iontk/internal/ui"
 	"tyrtop.com/iontk/internal/view"
@@ -28,7 +29,7 @@ type editTarget struct {
 	path  string
 	seed  func(m *tuiModel) string
 	check func(b []byte) error
-	apply func(m *tuiModel) (string, tea.Cmd, error)
+	apply func(m *tuiModel, l app.List) (string, tea.Cmd, error)
 }
 
 type yamlEdit struct {
@@ -130,7 +131,8 @@ func (m tuiModel) saveEdit() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if err := writeFileAtomic(t.path, text); err != nil {
+	save := &runtime.Call{Args: map[string]string{"file": t.path, "text": text}}
+	if err := m.runtime().Exec(save, "config.save"); err != nil {
 		m.edit.err, m.edit.note = err.Error(), ""
 		return m, nil
 	}
@@ -142,7 +144,8 @@ func (m tuiModel) saveEdit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	mm := m
-	note, cmd, err := t.apply(&mm)
+	l, _ := save.Result.(app.List)
+	note, cmd, err := t.apply(&mm, l)
 	if err != nil {
 		mm.edit.err = err.Error()
 		return mm, nil
@@ -159,22 +162,6 @@ func (m tuiModel) leaveEdit(status string) (tea.Model, tea.Cmd) {
 	m.phase = back
 	m.status = status
 	return m, nil
-}
-
-func writeFileAtomic(path, text string) error {
-	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return fmt.Errorf("make %s: %w", dir, err)
-		}
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(text), 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
 }
 
 func (m tuiModel) viewEdit() string {
@@ -202,6 +189,8 @@ func (m tuiModel) editTarget() (editTarget, bool) {
 		return m.columnsTarget(), true
 	case phaseData:
 		return m.viewsTarget()
+	case phaseWorkflows:
+		return m.workflowTarget()
 	case phaseSettings:
 		switch m.setSection {
 		case secTutorial:
@@ -217,6 +206,24 @@ func (m tuiModel) editTarget() (editTarget, bool) {
 	return editTarget{}, false
 }
 
+func (m tuiModel) workflowTarget() (editTarget, bool) {
+	cmds := m.listedCommands()
+	if m.wf.step != wfList || m.wf.cursor >= len(cmds) || cmds[m.wf.cursor].Source == "" {
+		return editTarget{}, false
+	}
+	path := cmds[m.wf.cursor].Source
+	return editTarget{
+		what: filepath.Base(filepath.Dir(path)) + "/" + filepath.Base(path),
+		path: path,
+		apply: func(m *tuiModel, _ app.List) (string, tea.Cmd, error) {
+			if w := m.runtime().Warnings(); len(w) > 0 {
+				return "", nil, fmt.Errorf("%s", strings.Join(w, "; "))
+			}
+			return fmt.Sprintf("%d workflow(s)", len(m.runtime().CommandsNamed(app.WorkflowPrefix))), nil, nil
+		},
+	}, true
+}
+
 func (m tuiModel) columnsTarget() editTarget {
 	path := m.listFrom
 	if path == "" {
@@ -226,24 +233,8 @@ func (m tuiModel) columnsTarget() editTarget {
 		what: filepath.Base(path),
 		path: path,
 		seed: func(*tuiModel) string { return column.BuiltinYAML() },
-		check: func(b []byte) error {
-			if filepath.Base(path) != column.FileName {
-				if err := view.CheckEnvelope(b, view.KindList); err != nil {
-					return err
-				}
-			}
-			set, err := column.Parse(b)
-			if err != nil {
-				return err
-			}
-			base, _ := defaultColumns()
-			_, err = buildColumns(set, base)
-			return err
-		},
-		apply: func(m *tuiModel) (string, tea.Cmd, error) {
-			m.listSpec, m.listFrom, m.columnsErr = nil, "", ""
-			m.runtime().SetColumns(builtinSpecs())
-			m.loadRuntime(m.store())
+		apply: func(m *tuiModel, l app.List) (string, tea.Cmd, error) {
+			m.drawRuntime(l)
 			if err := m.runtimeErr(); err != nil {
 				return "", nil, err
 			}
@@ -282,19 +273,8 @@ func (m tuiModel) viewsTarget() (editTarget, bool) {
 			}
 			return "# " + v.Name + ", as iontk ships it. " + viewPointer + "\n\n" + text
 		},
-		check: func(b []byte) error {
-			if strings.HasSuffix(path, dataview.FileName) {
-				_, err := dataview.Parse(b)
-				return err
-			}
-			if err := view.CheckEnvelope(b, view.KindData); err != nil {
-				return err
-			}
-			_, err := dataview.ParseOne(b)
-			return err
-		},
-		apply: func(m *tuiModel) (string, tea.Cmd, error) {
-			m.loadRuntime(m.store())
+		apply: func(m *tuiModel, l app.List) (string, tea.Cmd, error) {
+			m.drawRuntime(l)
 			if err := m.runtimeErr(); err != nil {
 				return "", nil, err
 			}
@@ -325,9 +305,9 @@ func (m tuiModel) menuTarget() (editTarget, bool) {
 			_, err := parseMenu(b, m.runsCommand)
 			return err
 		},
-		apply: func(m *tuiModel) (string, tea.Cmd, error) {
+		apply: func(m *tuiModel, l app.List) (string, tea.Cmd, error) {
 			m.menuErr = ""
-			m.loadRuntime(m.store())
+			m.drawRuntime(l)
 			if err := m.runtimeErr(); err != nil {
 				return "", nil, err
 			}
@@ -380,11 +360,7 @@ func (m tuiModel) flowTarget() (editTarget, bool) {
 		what: filepath.Base(path),
 		path: path,
 		seed: func(*tuiModel) string { return tutorial.BuiltinYAML() },
-		check: func(b []byte) error {
-			_, err := tutorial.Parse(b, filepath.Base(path))
-			return err
-		},
-		apply: func(m *tuiModel) (string, tea.Cmd, error) {
+		apply: func(m *tuiModel, _ app.List) (string, tea.Cmd, error) {
 			*m = m.readFlows()
 			if m.flowsErr != "" {
 				return "", nil, fmt.Errorf("%s", m.flowsErr)
@@ -395,7 +371,7 @@ func (m tuiModel) flowTarget() (editTarget, bool) {
 }
 
 func (m tuiModel) fixturesTarget() (editTarget, bool) {
-	path := FixturesPath(m.store())
+	path := app.FixturesPath(m.store())
 	if path == "" {
 		return editTarget{}, false
 	}
@@ -403,12 +379,8 @@ func (m tuiModel) fixturesTarget() (editTarget, bool) {
 		what: filepath.Base(path),
 		path: path,
 		seed: func(*tuiModel) string { return fixture.BuiltinYAML() },
-		check: func(b []byte) error {
-			_, err := fixture.Parse(b, filepath.Base(path))
-			return err
-		},
-		apply: func(m *tuiModel) (string, tea.Cmd, error) {
-			set, err := m.fakeFleet()
+		apply: func(m *tuiModel, _ app.List) (string, tea.Cmd, error) {
+			_, set, err := app.FakeFleet(m.store())
 			if err != nil {
 				return "", nil, err
 			}
@@ -438,9 +410,9 @@ func (m tuiModel) keybindsTarget() (editTarget, bool) {
 			}
 			return km.check()
 		},
-		apply: func(m *tuiModel) (string, tea.Cmd, error) {
+		apply: func(m *tuiModel, l app.List) (string, tea.Cmd, error) {
 			m.keysErr = ""
-			m.loadRuntime(m.store())
+			m.drawRuntime(l)
 			if err := m.runtimeErr(); err != nil {
 				return "", nil, err
 			}
@@ -469,11 +441,7 @@ func (m tuiModel) themeTarget() (editTarget, bool) {
 			}
 			return text
 		},
-		check: func(b []byte) error {
-			_, err := ui.ParseThemes(b)
-			return err
-		},
-		apply: func(m *tuiModel) (string, tea.Cmd, error) {
+		apply: func(m *tuiModel, _ app.List) (string, tea.Cmd, error) {
 			if err := ui.LoadThemes(dir); err != nil {
 				return "", nil, err
 			}

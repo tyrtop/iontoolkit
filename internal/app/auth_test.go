@@ -314,7 +314,7 @@ func TestATenantWithNoSignInReadsTheSameWhateverTheAccountCredentialDid(t *testi
 			name: "another tenant narrowed it first",
 			seed: func(t *testing.T, tokenURL string, client *http.Client) *saseauth.Seed {
 				s := saseauth.NewSeed("acct")
-				opt := saseauth.Options{TokenURL: tokenURL, Client: client, Seed: s}
+				opt := saseauth.Options{Host: tokenURL, Client: client, Seed: s}
 				if _, _, err := saseauth.NewSource(good, "", opt, nil).Token(context.Background()); err != nil {
 					t.Fatalf("the first tenant could not narrow the account credential: %v", err)
 				}
@@ -343,9 +343,9 @@ func TestATenantWithNoSignInReadsTheSameWhateverTheAccountCredentialDid(t *testi
 			defer srv.Close()
 
 			opt := saseauth.Options{
-				TokenURL: srv.URL,
-				Client:   srv.Client(),
-				Seed:     tt.seed(t, srv.URL, srv.Client()),
+				Host:   srv.URL,
+				Client: srv.Client(),
+				Seed:   tt.seed(t, srv.URL, srv.Client()),
 			}
 			_, _, err := saseauth.NewSource(bad, "", opt, nil).Token(context.Background())
 			if err == nil {

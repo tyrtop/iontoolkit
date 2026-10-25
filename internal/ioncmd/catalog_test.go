@@ -110,22 +110,9 @@ func TestReadOnlyFilterAgreesWithTheGuard(t *testing.T) {
 		}
 	}
 	for _, c := range ro {
-		if v := Verb(c); v == "config" || v == "set" || v == "clear" {
+		if v := ioncli.Verb(c); v == "config" || v == "set" || v == "clear" {
 			t.Errorf("mutating command %q in the read-only subset", c)
 		}
 	}
 	t.Logf("read-only: %d of %d commands", len(ro), len(all))
-}
-
-func TestVerb(t *testing.T) {
-	cases := map[string]string{
-		"dump device status": "dump",
-		"dump":               "dump",
-		"":                   "",
-	}
-	for in, want := range cases {
-		if got := Verb(in); got != want {
-			t.Errorf("Verb(%q) = %q, want %q", in, got, want)
-		}
-	}
 }

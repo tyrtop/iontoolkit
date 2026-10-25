@@ -62,7 +62,10 @@ func runWrite(ctx context.Context, what string, out io.Writer) error {
 	if len(els) == 0 {
 		return fmt.Errorf("no elements: give --element or --elements-path")
 	}
-	app.WritesFile = flagWrites
+	if flagWrites != "" {
+		app.WritesFile = flagWrites
+		app.ReloadWrites(cliRuntime())
+	}
 	args, rest := writeCall(what, els, flagWriteMatch, flagWriteSet)
 	return execPrinting(ctx, out, "write", args, rest, flagWriteDoit)
 }

@@ -102,8 +102,14 @@ func TestADottedFieldIsMadeUnderANullObject(t *testing.T) {
 	set, err := Parse([]byte(`
 writes:
   - name: address
-    list: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces
-    item: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces/{{ .item.id }}
+    endpoints:
+      - name: interfaces
+        path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces
+      - name: interface
+        method: PUT
+        path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces/{item.id}
+    list: interfaces
+    item: interface
     fields:
       - key: ipv4_config.static_config.address
 `))
@@ -146,11 +152,11 @@ func TestBadSpecsAreNamed(t *testing.T) {
 	tests := []struct {
 		name, yaml, want string
 	}{
-		{"no fields", `writes: [{name: a, list: /sdwan/x, item: /sdwan/x/1}]`, "no fields"},
-		{"a host", `writes: [{name: a, list: "https://x/sdwan/x", item: /sdwan/x/1, fields: [{key: d}]}]`, "names a host"},
-		{"delete", `writes: [{name: a, method: delete, list: /sdwan/x, item: /sdwan/x/1, fields: [{key: d}]}]`, "PUT or PATCH"},
-		{"type", `writes: [{name: a, list: /sdwan/x, item: /sdwan/x/1, fields: [{key: d, type: date}]}]`, "type"},
-		{"twice", `writes: [{name: a, list: /sdwan/x, item: /sdwan/x/1, fields: [{key: d}]}, {name: A, list: /sdwan/x, item: /sdwan/x/1, fields: [{key: d}]}]`, "two writes"},
+		{"no fields", `writes: [{name: a, endpoints: [{name: l, path: /sdwan/x}, {name: i, method: PUT, path: "/sdwan/x/{item.id}"}], list: l, item: i}]`, "no fields"},
+		{"a host", `writes: [{name: a, endpoints: [{name: l, host: "https://x", path: /sdwan/x}, {name: i, method: PUT, path: /sdwan/x/1}], list: l, item: i, fields: [{key: d}]}]`, "names a host"},
+		{"delete", `writes: [{name: a, endpoints: [{name: l, path: /sdwan/x}, {name: i, method: delete, path: /sdwan/x/1}], list: l, item: i, fields: [{key: d}]}]`, "PUT or PATCH"},
+		{"type", `writes: [{name: a, endpoints: [{name: l, path: /sdwan/x}, {name: i, method: PUT, path: "/sdwan/x/{item.id}"}], list: l, item: i, fields: [{key: d, type: date}]}]`, "type"},
+		{"twice", `writes: [{name: a, endpoints: [{name: l, path: /sdwan/x}, {name: i, method: PUT, path: "/sdwan/x/{item.id}"}], list: l, item: i, fields: [{key: d}]}, {name: A, endpoints: [{name: l, path: /sdwan/x}, {name: i, method: PUT, path: "/sdwan/x/{item.id}"}], list: l, item: i, fields: [{key: d}]}]`, "two writes"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,8 +174,14 @@ func TestAUserFileOverridesTheBuiltinByName(t *testing.T) {
 writes:
   - name: interface
     verified: true
-    list: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces
-    item: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces/{{ .item.id }}
+    endpoints:
+      - name: interfaces
+        path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces
+      - name: interface
+        method: PUT
+        path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces/{item.id}
+    list: interfaces
+    item: interface
     fields:
       - key: description
 `), 0o600)

@@ -150,20 +150,20 @@ func TestTabBarAlwaysHasElementsTab(t *testing.T) {
 	if m.currentTab() != 0 {
 		t.Errorf("currentTab() = %d in the picker, want 0", m.currentTab())
 	}
-	if m.tabCount() != 1 {
-		t.Errorf("tabCount() = %d with no sessions, want 1", m.tabCount())
+	if tabCountOf(m) != 1 {
+		t.Errorf("tabCount() = %d with no sessions, want 1", tabCountOf(m))
 	}
 }
 
 func TestSelectTabWrapsThroughElements(t *testing.T) {
 	m := pickModel(t)
 
-	m2 := m.selectTab(1)
+	m2 := selectTabOf(m, 1)
 	if m2.phase != phasePicking {
 		t.Errorf("with no sessions, every tab is the elements tab; phase = %v", m2.phase)
 	}
 
-	m3 := m.selectTab(-1)
+	m3 := selectTabOf(m, -1)
 	if m3.phase != phasePicking {
 		t.Errorf("negative index should wrap, phase = %v", m3.phase)
 	}
@@ -171,8 +171,8 @@ func TestSelectTabWrapsThroughElements(t *testing.T) {
 
 func TestNilManagerBehavesAsEmpty(t *testing.T) {
 	m := withStore(tuiModel{}, nil, &config.Config{})
-	if m.tabCount() != 1 {
-		t.Errorf("tabCount() = %d with a nil manager, want 1", m.tabCount())
+	if tabCountOf(m) != 1 {
+		t.Errorf("tabCount() = %d with a nil manager, want 1", tabCountOf(m))
 	}
 	if got := plain(m.tabBar()); !strings.Contains(got, "elements") {
 		t.Errorf("tabBar = %q", got)
@@ -185,9 +185,9 @@ func TestRenderSessionConnecting(t *testing.T) {
 	m := pickModel(t)
 	m.phase = phaseSession
 	m.connecting = "S0100-RTR-01"
-	t.Log("\n" + m.viewSession())
+	t.Log("\n" + sessionText(m))
 
-	if got := plain(m.viewSession()); !strings.Contains(got, "connecting to S0100-RTR-01") {
+	if got := plain(sessionText(m)); !strings.Contains(got, "connecting to S0100-RTR-01") {
 		t.Errorf("view = %q", got)
 	}
 }
@@ -374,7 +374,7 @@ func TestModeCycle(t *testing.T) {
 		t.Fatalf("default mode = %v, want shell", m.mode())
 	}
 
-	want := append(pickModes[1:], pickModes[0])
+	want := []string{modeBatch, modeData, modeShell}
 	cur := tea.Model(m)
 	for i, expect := range want {
 		cur, _ = cur.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModAlt}))
@@ -1346,7 +1346,7 @@ func hungModel(t *testing.T) tuiModel {
 func TestAHungSessionSaysSoAndOffersAReconnect(t *testing.T) {
 	m := hungModel(t)
 
-	view := plain(m.viewSession())
+	view := plain(sessionText(m))
 	if !strings.Contains(view, "stopped answering") {
 		t.Errorf("the pane does not say the connection is hung:\n%s", view)
 	}
@@ -1387,7 +1387,7 @@ func TestAltROnAHungSessionOpensAFreshOne(t *testing.T) {
 	if !strings.Contains(got.status, "redialling") {
 		t.Errorf("status = %q, want it to say a dial is running", got.status)
 	}
-	pane := plain(got.viewSession())
+	pane := plain(sessionText(got))
 	if !strings.Contains(pane, "redialling e1") || strings.Contains(pane, "alt+r retry") {
 		t.Errorf("the pane still offers the key it is already running:\n%s", pane)
 	}
@@ -1453,7 +1453,7 @@ func TestAltRRedialsAFailedSession(t *testing.T) {
 	if m.sessions().Find(el.ID) != s {
 		t.Error("the dead tab went before its replacement was up")
 	}
-	if got := plain(m.viewSession()); !strings.Contains(got, "redial") {
+	if got := plain(sessionText(m)); !strings.Contains(got, "redial") {
 		t.Errorf("nothing on screen says a redial is running:\n%s", got)
 	}
 

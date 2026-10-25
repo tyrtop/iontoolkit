@@ -22,14 +22,12 @@ type Options struct {
 	Chrome  string
 	DataDir string
 	Timeout time.Duration
-	// hardened Linux images forbid the user namespaces Chrome needs and it cannot
-	// start there at all; anything that can sandbox keeps the sandbox
+	// hardened Linux images forbid the user namespaces Chrome's sandbox needs
 	NoSandbox bool
 
-	AuthorizeURL string
-	TokenURL     string
-	Client       *http.Client
-	Logger       *slog.Logger
+	Host   string
+	Client *http.Client
+	Logger *slog.Logger
 
 	Seed *Seed
 }
@@ -41,18 +39,16 @@ func (o Options) log() *slog.Logger {
 	return logging.L()
 }
 
-func (o Options) authorize() string {
-	if o.AuthorizeURL != "" {
-		return o.AuthorizeURL
-	}
-	return AuthorizeURL
-}
+func (o Options) authorize() string { return o.url("authorize") }
 
-func (o Options) token() string {
-	if o.TokenURL != "" {
-		return o.TokenURL
+func (o Options) token() string { return o.url("token") }
+
+func (o Options) url(name string) string {
+	u, err := endpoints.URLAt(name, o.Host, nil)
+	if err != nil {
+		panic(err)
 	}
-	return TokenURL
+	return u
 }
 
 func (o Options) httpClient() *http.Client {
@@ -160,8 +156,7 @@ func stopWaiting(cancel func()) {
 	}
 }
 
-// one channel per data dir: Chrome locks a user-data-dir, so a second launch
-// hands its URL to the running instance and exits, leaving chromedp waiting
+// Chrome hands a second launch on one user-data-dir to the first
 var profileLocks sync.Map
 
 func lockProfile(ctx context.Context, dir string) (func(), error) {
@@ -225,7 +220,7 @@ func codeFromBrowser(ctx context.Context, authorizeURL, state string, opt Option
 		if err != nil {
 			return "", fmt.Errorf("browser: %w", err)
 		}
-		if ev.Request == nil || !strings.HasPrefix(ev.Request.URL, RedirectURI) {
+		if ev.Request == nil || !strings.HasPrefix(ev.Request.URL, RedirectURI()) {
 			continue
 		}
 		opt.log().Debug("callback reached", "url", ev.Request.URL)
@@ -243,20 +238,4 @@ func codeFromBrowser(ctx context.Context, authorizeURL, state string, opt Option
 		return "", fmt.Errorf("sign-in did not complete within %s", timeout)
 	}
 	return "", fmt.Errorf("browser closed before sign-in completed")
-}
-
-func ManualURL(tsg string, opt Options) (authURL string, verifier, state string, err error) {
-	p, err := newPKCE()
-	if err != nil {
-		return "", "", "", err
-	}
-	return p.authorizeURL(opt.authorize(), tsg, false), p.verifier, p.state, nil
-}
-
-func CompleteManual(ctx context.Context, callbackURL, verifier, state string, opt Options) (*Token, error) {
-	code, err := CodeFromCallback(callbackURL, state)
-	if err != nil {
-		return nil, err
-	}
-	return ExchangeCode(ctx, opt.httpClient(), opt.token(), code, verifier)
 }

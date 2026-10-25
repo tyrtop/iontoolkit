@@ -852,3 +852,52 @@ func TestTrafficAloneKeepsASessionAliveWithoutPinging(t *testing.T) {
 		t.Error("Hung() = true for a session producing output")
 	}
 }
+
+func TestATerminalAttachedToASessionSeesItsBytesAndTypesStraightThrough(t *testing.T) {
+	conn := newFakeConn(nil)
+	m := NewManager()
+	t.Cleanup(m.CloseAll)
+	s, err := m.Open(context.Background(), &fakeDialer{conn: conn}, "123", "x", 80, 24, Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := s.Tap()
+	conn.feed <- []byte("S5032-RTR-01# ")
+	if got := <-out; string(got) != "S5032-RTR-01# " {
+		t.Errorf("tap got %q, want the device's bytes as they came", got)
+	}
+	if err := s.WriteRaw([]byte("dump\r\x1b[A")); err != nil {
+		t.Fatal(err)
+	}
+	if got := conn.sent(); got != "dump\r\x1b[A" {
+		t.Errorf("wire got %q, want the terminal's bytes unchanged", got)
+	}
+	conn.Close(websocket.StatusNormalClosure, "")
+	for range out {
+	}
+	if late := s.Tap(); late != nil {
+		if _, open := <-late; open {
+			t.Error("a terminal that attached after the device hung up was left waiting")
+		}
+	}
+}
+
+func TestATerminalAttachedToAHungSessionIsLetGo(t *testing.T) {
+	conn := newFakeConn(nil)
+	m := NewManager()
+	t.Cleanup(m.CloseAll)
+	s, err := m.Open(context.Background(), &fakeDialer{conn: conn}, "123", "x", 80, 24, Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := s.Tap()
+	s.markHung()
+	select {
+	case _, open := <-out:
+		if open {
+			t.Error("a hung session kept sending to the terminal")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the terminal was left waiting on a hung session")
+	}
+}

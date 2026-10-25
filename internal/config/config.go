@@ -94,6 +94,8 @@ func (c *Config) BatchOutDir() string {
 type Store struct {
 	Root    string
 	Secrets Secrets
+
+	cacheMu sync.Mutex
 }
 
 func Open() (*Store, error) {
@@ -168,6 +170,8 @@ func (s *Store) SaveConfig(c *Config) error {
 	}
 	return writeAtomic(s.configPath(), append(b, '\n'), 0o600)
 }
+
+func WriteFile(path string, data []byte) error { return writeAtomic(path, data, 0o600) }
 
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

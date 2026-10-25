@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"tyrtop.com/iontk/internal/clock"
@@ -53,6 +54,7 @@ func NewRuntime(st *config.Store, cfg *config.Config) *runtime.Runtime {
 		After: func(_ *runtime.Runtime, v string) { _ = clock.Use(v) },
 	})
 	rt.UseConfig(st, cfg)
+	runAsFromEnv(rt)
 	rt.PreferAdded(Fixture != nil)
 	rt.UseConnector(runtime.Connector{
 		Check: func(st *config.Store, t config.Tenant) error { return TenantFlags(st, t, "").ValidateCreds() },
@@ -60,6 +62,7 @@ func NewRuntime(st *config.Store, cfg *config.Config) *runtime.Runtime {
 			return NewClient(ctx, st, TenantFlags(st, t, ""), io.Discard)
 		},
 		Explain: func(err error) string { return ui.Truncate(ShortAuthError(err), 90) },
+		Refused: func(err error) bool { return IsAuthFailure(err.Error()) },
 	})
 	rt.UseDevice(runtime.Device{
 		Login: func(st *config.Store, t config.Tenant, user string) (string, string) {
@@ -89,9 +92,56 @@ func NewRuntime(st *config.Store, cfg *config.Config) *runtime.Runtime {
 		Writes: func() bool { return Defaults.AllowWrites },
 	})
 	rt.UseResolver(ResolveTenant)
-	ReloadViews(rt)
 	registerCommands(rt)
+	Reload(rt)
 	return rt
+}
+
+func Reload(rt *runtime.Runtime) List {
+	ReloadViews(rt)
+	l := LoadList(rt.Store())
+	UseList(rt, l)
+	ReloadWrites(rt)
+	ReloadCommands(rt)
+	return l
+}
+
+func reloadCommand() runtime.Command {
+	return runtime.Command{
+		Name: "reload", Help: "read every YAML file again: data views, the element list, writes, workflows and actions",
+		Run: func(rt *runtime.Runtime, c *runtime.Call) error {
+			l := Reload(rt)
+			c.Result = l
+			var problems []string
+			for _, p := range []string{rt.ViewsErr(), l.Err, writesProblem(rt)} {
+				if p != "" {
+					problems = append(problems, p)
+				}
+			}
+			problems = append(problems, rt.Warnings()...)
+			if len(problems) > 0 {
+				return fmt.Errorf("%s", strings.Join(problems, "; "))
+			}
+			c.Say("reloaded")
+			return nil
+		},
+	}
+}
+
+func writesProblem(rt *runtime.Runtime) string {
+	_, problem := rt.Writes()
+	return problem
+}
+
+func runAsFromEnv(rt *runtime.Runtime) {
+	u := os.Getenv("ION_USER")
+	cfg := rt.Config()
+	if u == "" || cfg == nil {
+		return
+	}
+	for _, t := range cfg.Tenants {
+		rt.SetRunAs(t.TSGID, u)
+	}
 }
 
 type toolkitDialer struct{ c *api.Client }

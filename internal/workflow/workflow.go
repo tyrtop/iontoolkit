@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"tyrtop.com/iontk/internal/endpoint"
 	"tyrtop.com/iontk/internal/script"
 )
 
@@ -32,9 +33,12 @@ type Workflow struct {
 	Entry       string  `yaml:"entry,omitempty"`
 	Budget      string  `yaml:"budget,omitempty"`
 
+	Endpoints []endpoint.Endpoint `yaml:"endpoints,omitempty"`
+
 	Dir    string        `yaml:"-"`
 	budget time.Duration `yaml:"-"`
 	set    *script.Set   `yaml:"-"`
+	calls  *endpoint.Set `yaml:"-"`
 }
 
 type Input struct {
@@ -82,11 +86,16 @@ func Load(dir string) ([]Workflow, error) {
 }
 
 func LoadOne(dir string) (Workflow, error) {
-	name := filepath.Base(dir)
 	b, err := os.ReadFile(filepath.Join(dir, ManifestName))
 	if err != nil {
 		return Workflow{}, err
 	}
+	return Parse(dir, b)
+}
+
+func Parse(dir string, b []byte) (Workflow, error) {
+	name := filepath.Base(dir)
+	var err error
 	var w Workflow
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
 	dec.KnownFields(true)
@@ -97,6 +106,18 @@ func LoadOne(dir string) (Workflow, error) {
 	if err := w.normalize(); err != nil {
 		return Workflow{}, fmt.Errorf("%s: %w", name, err)
 	}
+	if w.calls, err = endpoint.Build(name, "", nil, w.Endpoints); err != nil {
+		return Workflow{}, fmt.Errorf("%s/%s: %w", name, ManifestName, err)
+	}
+	for _, e := range w.Endpoints {
+		err := e.SDWAN()
+		if err == nil && strings.EqualFold(e.Method, "WS") {
+			err = fmt.Errorf("%s opens a session; a workflow calls, it does not dial", e.Name)
+		}
+		if err != nil {
+			return Workflow{}, fmt.Errorf("%s/%s: %w", name, ManifestName, err)
+		}
+	}
 	set, err := script.LoadPackage(dir)
 	if err != nil {
 		return Workflow{}, fmt.Errorf("%s: %w", name, err)
@@ -106,6 +127,14 @@ func LoadOne(dir string) (Workflow, error) {
 	}
 	w.set = set
 	return w, nil
+}
+
+func (w Workflow) Endpoint(name string) (endpoint.Endpoint, bool) {
+	if w.calls == nil {
+		return endpoint.Endpoint{}, false
+	}
+	e, err := w.calls.Get(name)
+	return e, err == nil
 }
 
 func (w *Workflow) normalize() error {
@@ -182,7 +211,7 @@ func (w Workflow) CheckInputs(given map[string]string) (map[string]string, error
 
 type Host struct {
 	Exec     func(script.Call) ([]string, any, error)
-	Export   func(text, slug string) (string, error)
+	Export   func(text, slug, ext string) (string, error)
 	OnStatus func(string)
 }
 

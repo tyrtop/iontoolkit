@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -9,6 +11,8 @@ import (
 
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ioncmd"
+	"tyrtop.com/iontk/internal/ionterm"
+	"tyrtop.com/iontk/internal/sase"
 )
 
 const AreaHistory = "history"
@@ -214,12 +218,25 @@ func (rt *Runtime) SessionModel() string {
 	if s == nil {
 		return ""
 	}
+	return rt.modelOfSession(s)
+}
+
+func (rt *Runtime) modelOfSession(s *ionterm.Session) string {
 	for _, el := range rt.Elements() {
 		if el.ID == s.ElementID {
 			return el.Model
 		}
 	}
 	return ""
+}
+
+func (rt *Runtime) RecordLine(s *ionterm.Session) bool {
+	line := s.Line()
+	if line == "" {
+		return false
+	}
+	rt.RecordUse(rt.modelOfSession(s), line)
+	return true
 }
 
 func MacroMismatch(m config.Macro, rows []Element) string {
@@ -246,14 +263,37 @@ func (rt *Runtime) UseFavourite(slot int) (config.Favourite, string, error) {
 	return f, differs, rt.InsertLine(f.Command)
 }
 
-func splitCommands(s string) []string {
+func SplitList(s, sep string) []string {
 	var out []string
-	for _, part := range strings.Split(s, ";") {
+	for _, part := range strings.Split(s, sep) {
 		if part = strings.TrimSpace(part); part != "" {
 			out = append(out, part)
 		}
 	}
 	return out
+}
+
+func SplitCommands(raw ...string) []string {
+	var out []string
+	for _, line := range raw {
+		out = append(out, SplitList(line, ",")...)
+	}
+	return out
+}
+
+func (rt *Runtime) SelectionModel() string {
+	model := ""
+	for _, r := range rt.Selected() {
+		switch {
+		case r.Model == "":
+			continue
+		case model == "":
+			model = r.Model
+		case model != r.Model:
+			return ""
+		}
+	}
+	return model
 }
 
 func historyCommands() []Command {
@@ -354,7 +394,7 @@ func historyCommands() []Command {
 			Name: "macro.list", Help: "the saved macros and their commands",
 			Run: func(rt *Runtime, c *Call) error {
 				for _, m := range rt.Macros() {
-					line := m.Name + ": " + strings.Join(m.Commands, "; ")
+					line := m.Name + ": " + strings.Join(m.Commands, ", ")
 					if m.Model != "" {
 						line += "  · " + m.Model
 					}
@@ -364,13 +404,30 @@ func historyCommands() []Command {
 			},
 		},
 		{
-			Name: "macro.set", Help: "save a macro: name= commands=\"a; b\" model=",
-			Args: []Arg{{Name: "name", Required: true}, {Name: "commands", Required: true}, {Name: "model"}},
+			Name: "macro.set", Help: "save a macro: name= commands=\"a, b\", or each command quoted after the name; model= was= its old name, to rename it",
+			Args: []Arg{{Name: "name"}, {Name: "commands"},
+				{Name: "model", Help: "the hardware it is for; with none, the selection's when the selection is one model"},
+				{Name: "was", Help: "the name it had, when renaming"}},
 			Run: func(rt *Runtime, c *Call) error {
-				m := config.Macro{Name: c.Arg("name"), Commands: splitCommands(c.Arg("commands")), Model: c.Arg("model")}
+				model := c.Arg("model")
+				if model == "" {
+					model = rt.SelectionModel()
+				}
+				cmds := SplitCommands(c.Arg("commands"))
+				for _, w := range c.Rest {
+					if w = strings.TrimSpace(w); w != "" {
+						cmds = append(cmds, w)
+					}
+				}
+				m := config.Macro{Name: c.Arg("name"), Commands: cmds, Model: model}
 				if err := rt.SetMacro(m); err != nil {
 					return err
 				}
+				if was := c.Arg("was"); was != "" && !strings.EqualFold(was, m.Name) {
+					rt.RemoveMacro(was)
+				}
+				c.Result = m
+				c.Say("saved %s, %d command(s)", m.Name, len(m.Commands))
 				return rt.SaveCommands()
 			},
 		},
@@ -399,31 +456,48 @@ func historyCommands() []Command {
 			Name: "macro.run", Slow: true, Help: "run a macro's commands on elements: name= elements=ID,ID (default: the selection) anyway=yes runs one built on other hardware",
 			Args: []Arg{{Name: "name", Required: true}, {Name: "elements"}, {Name: "anyway", Bool: true, Help: "run one built on other hardware"}},
 			Run: func(rt *Runtime, c *Call) error {
-				m, ok := rt.Macro(c.Arg("name"))
-				if !ok {
-					return fmt.Errorf("no macro is called %q", c.Arg("name"))
+				rows := rt.ElementsArg(c, "elements")
+				events, err := rt.StartMacro(c.Ctx, c.Arg("name"), rows, c.Arg("anyway") == "yes")
+				var mm *MacroMismatchError
+				if errors.As(err, &mm) {
+					return fmt.Errorf("%w, anyway=yes runs it (and is not asked again)", err)
 				}
-				if err := rt.CheckCommands(m.Commands); err != nil {
-					return fmt.Errorf("%s: %w", m.Name, err)
+				if err != nil {
+					return err
 				}
-				rows := rt.Targets()
-				if ids := c.Arg("elements"); ids != "" {
-					rows = rt.knownRows(c, strings.Split(ids, ","))
-				}
-				if len(rows) == 0 {
-					return fmt.Errorf("nothing selected — pick elements, then run the macro")
-				}
-				if why := MacroMismatch(m, rows); why != "" && !rt.Acked(WarnMacroModel) {
-					if c.Arg("anyway") != "yes" {
-						return fmt.Errorf("%s was %s; command syntax differs by model and version, anyway=yes runs it (and is not asked again)", m.Name, why)
-					}
-					rt.Ack(WarnMacroModel)
-					if err := rt.SaveCommands(); err != nil {
-						return err
-					}
-				}
-				return rt.runBatch(c, m.Commands, rows)
+				return rt.sayBatch(c, events)
 			},
 		},
 	}
+}
+
+type MacroMismatchError struct {
+	Macro, Why string
+}
+
+func (e *MacroMismatchError) Error() string {
+	return fmt.Sprintf("%s was %s; command syntax differs by model and version", e.Macro, e.Why)
+}
+
+func (rt *Runtime) StartMacro(ctx context.Context, name string, rows []Element, anyway bool) (<-chan sase.Event, error) {
+	m, ok := rt.Macro(name)
+	if !ok {
+		return nil, fmt.Errorf("no macro is called %q", name)
+	}
+	if err := rt.CheckCommands(m.Commands); err != nil {
+		return nil, fmt.Errorf("%s: %w", m.Name, err)
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("nothing selected — pick elements, then run the macro")
+	}
+	if why := MacroMismatch(m, rows); why != "" && !rt.Acked(WarnMacroModel) {
+		if !anyway {
+			return nil, &MacroMismatchError{Macro: m.Name, Why: why}
+		}
+		rt.Ack(WarnMacroModel)
+		if err := rt.SaveCommands(); err != nil {
+			return nil, err
+		}
+	}
+	return rt.StartBatch(ctx, m.Commands, rows)
 }

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"tyrtop.com/iontk/internal/runtime"
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/app"
@@ -189,10 +190,6 @@ func previewTabs(t ui.Theme) string {
 	return " " + strings.Join(parts, " ")
 }
 
-func spinnerFrame(t ui.Theme) string {
-	return ui.SpinnerFrame(t.Spinner)
-}
-
 func spinnerLabel(t ui.Theme) string { return ui.SpinnerName(t.Spinner) }
 
 func (m tuiModel) onThemeKey(key string) (tea.Model, tea.Cmd) {
@@ -288,7 +285,7 @@ func (m tuiModel) submitNewTheme() (tea.Model, tea.Cmd) {
 	t := ui.CurrentTheme()
 	t.Name, t.Blurb = name, "copied from "+ui.CurrentTheme().Name
 	t.Tabs = slices.Clone(t.Tabs)
-	if err := ui.SaveUserTheme(app.ThemesPath(m.store()), t); err != nil {
+	if err := m.saveTheme(t); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
@@ -337,64 +334,28 @@ func (m tuiModel) deleteWord(t ui.Theme) string {
 }
 
 func (m tuiModel) deleteTheme(t ui.Theme) (tea.Model, tea.Cmd) {
-	path := app.ThemesPath(m.store())
-	report := ""
-
-	if ui.IsUserTheme(path, t.Name) {
-		if err := ui.DeleteUserTheme(path, t.Name); err != nil {
-			m.status = err.Error()
-			return m, nil
-		}
-		if _, still := ui.ThemeByName(t.Name); still {
-			report = t.Name + " is back to the one iontk ships"
-		} else {
-			report = t.Name + " is gone"
-		}
-	} else {
-		m.cfg().HiddenThemes = append(slices.Clone(m.cfg().HiddenThemes), t.Name)
-		ui.HideThemes(m.cfg().HiddenThemes)
-		report = t.Name + " is hidden · settings → Reset brings it back"
-	}
-
-	if _, still := ui.ThemeByName(m.cfg().Theme); !still || ui.IsHidden(m.cfg().Theme) {
-		m.cfg().Theme = ui.Default().Name
-		report += ", so " + m.cfg().Theme + " is in use"
-	}
-	if err := m.store().SaveConfig(m.cfg()); err != nil {
+	var said []string
+	if err := m.runtime().Exec(&runtime.Call{Args: map[string]string{"name": t.Name}, Out: func(l string) { said = append(said, l) }}, "theme.hide"); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
-
 	m.setCursor = min(m.setCursor, max(0, m.sectionRows()-1))
 	now, _ := ui.ThemeByName(m.cfg().Theme)
 	next, cmd := m.applyTheme(now)
 	nm := next.(tuiModel)
-	nm.status = report
+	nm.status = strings.Join(said, ", ")
 	return nm, cmd
 }
 
 func (m tuiModel) restoreShippedThemes() (tea.Model, tea.Cmd) {
-	n, err := ui.RemoveOverrides(app.ThemesPath(m.store()))
-	if err != nil {
+	var said []string
+	if err := m.runtime().Exec(&runtime.Call{Out: func(l string) { said = append(said, l) }}, "theme.restore"); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
-	hidden := len(m.cfg().HiddenThemes)
-	m.cfg().HiddenThemes = nil
-	ui.HideThemes(nil)
-	if err := m.store().SaveConfig(m.cfg()); err != nil {
-		m.status = err.Error()
-		return m, nil
-	}
-
-	now, ok := ui.ThemeByName(m.cfg().Theme)
-	if !ok {
-		m.cfg().Theme = now.Name
-		_ = m.store().SaveConfig(m.cfg())
-	}
+	now, _ := ui.ThemeByName(m.cfg().Theme)
 	next, cmd := m.applyTheme(now)
 	nm := next.(tuiModel)
-	nm.status = fmt.Sprintf("the shipped schemes are back · %d override(s) removed, %d unhidden",
-		n, hidden)
+	nm.status = strings.Join(said, " ")
 	return nm, cmd
 }

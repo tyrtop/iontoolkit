@@ -28,19 +28,7 @@ func (m tuiModel) openMacros() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) macroRows() []config.Macro {
-	all := m.runtime().Macros()
-	q := strings.ToLower(strings.TrimSpace(m.macroFilter.Value()))
-	if q == "" {
-		return all
-	}
-	var out []config.Macro
-	for _, mac := range all {
-		hay := strings.ToLower(mac.Name + " " + strings.Join(mac.Commands, " "))
-		if strings.Contains(hay, q) {
-			out = append(out, mac)
-		}
-	}
-	return out
+	return m.runtime().MacrosMatching(m.macroFilter.Value())
 }
 
 func (m tuiModel) macroAt(cursor int) (config.Macro, bool) {
@@ -87,38 +75,46 @@ func (m tuiModel) onMacroKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cm
 		return m.resetMacroCursor(), cmd
 	}
 
+	if key == "x" {
+		return m.armOrDeleteMacro(armed)
+	}
+	if next, cmd, ran := m.bindingOn(scrMacros, key); ran {
+		return next, cmd
+	}
 	switch key {
-	case "esc", "q":
-		m.phase = phaseMenu
-		m.status = ""
-		return m, nil
-	case "/":
-		m.macroFilter.SetValue("")
-		m.macroCursor = 0
-		m.macroFilterOn = true
-		return m, m.macroFilter.Focus()
 	case "up", "k":
 		m.macroCursor = max(0, m.macroCursor-1)
-		return m, nil
 	case "down", "j":
 		m.macroCursor = min(len(m.macroRows()), m.macroCursor+1)
-		return m, nil
-	case "e":
-		if mac, ok := m.macroAt(m.macroCursor); ok {
-			return m.openMacroForm(mac)
-		}
-		return m, nil
-	case "x":
-		return m.armOrDeleteMacro(armed)
-	case "u":
-		return m.undoMacroDelete()
-	case "enter":
-		if mac, ok := m.macroAt(m.macroCursor); ok {
-			return m.armMacro(mac)
-		}
-		return m.openMacroForm(config.Macro{})
 	}
 	return m, nil
+}
+
+func (m tuiModel) macrosBack() (tea.Model, tea.Cmd) {
+	m.phase = phaseMenu
+	m.status = ""
+	return m, nil
+}
+
+func (m tuiModel) openMacroFilter() (tea.Model, tea.Cmd) {
+	m.macroFilter.SetValue("")
+	m.macroCursor = 0
+	m.macroFilterOn = true
+	return m, m.macroFilter.Focus()
+}
+
+func (m tuiModel) editMacro() (tea.Model, tea.Cmd) {
+	if mac, ok := m.macroAt(m.macroCursor); ok {
+		return m.openMacroForm(mac)
+	}
+	return m, nil
+}
+
+func (m tuiModel) pickMacro() (tea.Model, tea.Cmd) {
+	if mac, ok := m.macroAt(m.macroCursor); ok {
+		return m.armMacro(mac)
+	}
+	return m.openMacroForm(config.Macro{})
 }
 
 func (m tuiModel) armOrDeleteMacro(armed string) (tea.Model, tea.Cmd) {
@@ -166,7 +162,7 @@ func (m tuiModel) armMacro(mac config.Macro) (tea.Model, tea.Cmd) {
 func (m tuiModel) runArmedMacro(rows []elementRow) (tea.Model, tea.Cmd) {
 	mac, ok := m.runtime().Macro(m.armed())
 	if !ok {
-		m.setMode(modeShell)
+		m.runtime().Disarm()
 		m.status = "that macro is gone — pick another from the menu"
 		return m, nil
 	}
@@ -174,40 +170,24 @@ func (m tuiModel) runArmedMacro(rows []elementRow) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) runMacro(mac config.Macro, rows []elementRow) (tea.Model, tea.Cmd) {
-	if err := m.runtime().CheckCommands(mac.Commands); err != nil {
-		m.status = mac.Name + ": " + err.Error()
-		return m, nil
-	}
-
-	if len(rows) == 0 {
-		m.status = "nothing selected — pick elements in the list, then run the macro"
-		return m, nil
-	}
-
-	if macroMismatch(mac, rows) != "" && !m.runtime().Acked(runtime.WarnMacroModel) {
-		m.askMacro = mac.Name
-		m.askMacroOn = rows
-		return m, nil
-	}
-
-	ids := make([]string, 0, len(rows))
-	for _, r := range rows {
-		ids = append(ids, r.ID)
-	}
-	return m.startRunOn(mac.Commands, rows, ids)
+	return m.startMacro(mac.Name, rows, false)
 }
 
-func macroMismatch(mac config.Macro, rows []elementRow) string {
-	return runtime.MacroMismatch(mac, rows)
+func (m tuiModel) startMacro(name string, rows []elementRow, anyway bool) (tea.Model, tea.Cmd) {
+	m.status = "starting the run"
+	rt, ctx := m.runtime(), m.ctx
+	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		events, err := rt.StartMacro(ctx, name, rows, anyway)
+		return batchStartedMsg{events: events, err: err, macro: name, rows: rows}
+	})
 }
 
 func (m tuiModel) macroWarnPrompt() string {
 	mac, _ := m.runtime().Macro(m.askMacro)
-	rows := m.askMacroOn
 
 	lines := []string{
 		ui.StyleWarn.Render(ui.Truncate(mac.Name, 30)) + ui.StyleWarn.Render(" was built on other hardware"),
-		ui.StyleDim.Render(ui.Truncate(macroMismatch(mac, rows), 52)),
+		ui.StyleDim.Render(ui.Truncate(m.askMacroWhy, 52)),
 		ui.StyleDim.Render("command syntax differs by model and version"),
 		"",
 		"run it anyway",
@@ -236,22 +216,14 @@ func (m tuiModel) onMacroWarnKey(key string) (tea.Model, tea.Cmd) {
 	}
 
 	name, rows := m.askMacro, m.askMacroOn
-	m.askMacro, m.askMacroOn = "", nil
+	m.askMacro, m.askMacroOn, m.askMacroWhy = "", nil, ""
 	yes := key == "y" || key == "Y" || (key == "enter" && !m.askRetryNo)
 	m.askRetryNo = false
 	if !yes {
 		m.status = "not run"
 		return m, nil
 	}
-
-	m.runtime().Ack(runtime.WarnMacroModel)
-	save := m.saveCommands()
-	mac, ok := m.runtime().Macro(name)
-	if !ok {
-		return m, save
-	}
-	next, cmd := m.runMacro(mac, rows)
-	return next, tea.Batch(save, cmd)
+	return m.startMacro(name, rows, true)
 }
 
 func macroCommandLabel(i int) string { return fmt.Sprintf("command %d", i+1) }
@@ -320,43 +292,24 @@ func (m tuiModel) macroFormCommands() []string {
 }
 
 func (m tuiModel) submitMacro() (tea.Model, tea.Cmd) {
-	name := m.formValue(0)
-	mac := config.Macro{Name: name, Commands: m.macroFormCommands(), Model: m.selectionModel()}
-
-	if m.formMacroName != "" && !strings.EqualFold(m.formMacroName, name) {
-		m.runtime().RemoveMacro(m.formMacroName)
-	}
-	if err := m.runtime().SetMacro(mac); err != nil {
+	var said []string
+	c := &runtime.Call{Out: func(l string) { said = append(said, l) }, Rest: m.macroFormCommands(),
+		Args: map[string]string{"name": m.formValue(0), "was": m.formMacroName}}
+	if err := m.runtime().Exec(c, "macro.set"); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
 	m.form, m.formKind = nil, formNone
 	m.phase = m.formReturn
-	m.status = fmt.Sprintf("saved %s, %d command(s)", mac.Name, len(mac.Commands))
-	return m, m.saveCommands()
-}
-
-func (m tuiModel) selectionModel() string {
-	rows, _ := m.selectedRows()
-	model := ""
-	for _, r := range rows {
-		switch {
-		case r.Model == "":
-			continue
-		case model == "":
-			model = r.Model
-		case model != r.Model:
-			return ""
-		}
-	}
-	return model
+	m.status = strings.Join(said, " ")
+	return m, nil
 }
 
 func (m tuiModel) viewMacros() string {
 	var b strings.Builder
 	b.WriteString(ui.StyleCmd.Render("macros"))
 
-	rows, _ := m.selectedRows()
+	rows := m.runtime().Selected()
 	b.WriteString(ui.StyleDim.Render(fmt.Sprintf("   %d element(s) selected", len(rows))))
 	if m.macroFilterOn || m.macroFilter.Value() != "" {
 		b.WriteString("   " + m.macroFilter.View())
@@ -388,7 +341,7 @@ func (m tuiModel) viewMacros() string {
 		if mac.Model != "" {
 			model = mac.Model + "  "
 			style := ui.StyleDim
-			if sel := m.selectionModel(); sel != "" && sel != mac.Model {
+			if sel := m.runtime().SelectionModel(); sel != "" && sel != mac.Model {
 				style = ui.StyleWarn
 			}
 			tag = style.Render(model)
@@ -406,7 +359,7 @@ func (m tuiModel) viewMacros() string {
 }
 
 func (m tuiModel) modeLabel() string {
-	label := ui.StyleElement.Render(ui.Title(m.mode().String()) + " Mode")
+	label := ui.StyleElement.Render(ui.Title(m.mode()) + " Mode")
 	if m.mode() == modeMacro && m.armed() != "" {
 		label += ui.StyleCmd.Render("  " + m.armed())
 	}

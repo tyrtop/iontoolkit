@@ -320,3 +320,53 @@ func TestASessionWithNothingToDialWithFailsItsDial(t *testing.T) {
 		t.Errorf("dial = %+v %v", d, ok)
 	}
 }
+
+func TestATenantWithNoSitesKeepsTheOthersNames(t *testing.T) {
+	rt := New()
+	rt.MergeSites(map[string]string{"111/s1": "Store 0001"})
+	rt.MergeSites(nil)
+	rt.MergeSites(map[string]string{})
+	if got := rt.Sites()["111/s1"]; got != "Store 0001" {
+		t.Errorf("site name = %q after a tenant with no sites, want the other tenant's kept", got)
+	}
+	rt.ClearSites()
+	if len(rt.Sites()) != 0 {
+		t.Errorf("sites = %v after a clear", rt.Sites())
+	}
+}
+
+func TestALineTypedIntoASessionIsRanked(t *testing.T) {
+	rt := deviceRuntime(t)
+	run(t, rt, "list.select-matches")
+	if err := rt.Exec(&Call{Ctx: context.Background()}, "session.open"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Sessions().CloseAll)
+	if err := rt.Exec(&Call{Ctx: context.Background(), Args: map[string]string{"text": "dump overlay status"}}, "session.insert"); err != nil {
+		t.Fatal(err)
+	}
+	s := rt.Sessions().Active()
+	deadline, since := time.Now().Add(10*time.Second), time.Time{}
+	for {
+		if s.Line() != "dump overlay status" {
+			since = time.Time{}
+		} else if since.IsZero() {
+			since = time.Now()
+		} else if time.Since(since) > 100*time.Millisecond {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the echo never settled, the line reads %q", s.Line())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !rt.RecordLine(s) {
+		t.Fatalf("nothing recorded from the line %q", s.Line())
+	}
+	for _, u := range rt.Ranked("", "overlay") {
+		if u.Command == "dump overlay status" {
+			return
+		}
+	}
+	t.Errorf("ranked = %v, want the typed line in the history", rt.Ranked("", "overlay"))
+}

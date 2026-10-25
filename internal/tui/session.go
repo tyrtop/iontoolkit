@@ -30,15 +30,13 @@ func waitForSession(ch <-chan string) tea.Cmd {
 	}
 }
 
-func openSessionCmd(ctx context.Context, rt *runtime.Runtime, eid, name, tsg string) tea.Cmd {
+func openSessionCmd(ctx context.Context, rt *runtime.Runtime, t sessionTarget) tea.Cmd {
 	return func() tea.Msg {
-		if _, err := rt.OpenSession(ctx, eid, name, tsg); err != nil {
-			return sessionErrMsg{
-				target: sessionTarget{eid: eid, name: name, tsg: tsg},
-				err:    err.Error(),
-			}
+		err := rt.Exec(&runtime.Call{Ctx: ctx, Args: map[string]string{"elements": t.eid}}, "session.open")
+		if err != nil {
+			return sessionErrMsg{target: t, err: err.Error()}
 		}
-		return sessionOpenedMsg(eid)
+		return sessionOpenedMsg(t.eid)
 	}
 }
 
@@ -52,109 +50,77 @@ func (m tuiModel) openSession(eid, name, tsg string) (tea.Model, tea.Cmd) {
 	return m.openSessions([]sessionTarget{{eid: eid, name: name, tsg: tsg}})
 }
 
-func (m tuiModel) openOneSession(t sessionTarget) (tea.Model, tea.Cmd) {
-	c := m.tenantClient(t.tsg)
-	if c == nil {
-		if m.status == "" {
-			m.status = "could not reach " + m.tenantName(t.tsg)
-		}
-		return m, nil
-	}
-	m.connecting = t.name
-	m.status = ""
-	m.phase = phaseSession
-	m.markDialing(t.eid)
-	return m, tea.Batch(
-		m.spinner.Tick,
-		waitForDial(m.runtime().DialReports()),
-		openSessionCmd(m.ctx, m.runtime(), t.eid, t.name, t.tsg),
-	)
-}
-
 func (m tuiModel) openSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	if len(targets) == 0 {
 		return m, nil
 	}
 	m.lastTargets = targets
-	if m.needsSignIn(tsgsOf(targets)) {
+	if m.runtime().NeedsSignIn(tsgsOf(targets)) {
 		return m.signInThenSessions(targets)
 	}
-	if conn := m.ensureClients(tsgsOf(targets)); len(conn) > 0 {
-		m.resumeSessions = targets
-		m.connectWait = len(conn)
-		m.connecting = fmt.Sprintf("%d sessions", len(targets))
-		if len(targets) == 1 {
-			m.connecting = targets[0].name
-		}
-		m.status = ""
-		m.phase = phaseSession
-		return m, tea.Batch(append(conn, m.spinner.Tick)...)
-	}
-
-	if len(targets) == 1 {
-		return m.openOneSession(targets[0])
-	}
-
-	cmds := []tea.Cmd{m.spinner.Tick, waitForDial(m.runtime().DialReports())}
-	var unreachable []string
-	for _, t := range targets {
-		c := m.tenantClient(t.tsg)
-		if c == nil {
-			unreachable = append(unreachable, t.name)
-			continue
-		}
-		m.markDialing(t.eid)
-		cmds = append(cmds, openSessionCmd(m.ctx, m.runtime(), t.eid, t.name, t.tsg))
-	}
-	if len(cmds) == 2 {
-		m.status = "could not reach " + strings.Join(unreachable, ", ")
+	rows, note := m.runtime().Reach(rowsOf(targets))
+	m.status = note
+	if len(rows) == 0 {
 		return m, nil
 	}
-	if len(unreachable) > 0 {
-		m.status = "skipped " + strings.Join(unreachable, ", ") + ": tenant unreachable"
+	cmds := []tea.Cmd{m.spinner.Tick, waitForDial(m.runtime().DialReports())}
+	for _, r := range rows {
+		m.runtime().MarkDialing(r.ID)
+		cmds = append(cmds, openSessionCmd(m.ctx, m.runtime(), sessionTarget{eid: r.ID, name: r.Label(), tsg: r.TSG}))
 	}
-
-	m.connecting = ""
-	m.rebuildRows()
+	if len(targets) == 1 {
+		m.connecting = rows[0].Label()
+		m.phase = phaseSession
+	} else {
+		m.connecting = ""
+		m.rebuildRows()
+	}
 	return m, tea.Batch(cmds...)
 }
 
-func (m tuiModel) tabCount() int { return 1 + m.sessions().Count() + len(m.dataTabs()) }
-
-func (m tuiModel) currentTab() int {
+func (m tuiModel) front() string {
 	switch m.phase {
 	case phaseSession:
-		return 1 + m.sessions().ActiveIndex()
+		return runtime.FrontSession
 	case phaseData:
-		return 1 + m.sessions().Count() + m.dataActive()
+		return runtime.FrontData
 	}
-	return 0
+	return runtime.FrontList
 }
 
-func (m tuiModel) selectTab(i int) tuiModel {
-	n := m.tabCount()
-	i = ((i % n) + n) % n
-	if i == 0 {
+func (m tuiModel) showFront(front string) tuiModel {
+	switch front {
+	case runtime.FrontSession:
+		m.phase, m.sesScroll = phaseSession, 0
+	case runtime.FrontData:
+		m.phase = phaseData
+	default:
 		m.phase = phasePicking
-		return m
 	}
-	if i <= m.sessions().Count() {
-		m.sessions().Select(i - 1)
-		m.phase = phaseSession
-		m.sesScroll = 0
-		return m
-	}
-	m.runtime().SelectData(i - 1 - m.sessions().Count())
-	m.phase = phaseData
 	return m
+}
+
+func (m tuiModel) currentTab() int {
+	_, cur := m.runtime().Tabs(m.front())
+	return cur
+}
+
+func (m tuiModel) stepTab(cmd string) tuiModel {
+	c := &runtime.Call{Args: map[string]string{"from": m.front()}}
+	if err := m.runtime().Exec(c, cmd); err != nil {
+		m.status = err.Error()
+		return m
+	}
+	front, _ := c.Result.(string)
+	return m.showFront(front)
 }
 
 func (m tuiModel) onTabKey(key string) (tuiModel, bool) {
 	switch key {
 	case "alt+right", "alt+l":
-		return m.selectTab(m.currentTab() + 1), true
+		return m.stepTab("tab.next"), true
 	case "alt+left", "alt+h":
-		return m.selectTab(m.currentTab() - 1), true
+		return m.stepTab("tab.prev"), true
 	case "alt+w", "alt+k":
 		if m.phase == phaseData {
 			return m.closeDataTab(), true
@@ -163,11 +129,13 @@ func (m tuiModel) onTabKey(key string) (tuiModel, bool) {
 			return m, true
 		}
 		if key == "alt+w" {
-			if s, ok := m.sessions().Detach(); ok {
-				m.status = "detached " + s.Name + " — alt+t to reattach"
+			var said []string
+			_ = m.runtime().Exec(&runtime.Call{Out: func(l string) { said = append(said, l) }}, "session.detach")
+			if len(said) > 0 {
+				m.status = said[0] + " — alt+t to reattach"
 			}
 		} else {
-			m.sessions().CloseActive()
+			_ = m.runtime().Run("session.close", nil)
 		}
 		if m.sessions().Count() == 0 {
 			m.phase = phasePicking
@@ -185,44 +153,12 @@ func (m tuiModel) onSessionKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		return m.onFavouriteKey(key)
 	}
 
-	if next, handled := m.onTabKey(key); handled {
-		return next, nil
-	}
-
-	if key == "alt+t" {
-		return m.reopenLastTab()
-	}
-
-	switch key {
-	case "ctrl+]":
-		m.phase = phasePicking
-		return m, nil
-	case "alt+f":
-		return m.openFavourites()
-	}
-
-	if n, ok := altDigit(key); ok {
-		return m.useFavourite(n)
+	if next, cmd, ran := m.bindingOn(scrSession, key); ran {
+		return next, cmd
 	}
 
 	s := m.sessions().Active()
 	if s == nil {
-		return m, nil
-	}
-
-	if key == exportKey {
-		return m.exportSession()
-	}
-
-	if key == "alt+v" {
-		return m.toggleMouse()
-	}
-
-	if key == "alt+r" {
-		if s.Err() != nil || s.Hung() || s.Ended() {
-			return m.redialActive()
-		}
-		m.status = "this session is still answering — alt+k closes it"
 		return m, nil
 	}
 
@@ -269,17 +205,17 @@ func (m tuiModel) onScrollKey(s *ionterm.Session, key string) (tuiModel, bool) {
 }
 
 func (m tuiModel) reopenLastTab() (tea.Model, tea.Cmd) {
-	if _, ok := m.sessions().Reattach(); ok {
+	s, eid, err := m.runtime().Reopen()
+	switch {
+	case err != nil:
+		m.status = err.Error()
+		return m, nil
+	case s != nil:
 		m.status = ""
 		m.phase = phaseSession
 		return m, waitForSession(m.sessions().Dirty())
 	}
-
-	eid, name, ok := m.sessions().LastClosed()
-	if !ok {
-		m.status = "nothing to reattach"
-		return m, nil
-	}
+	_, name, _ := m.sessions().LastClosed()
 	return m.openSession(eid, name, m.tsgForElement(eid))
 }
 
@@ -414,11 +350,6 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 	return b.String(), tea.NewCursor(view.CursorX, view.CursorY+2)
 }
 
-func (m tuiModel) viewSession() string {
-	content, _ := m.renderSession()
-	return content
-}
-
 func (m tuiModel) signInThenSessions(targets []sessionTarget) (tea.Model, tea.Cmd) {
 	if len(targets) == 0 {
 		m.signInResume = true
@@ -428,21 +359,39 @@ func (m tuiModel) signInThenSessions(targets []sessionTarget) (tea.Model, tea.Cm
 	return m.startSignIn()
 }
 
-func (m tuiModel) needsSignIn(tsgs []string) bool {
-	if m.runtime().TokenDead() == "" {
-		return false
-	}
-	if len(tsgs) == 0 {
-		return m.tenant().UsesBrowser()
-	}
-	for _, tsg := range tsgs {
-		if t, ok := m.tenantOf(tsg); ok {
-			if t.UsesBrowser() {
-				return true
-			}
-			continue
+func (m tuiModel) nextTab() (tea.Model, tea.Cmd) { return m.stepTab("tab.next"), nil }
+
+func (m tuiModel) prevTab() (tea.Model, tea.Cmd) { return m.stepTab("tab.prev"), nil }
+
+func (m tuiModel) detachTab() (tea.Model, tea.Cmd) {
+	next, _ := m.onTabKey("alt+w")
+	return next, nil
+}
+
+func (m tuiModel) closeTab() (tea.Model, tea.Cmd) {
+	next, _ := m.onTabKey("alt+k")
+	return next, nil
+}
+
+func (m tuiModel) sessionBack() (tea.Model, tea.Cmd) {
+	m.phase = phasePicking
+	return m, nil
+}
+
+func onActiveSession(run func(tuiModel) (tea.Model, tea.Cmd)) func(tuiModel) (tea.Model, tea.Cmd) {
+	return func(m tuiModel) (tea.Model, tea.Cmd) {
+		if m.sessions().Active() == nil {
+			return m, nil
 		}
-		return true
+		return run(m)
 	}
-	return false
+}
+
+func (m tuiModel) redialIfDead() (tea.Model, tea.Cmd) {
+	s := m.sessions().Active()
+	if s.Err() != nil || s.Hung() || s.Ended() {
+		return m.redialActive()
+	}
+	m.status = "this session is still answering — alt+k closes it"
+	return m, nil
 }

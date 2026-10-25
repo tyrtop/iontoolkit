@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -13,15 +14,17 @@ import (
 	"strings"
 	"time"
 
+	"tyrtop.com/iontk/internal/endpoint"
 	"tyrtop.com/iontk/internal/logging"
 )
 
-const (
-	AuthorizeURL = "https://auth.apps.paloaltonetworks.com/am/oauth2/authorize"
-	TokenURL     = "https://auth.apps.paloaltonetworks.com/am/oauth2/access_token"
-	ClientID     = "scm"
-	RedirectURI  = "https://stratacloudmanager.paloaltonetworks.com/authentication/callback"
-)
+//go:embed login.yaml
+var loginYAML []byte
+
+var endpoints = endpoint.MustParse("login", loginYAML)
+
+func RedirectURI() string { return endpoints.Value("callback") }
+func ClientID() string    { return endpoints.Value("client_id") }
 
 const userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
 
@@ -73,9 +76,9 @@ func scopeFor(tsg string) string {
 
 func (p pkce) authorizeURL(base, tsg string, silent bool) string {
 	q := url.Values{
-		"client_id":             {ClientID},
+		"client_id":             {ClientID()},
 		"response_type":         {"code"},
-		"redirect_uri":          {RedirectURI},
+		"redirect_uri":          {RedirectURI()},
 		"scope":                 {scopeFor(tsg)},
 		"state":                 {p.state},
 		"code_challenge":        {p.challenge},
@@ -110,7 +113,7 @@ func CodeFromCallback(raw, want string) (string, error) {
 }
 
 func exchange(ctx context.Context, client *http.Client, tokenURL string, form url.Values) (*Token, error) {
-	form.Set("client_id", ClientID)
+	form.Set("client_id", ClientID())
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -163,7 +166,7 @@ func ExchangeCode(ctx context.Context, client *http.Client, tokenURL, code, veri
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"code_verifier": {verifier},
-		"redirect_uri":  {RedirectURI},
+		"redirect_uri":  {RedirectURI()},
 	})
 }
 

@@ -62,19 +62,19 @@ func TestAuthorizeURL(t *testing.T) {
 	p := pkce{verifier: "v", challenge: "chal", state: "st"}
 
 	t.Run("interactive", func(t *testing.T) {
-		raw := p.authorizeURL(AuthorizeURL, "123", false)
+		raw := p.authorizeURL(Options{}.url("authorize"), "123", false)
 		u, err := url.Parse(raw)
 		if err != nil {
 			t.Fatalf("parse %q: %v", raw, err)
 		}
-		if got := u.Scheme + "://" + u.Host + u.Path; got != AuthorizeURL {
-			t.Errorf("endpoint = %q, want %q", got, AuthorizeURL)
+		if got := u.Scheme + "://" + u.Host + u.Path; got != (Options{}).url("authorize") {
+			t.Errorf("endpoint = %q, want %q", got, (Options{}).url("authorize"))
 		}
 		q := u.Query()
 		want := map[string]string{
-			"client_id":             ClientID,
+			"client_id":             ClientID(),
 			"response_type":         "code",
-			"redirect_uri":          RedirectURI,
+			"redirect_uri":          RedirectURI(),
 			"scope":                 "openid profile email tsg_id:123",
 			"state":                 "st",
 			"code_challenge":        "chal",
@@ -97,7 +97,7 @@ func TestAuthorizeURL(t *testing.T) {
 	})
 
 	t.Run("silent", func(t *testing.T) {
-		u, err := url.Parse(p.authorizeURL(AuthorizeURL, "123", true))
+		u, err := url.Parse(p.authorizeURL(Options{}.url("authorize"), "123", true))
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
@@ -117,49 +117,49 @@ func TestCodeFromCallback(t *testing.T) {
 	}{
 		{
 			name:  "valid",
-			raw:   RedirectURI + "?code=sWN8GTm91g16GGtBX3_zYHBzbs8&iss=https%3A%2F%2Fauth.apps.paloaltonetworks.com&state=st",
+			raw:   RedirectURI() + "?code=sWN8GTm91g16GGtBX3_zYHBzbs8&iss=https%3A%2F%2Fauth.apps.paloaltonetworks.com&state=st",
 			state: "st",
 			want:  "sWN8GTm91g16GGtBX3_zYHBzbs8",
 		},
 		{
 			name:  "state unchecked when caller has none",
-			raw:   RedirectURI + "?code=abc&state=whatever",
+			raw:   RedirectURI() + "?code=abc&state=whatever",
 			state: "",
 			want:  "abc",
 		},
 		{
 			name:  "surrounding whitespace tolerated",
-			raw:   "  " + RedirectURI + "?code=abc&state=st\n",
+			raw:   "  " + RedirectURI() + "?code=abc&state=st\n",
 			state: "st",
 			want:  "abc",
 		},
 		{
 			name:    "state mismatch",
-			raw:     RedirectURI + "?code=abc&state=other",
+			raw:     RedirectURI() + "?code=abc&state=other",
 			state:   "st",
 			wantErr: "state mismatch",
 		},
 		{
 			name:    "error without description",
-			raw:     RedirectURI + "?error=login_required",
+			raw:     RedirectURI() + "?error=login_required",
 			state:   "st",
 			wantErr: "login_required",
 		},
 		{
 			name:    "error with description",
-			raw:     RedirectURI + "?error=access_denied&error_description=user+aborted",
+			raw:     RedirectURI() + "?error=access_denied&error_description=user+aborted",
 			state:   "st",
 			wantErr: "user aborted",
 		},
 		{
 			name:    "error wins over code",
-			raw:     RedirectURI + "?code=abc&error=login_required&state=st",
+			raw:     RedirectURI() + "?code=abc&error=login_required&state=st",
 			state:   "st",
 			wantErr: "login_required",
 		},
 		{
 			name:    "no code",
-			raw:     RedirectURI + "?iss=whatever",
+			raw:     RedirectURI() + "?iss=whatever",
 			state:   "",
 			wantErr: "no code parameter",
 		},
@@ -232,8 +232,8 @@ func TestExchangeCode(t *testing.T) {
 		"grant_type":    "authorization_code",
 		"code":          "the-code",
 		"code_verifier": "the-verifier",
-		"redirect_uri":  RedirectURI,
-		"client_id":     ClientID,
+		"redirect_uri":  RedirectURI(),
+		"client_id":     ClientID(),
 	}
 	for k, v := range want {
 		if got := form.Get(k); got != v {
@@ -313,45 +313,13 @@ func TestExchangeCodeContextCancelled(t *testing.T) {
 	}
 }
 
-func TestCompleteManual(t *testing.T) {
-	srv, form := tokenServer(t, http.StatusOK, `{"access_token":"at","expires_in":899}`)
-	opt := Options{TokenURL: srv.URL, Client: srv.Client()}
-
-	authURL, verifier, state, err := ManualURL("123", opt)
-	if err != nil {
-		t.Fatalf("ManualURL() error = %v", err)
-	}
-	u, err := url.Parse(authURL)
-	if err != nil {
-		t.Fatalf("parse %q: %v", authURL, err)
-	}
-	if got := u.Query().Get("state"); got != state {
-		t.Errorf("state in URL = %q, want the returned %q", got, state)
-	}
-
-	tok, err := CompleteManual(context.Background(), RedirectURI+"?code=abc&state="+state, verifier, state, opt)
-	if err != nil {
-		t.Fatalf("CompleteManual() error = %v", err)
-	}
-	if tok.AccessToken != "at" {
-		t.Errorf("AccessToken = %q, want %q", tok.AccessToken, "at")
-	}
-	if got := form.Get("code_verifier"); got != verifier {
-		t.Errorf("code_verifier = %q, want %q", got, verifier)
-	}
-
-	if _, err := CompleteManual(context.Background(), RedirectURI+"?code=abc&state=wrong", verifier, state, opt); err == nil {
-		t.Error("CompleteManual() with a mismatched state error = nil, want an error")
-	}
-}
-
 func TestOptionsDefaults(t *testing.T) {
 	var o Options
-	if got := o.authorize(); got != AuthorizeURL {
-		t.Errorf("authorize() = %q, want %q", got, AuthorizeURL)
+	if got := o.authorize(); got != (Options{}).url("authorize") {
+		t.Errorf("authorize() = %q, want %q", got, (Options{}).url("authorize"))
 	}
-	if got := o.token(); got != TokenURL {
-		t.Errorf("token() = %q, want %q", got, TokenURL)
+	if got := o.token(); got != (Options{}).url("token") {
+		t.Errorf("token() = %q, want %q", got, (Options{}).url("token"))
 	}
 	if o.httpClient() != http.DefaultClient {
 		t.Error("httpClient() did not fall back to http.DefaultClient")
@@ -360,12 +328,12 @@ func TestOptionsDefaults(t *testing.T) {
 		t.Errorf("timeout() = %v, want %v", got, 5*time.Minute)
 	}
 
-	set := Options{AuthorizeURL: "a", TokenURL: "t", Timeout: time.Second, Client: &http.Client{}}
-	if got := set.authorize(); got != "a" {
-		t.Errorf("authorize() = %q, want %q", got, "a")
+	set := Options{Host: "https://fake.example.com", Timeout: time.Second, Client: &http.Client{}}
+	if got := set.authorize(); got != "https://fake.example.com/am/oauth2/authorize" {
+		t.Errorf("authorize() = %q, want the fake host", got)
 	}
-	if got := set.token(); got != "t" {
-		t.Errorf("token() = %q, want %q", got, "t")
+	if got := set.token(); got != "https://fake.example.com/am/oauth2/access_token" {
+		t.Errorf("token() = %q, want the fake host", got)
 	}
 	if got := set.timeout(); got != time.Second {
 		t.Errorf("timeout() = %v, want %v", got, time.Second)

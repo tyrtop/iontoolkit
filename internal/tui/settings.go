@@ -221,38 +221,15 @@ const (
 )
 
 func (m tuiModel) factoryReset() (tea.Model, tea.Cmd) {
-	m.sessions().CloseAll()
-
-	if err := app.RemoveThemes(m.store()); err != nil {
-		m.status = err.Error()
-		return m, nil
-	}
-	ui.HideThemes(nil)
-	if err := ui.LoadThemes(app.ThemesPath(m.store())); err != nil {
-		m.status = err.Error()
-	}
-
-	if err := m.store().Reset(); err != nil {
-		m.status = err.Error()
-		return m, nil
-	}
-
-	m.runtime().UseConfig(m.store(), &config.Config{})
-	m.runtime().ClearTenant()
-	m.setAuthMode(authBrowser)
-	m.runtime().ResetClients()
-	m.setElements(nil)
-	m.runtime().MergeSites(nil)
-	m.runtime().ForgetSelection()
-	m.runtime().ForgetRunAs()
-	m.runtime().ClearIssues()
-	m.runtime().ForgetAuth()
-	m.runtime().ResetFleet()
+	var said []string
+	err := m.runtime().Exec(&runtime.Call{Out: func(l string) { said = append(said, l) }}, "reset")
 	m.setSection, m.setFocus, m.setCursor = secGeneral, focusNav, 0
 	m.menuCursor = 0
 	m.phase = phaseMenu
-	m.status = "reset — nothing is saved any more"
-
+	m.status = strings.Join(said, " ")
+	if err != nil {
+		m.status = err.Error()
+	}
 	m.tut = tutorialRun{}
 	m = m.fitTutorial().raiseTutorialAsk()
 	return m, nil
@@ -383,10 +360,14 @@ func (m tuiModel) onSessionGeoKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.setCursor == 0 {
-		return m.setOption("session_cols", strconv.Itoa(min(400, max(40, cols+step)))), nil
+	name, n := "session_cols", cols+step
+	if m.setCursor != 0 {
+		name, n = "session_rows", rows+step
 	}
-	return m.setOption("session_rows", strconv.Itoa(min(200, max(10, rows+step)))), nil
+	if o, ok := m.runtime().Option(name); ok {
+		n = o.Clamp(n)
+	}
+	return m.setOption(name, strconv.Itoa(n)), nil
 }
 
 func (m tuiModel) sectionContent() []string {
@@ -426,7 +407,7 @@ func (m tuiModel) sectionContent() []string {
 		}
 		out = append(out,
 			ui.Label("Commands")+guard,
-			ui.Label("Mode")+ui.StyleElement.Render(m.defaultMode().String())+
+			ui.Label("Mode")+ui.StyleElement.Render(m.defaultMode())+
 				ui.StyleDim.Render("  what the element list opens in"),
 			ui.Label("Jump")+ui.StyleElement.Render(fmt.Sprintf("%d rows", m.pageStep()))+
 				ui.StyleDim.Render("  how far alt+↑/↓ moves in the element list"),
@@ -549,7 +530,7 @@ func (m tuiModel) sectionContent() []string {
 			"",
 			ui.Label("Tenant")+ui.StyleDim.Render(m.tenant().Name+"  tsg "+m.tenant().TSGID),
 			ui.Label("ION User")+ui.StyleDim.Render(m.ionUser()),
-			ui.Label("Mode")+ui.StyleDim.Render(m.mode().String()),
+			ui.Label("Mode")+ui.StyleDim.Render(m.mode()),
 			"",
 			ui.Label("Elements")+ui.StyleDim.Render(fmt.Sprintf("%d cached, %d shown", m.cacheCount(), len(m.matched()))),
 			ui.Label("Sessions")+ui.StyleDim.Render(fmt.Sprintf("%d open, %d detached", m.sessions().Count(), m.sessions().DetachedCount())),
@@ -787,12 +768,7 @@ func (m tuiModel) screensLine() string {
 	return line + ui.StyleDim.Render(fmt.Sprintf("  %d files from %s", len(m.viewFiles), shortenPath(dir, 34)))
 }
 
-func (m tuiModel) defaultMode() pickMode {
-	if mode, ok := parseMode(m.option("default_mode")); ok {
-		return mode
-	}
-	return modeShell
-}
+func (m tuiModel) defaultMode() string { return m.option("default_mode") }
 
 func (m tuiModel) cycleDefaultMode() (tea.Model, tea.Cmd) {
 	return m.setOption("default_mode", "next"), nil

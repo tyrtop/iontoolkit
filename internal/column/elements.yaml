@@ -1,6 +1,17 @@
 kind: list
 name: Elements
 
+endpoints:
+  - name: elements
+    path: /sdwan/v3.2/api/elements
+  - name: sites
+    path: /sdwan/v4.13/api/sites
+  - name: spokecluster_status
+    path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters/{cluster_id}/status
+  - name: spokeclusters_status_query
+    method: POST
+    path: /sdwan/v2.0/api/spokeclusters/status/query
+
 columns:
   - name: caret
     go: caret
@@ -18,7 +29,7 @@ columns:
     min: 14
     max: 30
     flex: true
-    fetch: /sdwan/v3.2/api/elements
+    fetch: elements
     value: "{{ .label }}"
 
   - name: site
@@ -26,7 +37,7 @@ columns:
     min: 8
     max: 22
     flex: true
-    fetch: /sdwan/v4.13/api/sites
+    fetch: sites
     on: site_id
     value: "{{ .name }}"
 
@@ -35,7 +46,7 @@ columns:
     min: 8
     max: 11
     flex: true
-    fetch: /sdwan/v3.2/api/elements
+    fetch: elements
     value: "{{ .model_name }}"
 
   - name: sn
@@ -44,14 +55,14 @@ columns:
     max: 24
     flex: true
     when: "{{ .serials }}"
-    fetch: /sdwan/v3.2/api/elements
+    fetch: elements
     value: "{{ .serial_number }}"
 
   - name: state
     header: State
     min: 9
     max: 9
-    fetch: /sdwan/v3.2/api/elements
+    fetch: elements
     value: "{{ if .connected }}connected{{ else }}offline{{ end }}"
     style:
       - when: "{{ not .connected }}"
@@ -70,5 +81,5 @@ columns:
     max: 20
     flex: true
     when: "{{ gt .tenants 1 }}"
-    fetch: /sdwan/v3.2/api/elements
+    fetch: elements
     value: "{{ .tenant }}"

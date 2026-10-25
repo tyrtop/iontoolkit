@@ -63,7 +63,7 @@ func CompareCommands(views []View) []string {
 }
 
 func FetchCompare(ctx context.Context, g Getter, v View, vars Vars) (*Data, error) {
-	spec := View{Name: v.Name}
+	spec := View{Name: v.Name, calls: v.calls}
 	if v.Compare != nil {
 		spec.Fetch = v.Compare.Fetch
 	}

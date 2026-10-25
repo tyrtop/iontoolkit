@@ -41,10 +41,7 @@ type Channel struct {
 	From      string
 }
 
-// the unit cannot be assumed from the field name: one element-status body
-// carries seconds (last_rebooted_time), milliseconds (analytics_live_...) and
-// 100ns ticks (config_and_events_...), as do every record's _on_utc fields. So
-// the magnitude decides, an epoch date being around 1.8e9 seconds. Zero is unset.
+// one element-status body mixes seconds, milliseconds and 100ns ticks
 func UTCTime(v int64) time.Time {
 	switch {
 	case v == 0:
@@ -67,14 +64,6 @@ func (s ElementStatus) Channel(name string) (Channel, bool) {
 		}
 	}
 	return Channel{}, false
-}
-
-func (s *Client) ElementStatus(ctx context.Context, eid string) (ElementStatus, error) {
-	body, err := s.get(ctx, "element "+eid+" status", elementStatusURL(eid))
-	if err != nil {
-		return ElementStatus{}, err
-	}
-	return decodeElementStatus(body)
 }
 
 const (
@@ -148,7 +137,7 @@ type Interface struct {
 	IPv4Config          *IPv4Config `json:"ipv4_config"`
 }
 
-// null on a port with no IPv4, and on the parent of a set of subinterfaces.
+// null on a port with no IPv4, or a subinterface parent
 type IPv4Config struct {
 	Type         string            `json:"type"`
 	StaticConfig *IPv4StaticConfig `json:"static_config"`
@@ -156,23 +145,6 @@ type IPv4Config struct {
 
 type IPv4StaticConfig struct {
 	Address string `json:"address"`
-}
-
-func (s *Client) ListInterfaces(ctx context.Context, siteID, eid string) ([]Interface, error) {
-	if siteID == "" {
-		return nil, fmt.Errorf("element %s: interfaces need a site id", eid)
-	}
-	body, err := s.get(ctx, "element "+eid+" interfaces", interfacesURL(siteID, eid))
-	if err != nil {
-		return nil, err
-	}
-	var wrapped struct {
-		Items []Interface `json:"items"`
-	}
-	if err := json.Unmarshal(body, &wrapped); err != nil {
-		return nil, fmt.Errorf("element %s interfaces: json decode: %w", eid, err)
-	}
-	return wrapped.Items, nil
 }
 
 type InterfaceStatus struct {
@@ -222,16 +194,7 @@ type ServiceLinkState struct {
 	IPsecNextRekey    int64  `json:"ipsec_next_rekey"`
 }
 
-// a slice because a bypass pair answers with one status per member, wrapped in
-// the usual items/count envelope where every other type sends a bare object
-func (s *Client) InterfaceStatus(ctx context.Context, siteID, eid, iid string) ([]InterfaceStatus, error) {
-	body, err := s.get(ctx, "interface "+iid+" status", interfaceStatusURL(siteID, eid, iid))
-	if err != nil {
-		return nil, err
-	}
-	return decodeInterfaceStatus(iid, body)
-}
-
+// a bypass pair answers one status per member, in an items envelope
 func decodeInterfaceStatus(iid string, body []byte) ([]InterfaceStatus, error) {
 	var wrapped struct {
 		Items []InterfaceStatus `json:"items"`
@@ -254,8 +217,7 @@ type SpokeClusterStatus struct {
 	Events  []SwitchOver    `json:"switch_over_events"`
 }
 
-// Status is "active" on the one carrying traffic and "unknown" for a member the
-// controller cannot see -- what a dead peer looks like, not a distinct "standby"
+// "unknown" is a member the controller cannot see; there is no "standby"
 type ClusterMember struct {
 	ElementID string `json:"element_id"`
 	Status    string `json:"status"`
@@ -293,8 +255,8 @@ func (s SpokeClusterStatus) Active() (ClusterMember, bool) {
 	return ClusterMember{}, false
 }
 
-func (s *Client) SpokeClusterStatus(ctx context.Context, siteID, cid string) (SpokeClusterStatus, error) {
-	body, err := s.get(ctx, "spoke cluster "+cid+" status", clusterStatusURL(siteID, cid))
+func (s *Client) SpokeClusterStatus(ctx context.Context, path, cid string) (SpokeClusterStatus, error) {
+	body, err := s.GetJSON(ctx, path)
 	if err != nil {
 		return SpokeClusterStatus{}, err
 	}
@@ -309,7 +271,7 @@ func (s *Client) GetJSON(ctx context.Context, path string) ([]byte, error) {
 	if err := checkRead(path); err != nil {
 		return nil, err
 	}
-	return s.get(ctx, strings.TrimPrefix(path, "/"), apiHost+path)
+	return s.get(ctx, strings.TrimPrefix(path, "/"), apiHost()+path)
 }
 
 func (s *Client) QueryJSON(ctx context.Context, path, field string, ids []string, limit, page int) ([]byte, error) {
@@ -320,7 +282,7 @@ func (s *Client) QueryJSON(ctx context.Context, path, field string, ids []string
 		return nil, fmt.Errorf("query %s: nothing to ask about", path)
 	}
 	filter := fmt.Sprintf(`{%q:{"in":[%s]}}`, field, quoted(ids))
-	return s.post(ctx, strings.TrimPrefix(path, "/"), apiHost+path, queryBody(filter, limit, page))
+	return s.post(ctx, strings.TrimPrefix(path, "/"), apiHost()+path, queryBody(filter, limit, page))
 }
 
 func quoted(ids []string) string {
@@ -356,7 +318,7 @@ func (s *Client) post(ctx context.Context, what, url string, body []byte) ([]byt
 	return s.do(ctx, what, http.MethodPost, url, body)
 }
 
-// the cloudgenix SDK's urllib3 retry: 8 more tries, sleeping 0, 1.41s, 2.82s ... 90.35s
+// the cloudgenix SDK's urllib3 retry
 const (
 	retries     = 8
 	backoff     = 705883 * time.Microsecond
@@ -383,7 +345,7 @@ func again(method string, status int) bool {
 	return false
 }
 
-// urllib3 counts a reset or a timeout in a TLS handshake or proxy CONNECT as a read error, the rest as "other"
+// urllib3 counts a reset or timeout as a read error, the rest "other"
 func brokenOff(err error) bool {
 	var ne net.Error
 	return errors.Is(err, syscall.ECONNRESET) || (errors.As(err, &ne) && ne.Timeout())
@@ -413,8 +375,12 @@ func (s *Client) do(ctx context.Context, what, method, url string, body []byte) 
 }
 
 func (s *Client) call(ctx context.Context, what, method, url string, body []byte, write bool) ([]byte, error) {
+	return s.callAs(ctx, "", what, method, url, body, write)
+}
+
+func (s *Client) callAs(ctx context.Context, tok, what, method, url string, body []byte, write bool) ([]byte, error) {
 	for attempt := 0; ; attempt++ {
-		answer, status, after, err := s.attempt(ctx, what, method, url, body, write)
+		answer, status, after, err := s.attempt(ctx, tok, what, method, url, body, write)
 		if err == nil || ctx.Err() != nil || attempt >= retries || !again(method, status) {
 			return answer, err
 		}
@@ -436,7 +402,7 @@ func (s *Client) call(ctx context.Context, what, method, url string, body []byte
 	}
 }
 
-func (s *Client) attempt(ctx context.Context, what, method, url string, body []byte, write bool) ([]byte, int, time.Duration, error) {
+func (s *Client) attempt(ctx context.Context, tok, what, method, url string, body []byte, write bool) ([]byte, int, time.Duration, error) {
 	if err := s.limiter.Wait(ctx); err != nil {
 		return nil, -1, 0, fmt.Errorf("%s: rate limit wait: %w", what, err)
 	}
@@ -464,14 +430,17 @@ func (s *Client) attempt(ctx context.Context, what, method, url string, body []b
 	if err != nil {
 		return nil, -1, 0, fmt.Errorf("%s: build request: %w", what, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+s.getToken())
+	if tok == "" {
+		tok = s.getToken()
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", browserUA)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := s.httpFor(write || patient(ctx)).Do(req)
+	resp, err := s.httpFor(write).Do(req)
 	if err != nil {
 		status := noAnswer
 		switch {
@@ -521,8 +490,7 @@ func retryAfter(resp *http.Response) time.Duration {
 	return 0
 }
 
-// The envelope the portal's query_* POSTs take, from its own calls.
-// dest_page counts from one, not zero.
+// the portal's own query_* envelope; dest_page counts from one
 func queryBody(filter string, limit, page int) []byte {
 	return []byte(fmt.Sprintf(
 		`{"query_params":%s,"dest_page":%d,"limit":%d,"getDeleted":false,`+
@@ -547,12 +515,15 @@ type ClusterMemberStatus struct {
 	UpdatedAt int64  `json:"last_status_update_ts"`
 }
 
-func (s *Client) SpokeClusterStatuses(ctx context.Context, elementIDs []string) ([]ClusterMemberStatus, error) {
+func (s *Client) SpokeClusterStatuses(ctx context.Context, path string, elementIDs []string) ([]ClusterMemberStatus, error) {
 	if len(elementIDs) == 0 {
 		return nil, fmt.Errorf("spoke cluster status query: no elements to ask about")
 	}
+	if err := checkRead(path); err != nil {
+		return nil, err
+	}
 
-	out, err := s.clusterQuery(ctx, elementFilter(elementIDs))
+	out, err := s.clusterQuery(ctx, apiHost()+path, elementFilter(elementIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -564,10 +535,10 @@ func (s *Client) SpokeClusterStatuses(ctx context.Context, elementIDs []string) 
 	return nil, fmt.Errorf("spoke cluster status query: no members in %d item(s)", len(out))
 }
 
-func (s *Client) clusterQuery(ctx context.Context, filter string) ([]ClusterMemberStatus, error) {
+func (s *Client) clusterQuery(ctx context.Context, url, filter string) ([]ClusterMemberStatus, error) {
 	var out []ClusterMemberStatus
 	for page := 1; page <= clusterQueryPages; page++ {
-		body, err := s.post(ctx, "spoke cluster status query", clusterQueryURL(),
+		body, err := s.post(ctx, "spoke cluster status query", url,
 			queryBody(filter, ClusterQueryLimit, page))
 		if err != nil {
 			return nil, err

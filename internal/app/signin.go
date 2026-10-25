@@ -12,20 +12,8 @@ import (
 	"tyrtop.com/iontk/internal/saseauth"
 )
 
-func SignIn(ctx context.Context, st *config.Store, w io.Writer) (saseauth.Discovery, error) {
-	d, err := Discover(ctx, st)
-	if err != nil {
-		return d, fmt.Errorf("browser sign-in: %w", err)
-	}
-	if err := SaveDiscovery(st, d); err != nil {
-		return d, err
-	}
-	fmt.Fprintf(w, "signed in as %s — %d tenants visible\n", d.Identity.Display(), len(d.Tenants))
-	return d, nil
-}
-
 func Discover(ctx context.Context, st *config.Store) (saseauth.Discovery, error) {
-	return saseauth.Discover(ctx, BrowserOptions(&http.Client{Timeout: Defaults.HTTPTimeout}, st), "")
+	return saseauth.Discover(ctx, BrowserOptions(&http.Client{Timeout: Defaults.HTTPTimeout}, st))
 }
 
 func SaveDiscovery(st *config.Store, d saseauth.Discovery) error {
@@ -49,7 +37,7 @@ type TenantWarm struct {
 	Err     error
 }
 
-// rotated as it is redeemed, so it narrows to one tenant
+// the refresh token rotates on redeem and narrows to one tenant
 func WarmEach(ctx context.Context, st *config.Store, tenants []config.Tenant) []TenantWarm {
 	httpClient := &http.Client{Timeout: Defaults.HTTPTimeout}
 	out := make([]TenantWarm, 0, len(tenants))
@@ -67,10 +55,6 @@ func WarmEach(ctx context.Context, st *config.Store, tenants []config.Tenant) []
 		}
 	}
 	return out
-}
-
-func WarmTenants(ctx context.Context, st *config.Store, tenants []config.Tenant, w io.Writer) error {
-	return WarmReport(WarmEach(ctx, st, tenants), w)
 }
 
 func WarmReport(results []TenantWarm, w io.Writer) error {

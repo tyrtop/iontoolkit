@@ -1,14 +1,12 @@
 package tui
 
 import (
-	"context"
 	"strings"
 	"tyrtop.com/iontk/internal/runtime"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/app"
-	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/sase/write"
 	"tyrtop.com/iontk/internal/ui"
@@ -32,19 +30,20 @@ const (
 )
 
 type writeState struct {
-	step   writeStep
-	eid    string
-	tsg    string
-	vars   map[string]string
-	specs  []write.Spec
-	spec   write.Spec
-	recs   []map[string]any
-	cursor int
-	rec    map[string]any
-	inputs []textinput.Model
-	focus  int
-	plan   write.Plan
-	err    string
+	step    writeStep
+	eid     string
+	tsg     string
+	vars    map[string]string
+	specs   []write.Spec
+	spec    write.Spec
+	recs    []map[string]any
+	cursor  int
+	rec     map[string]any
+	inputs  []textinput.Model
+	focus   int
+	plan    write.Plan
+	blocked string
+	err     string
 }
 
 type writeRecsMsg struct {
@@ -53,24 +52,18 @@ type writeRecsMsg struct {
 	err  string
 }
 
+type writePlannedMsg struct {
+	eid     string
+	plan    write.Plan
+	found   bool
+	blocked string
+	err     string
+}
+
 type writeSentMsg struct {
 	eid   string
 	label string
 	err   string
-}
-
-func (m tuiModel) writeGuard(tsg string) write.Guard {
-	return app.WriteGuard(m.store(), m.cfg(), m.tenantName(tsg))
-}
-
-func (m *tuiModel) loadWrites(st *config.Store) {
-	set, err := app.LoadWrites(st, app.WritesFile)
-	m.writes = set
-	m.writesErr = ""
-	if err != nil {
-		m.writesErr = err.Error()
-		logging.L().Warn("writes refused", "err", err)
-	}
 }
 
 func (m tuiModel) startWrite() (tea.Model, tea.Cmd) {
@@ -78,11 +71,12 @@ func (m tuiModel) startWrite() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if m.writes == nil || len(m.writes.Writes) == 0 {
+	writes, _ := m.runtime().Writes()
+	if writes == nil || len(writes.Writes) == 0 {
 		m.status = "nothing is editable — writes.yaml names no records"
 		return m, nil
 	}
-	m.wr = writeState{eid: tab.EID, tsg: tab.TSG, vars: tab.Vars(), specs: m.writes.Writes}
+	m.wr = writeState{eid: tab.EID, tsg: tab.TSG, vars: tab.Vars(), specs: writes.Writes}
 	if len(m.wr.specs) > 1 {
 		m.wr.step = writeSpecs
 		return m, nil
@@ -91,20 +85,15 @@ func (m tuiModel) startWrite() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) loadWriteRecords(spec write.Spec) (tea.Model, tea.Cmd) {
-	c := m.tenantClient(m.wr.tsg)
-	if c == nil {
-		m.status = "could not reach " + m.tenantName(m.wr.tsg)
-		m.wr = writeState{}
-		return m, nil
-	}
 	m.wr.spec, m.wr.step, m.wr.cursor, m.wr.err = spec, writeLoading, 0, ""
-	ctx, eid, vars := m.ctx, m.wr.eid, m.wr.vars
+	rt, ctx, eid := m.runtime(), m.ctx, m.wr.eid
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		recs, err := spec.Records(ctx, c, vars)
-		msg := writeRecsMsg{eid: eid, recs: recs}
-		if err != nil {
+		c := &runtime.Call{Ctx: ctx, Args: map[string]string{"what": spec.Name, "element": eid}}
+		msg := writeRecsMsg{eid: eid}
+		if err := rt.Exec(c, "write.records"); err != nil {
 			msg.err = err.Error()
 		}
+		msg.recs, _ = c.Result.([]map[string]any)
 		return msg
 	})
 }
@@ -139,42 +128,57 @@ func (m tuiModel) moveWriteFocus(by int) tuiModel {
 	return m
 }
 
-func (m tuiModel) reviewWrite() tuiModel {
-	set := map[string]string{}
+func (m tuiModel) reviewWrite() (tuiModel, tea.Cmd) {
+	sets := make([]string, 0, len(m.wr.spec.Fields))
 	for i, f := range m.wr.spec.Fields {
-		set[f.Key] = m.wr.inputs[i].Value()
+		sets = append(sets, f.Key+"="+m.wr.inputs[i].Value())
 	}
-	p, err := m.wr.spec.Plan(m.wr.vars, m.wr.rec, set)
-	switch {
-	case err != nil:
-		m.wr.err = err.Error()
-	case p.Empty():
-		m.wr.err = "nothing changed"
-	default:
-		m.wr.plan, m.wr.err, m.wr.step = p, "", writeReview
+	args := map[string]string{"what": m.wr.spec.Name, "elements": m.wr.eid, "match": "id=" + write.Show(m.wr.rec["id"])}
+	rt, ctx, eid := m.runtime(), m.ctx, m.wr.eid
+	m.wr.err = ""
+	return m, func() tea.Msg {
+		c := &runtime.Call{Ctx: ctx, Args: args, Rest: sets}
+		err := rt.Exec(c, "write")
+		msg := writePlannedMsg{eid: eid}
+		if run, ok := c.Result.(*app.WriteRun); ok {
+			msg.blocked = run.Blocked
+			for _, ep := range run.Plans {
+				if len(ep.Plans) > 0 {
+					msg.plan, msg.found = ep.Plans[0], true
+				}
+			}
+		}
+		if err != nil {
+			msg.err = err.Error()
+		}
+		return msg
 	}
-	return m
 }
 
-func (m tuiModel) writeBlocked() string {
-	if err := m.writeGuard(m.wr.tsg).Ready(m.wr.spec); err != nil {
-		return err.Error()
+func (m tuiModel) onWritePlanned(msg writePlannedMsg) (tea.Model, tea.Cmd) {
+	if m.wr.step != writeForm || msg.eid != m.wr.eid {
+		return m, nil
 	}
-	return ""
+	switch {
+	case msg.err != "" && !msg.found:
+		m.wr.err = msg.err
+	case !msg.found || msg.plan.Empty():
+		m.wr.err = "nothing changed"
+	default:
+		m.wr.plan, m.wr.blocked, m.wr.err, m.wr.step = msg.plan, msg.blocked, "", writeReview
+	}
+	return m, nil
 }
 
 func (m tuiModel) sendWrite() (tea.Model, tea.Cmd) {
-	if m.writeBlocked() != "" {
+	if m.wr.blocked != "" {
 		return m, nil
 	}
 	m.wr.step = writeSending
-	m.bindPortal(m.wr.tsg)
 	rt, p, eid, ctx := m.runtime(), m.wr.plan, m.wr.eid, m.ctx
 	args, sets := editCall(m.wr.spec.Name, eid, p)
 	logging.L().Info("portal write", "spec", m.wr.spec.Name, "path", p.Path, "changes", len(p.Changes))
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(ctx, app.Defaults.HTTPTimeout)
-		defer cancel()
 		err := rt.Exec(&runtime.Call{Ctx: ctx, Args: args, Rest: sets, DoIt: true}, "write")
 		msg := writeSentMsg{eid: eid, label: p.Label}
 		if err != nil {
@@ -239,7 +243,7 @@ func (m tuiModel) onWriteKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cm
 		case "shift+tab", "up":
 			m = m.moveWriteFocus(-1)
 		case "enter":
-			m = m.reviewWrite()
+			return m.reviewWrite()
 		default:
 			var cmd tea.Cmd
 			m.wr.inputs[m.wr.focus], cmd = m.wr.inputs[m.wr.focus].Update(msg)
@@ -320,7 +324,7 @@ func (m tuiModel) viewWrite() string {
 		if m.wr.step == writeSending {
 			b.WriteString(ui.StyleDim.Render(m.spinner.View()+" sending") + "\n")
 			hint = ""
-		} else if why := m.writeBlocked(); why != "" {
+		} else if why := m.wr.blocked; why != "" {
 			b.WriteString(ui.StyleWarn.Render(ui.Truncate(why, width)) + "\n")
 			hint = "esc back to the fields"
 		} else {

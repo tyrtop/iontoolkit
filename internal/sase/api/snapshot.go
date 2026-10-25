@@ -33,11 +33,20 @@ func (s Snapshot) Err() error {
 	return errors.Join(errs...)
 }
 
+func (s *Client) InspectElement(ctx context.Context, eid string) (Snapshot, error) {
+	body, url, el, err := s.elementRecord(ctx, inspect, eid)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snap := s.ElementSnapshot(ctx, el)
+	snap.Raw[url] = body
+	return snap, nil
+}
+
 func (s *Client) ElementSnapshot(ctx context.Context, el Element) Snapshot {
 	snap := Snapshot{Element: el, Raw: map[string]json.RawMessage{}}
 
-	url := elementStatusURL(el.ID)
-	if body, err := s.get(ctx, "element "+el.ID+" status", url); err != nil {
+	if body, url, err := s.getNamed(ctx, "element "+el.ID+" status", inspect, "element_status", vars{"element_id": el.ID}); err != nil {
 		snap.StatusErr = err
 	} else {
 		snap.Raw[url] = body
@@ -50,8 +59,8 @@ func (s *Client) ElementSnapshot(ctx context.Context, el Element) Snapshot {
 	}
 
 	if cid := el.ClusterID(); cid != "" {
-		url := clusterStatusURL(el.SiteID, cid)
-		if body, err := s.get(ctx, "spoke cluster "+cid+" status", url); err != nil {
+		if body, url, err := s.getNamed(ctx, "spoke cluster "+cid+" status", inspect, "spokecluster_status",
+			vars{"site_id": el.SiteID, "cluster_id": cid}); err != nil {
 			snap.ClusterErr = err
 		} else {
 			snap.Raw[url] = body
@@ -64,8 +73,8 @@ func (s *Client) ElementSnapshot(ctx context.Context, el Element) Snapshot {
 		}
 	}
 
-	url = interfacesURL(el.SiteID, el.ID)
-	body, err := s.get(ctx, "element "+el.ID+" interfaces", url)
+	body, url, err := s.getNamed(ctx, "element "+el.ID+" interfaces", inspect, "interfaces",
+		vars{"site_id": el.SiteID, "element_id": el.ID})
 	if err != nil {
 		snap.IfacesErr = err
 		return snap
@@ -82,8 +91,8 @@ func (s *Client) ElementSnapshot(ctx context.Context, el Element) Snapshot {
 
 	for _, in := range wrapped.Items {
 		st := InterfaceState{Interface: in}
-		url := interfaceStatusURL(el.SiteID, el.ID, in.ID)
-		if body, err := s.get(ctx, "interface "+in.ID+" status", url); err != nil {
+		if body, url, err := s.getNamed(ctx, "interface "+in.ID+" status", inspect, "interface_status",
+			vars{"site_id": el.SiteID, "element_id": el.ID, "interface_id": in.ID}); err != nil {
 			st.StatusErr = err
 		} else {
 			snap.Raw[url] = body

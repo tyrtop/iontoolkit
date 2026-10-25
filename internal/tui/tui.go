@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -24,10 +22,7 @@ import (
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/sase"
-	"tyrtop.com/iontk/internal/sase/api"
-	"tyrtop.com/iontk/internal/sase/write"
 	"tyrtop.com/iontk/internal/saseauth"
-	"tyrtop.com/iontk/internal/search"
 	"tyrtop.com/iontk/internal/ui"
 	"tyrtop.com/iontk/internal/view"
 )
@@ -60,69 +55,25 @@ const (
 	phaseWorkflows
 )
 
-type pickMode int
-
 const (
-	modeShell pickMode = iota
-	modeBatch
-	modeData
-	modeMacro
+	modeShell = runtime.ModeShell
+	modeBatch = runtime.ModeBatch
+	modeData  = runtime.ModeData
+	modeMacro = runtime.ModeMacro
 )
 
-var pickModes = []pickMode{modeShell, modeBatch, modeData}
-
-func (p pickMode) String() string {
-	switch p {
-	case modeBatch:
-		return "batch"
-	case modeData:
-		return "rich data"
-	case modeMacro:
-		return "macro"
-	}
-	return "shell"
-}
-
-func (m tuiModel) mode() pickMode {
+func (m tuiModel) mode() string {
 	if m.rt == nil {
 		return modeShell
 	}
-	switch m.rt.Mode() {
-	case runtime.ModeBatch:
-		return modeBatch
-	case runtime.ModeData:
-		return modeData
-	case runtime.ModeMacro:
-		return modeMacro
-	}
-	return modeShell
+	return m.rt.Mode()
 }
-
-func (m *tuiModel) setMode(p pickMode) { m.runtime().SetMode(p.String()) }
 
 func (m tuiModel) armed() string {
 	if m.rt == nil {
 		return ""
 	}
 	return m.rt.Armed()
-}
-
-func (p pickMode) next() pickMode {
-	for i, m := range pickModes {
-		if m == p {
-			return pickModes[(i+1)%len(pickModes)]
-		}
-	}
-	return modeShell
-}
-
-func parseMode(s string) (pickMode, bool) {
-	for _, m := range pickModes {
-		if m.String() == s {
-			return m, true
-		}
-	}
-	return modeShell, false
 }
 
 type cacheState int
@@ -155,28 +106,12 @@ const (
 
 const cacheTTL = time.Hour
 
-type elementsErrMsg string
-type clientReadyMsg struct{ client *api.Client }
-type clientErrMsg string
-
-type needsSignInMsg struct{}
-
 type discoveredMsg struct {
-	d   saseauth.Discovery
 	err error
 }
 
-type tokenErrMsg struct {
-	err     error
-	stopped bool
-}
-
 type signedInMsg struct {
-	client  *api.Client
-	ident   saseauth.Identity
-	profile api.Profile
-	ttl     time.Duration
-	err     error
+	err error
 }
 
 type formField struct {
@@ -187,8 +122,6 @@ type formField struct {
 type tuiModel struct {
 	ctx context.Context
 
-	flags app.Flags
-
 	phase  tuiPhase
 	status string
 
@@ -198,10 +131,6 @@ type tuiModel struct {
 	switchCursor int
 	setCursor    int
 	usersTSG     string
-	scope        string
-	tenantCount  int
-	connectWait  int
-	resumeRun    []string
 	pickCursor   int
 
 	signInResume   bool
@@ -250,7 +179,6 @@ type tuiModel struct {
 	listWidths []int
 	listCells  []rowCells
 	listCache  map[string]rowCells
-	rowCtx     rowContext
 
 	cmdInput textinput.Model
 	cmdPick  suggest
@@ -282,8 +210,6 @@ type tuiModel struct {
 	viewFiles    []view.File
 	keys         keymap
 	keysErr      string
-	writes       *write.Set
-	writesErr    string
 	wr           writeState
 	wf           wfState
 	scriptOn     string
@@ -315,6 +241,7 @@ type tuiModel struct {
 	formMacroName string
 	askMacro      string
 	askMacroOn    []elementRow
+	askMacroWhy   string
 
 	mouseOff        bool
 	tut             tutorialRun
@@ -334,18 +261,14 @@ var Version = "dev"
 
 var Tenant string
 
-func Run(ctx context.Context) error {
+func Run(ctx context.Context, rt *runtime.Runtime) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return fmt.Errorf("iontk needs a terminal; use --cmd for batch mode")
 	}
 
-	store, err := app.Store()
-	if err != nil {
-		return err
-	}
-	cfg, err := store.Config()
-	if err != nil {
-		return err
+	store, cfg := rt.Store(), rt.Config()
+	if store == nil || cfg == nil {
+		return fmt.Errorf("iontk could not open its config")
 	}
 	if Tenant != "" {
 		if _, ok := app.ResolveTenant(cfg, Tenant); !ok {
@@ -355,7 +278,7 @@ func Run(ctx context.Context) error {
 
 	logging.L().Info("tui started", "version", Version, "tenant", Tenant, "config", store.Root)
 
-	model := newTUIModel(ctx, store, cfg).raiseTutorialAsk()
+	model := modelOn(ctx, rt).raiseTutorialAsk()
 	if Demo {
 		model = model.openDemo()
 	}
@@ -363,14 +286,17 @@ func Run(ctx context.Context) error {
 	// bubbletea's own reset is OSC 111, which not every terminal implements
 	defer restoreTermColor(os.Stdout)
 
-	_, err = tea.NewProgram(model, tea.WithContext(ctx)).Run()
+	p := tea.NewProgram(model, tea.WithContext(ctx))
+	startFeed(p.Send, model.rt)
+	_, err := p.Run()
 	if err != nil && !errors.Is(err, tea.ErrProgramKilled) {
 		return err
 	}
 	return nil
 }
 
-func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) tuiModel {
+func modelOn(ctx context.Context, rt *runtime.Runtime) tuiModel {
+	store, cfg := rt.Store(), rt.Config()
 	app.ApplyDisplaySettings(store, cfg)
 
 	s := ui.NewSpinner(ui.CurrentTheme().Spinner)
@@ -399,36 +325,19 @@ func newTUIModel(ctx context.Context, store *config.Store, cfg *config.Config) t
 		progress:  progress.New(progress.WithDefaultBlend(), progress.WithWidth(30), progress.WithoutPercentage()),
 		resFilter: newResultsFilter(),
 		resTable:  newResultsTable(),
-		rt:        app.NewRuntime(store, cfg),
+		rt:        rt,
 		width:     80,
 		height:    24,
-	}
-	if mode, ok := parseMode(cfg.DefaultMode); ok {
-		m.setMode(mode)
 	}
 	if z := cfg.Zone; z != "" && !strings.EqualFold(z, clock.UTC) && !strings.EqualFold(z, clock.Local) {
 		m.typedZone = z
 	}
 
-	m.loadRuntime(store)
+	m.drawRuntime(app.LoadList(store))
 
 	m.dataFilter = newDataFilter()
-	if am, ok := parseAuthMode(cfg.AuthMode); ok {
-		m.setAuthMode(am)
-	} else if t, ok := app.ResolveTenant(cfg, Tenant); ok && !t.UsesBrowser() {
-		m.setAuthMode(authTenant)
-	}
-	m.useResolved(app.ResolveTenant(cfg, Tenant))
 	if m.hasTenant() {
-		m.runtime().SetIONUser(m.tenant().DefaultUser())
-		m.setCacheState(cacheUpdating)
-		if c, err := store.Cache(m.tenant().TSGID); err == nil && c != nil && len(c.Elements) > 0 {
-			m.runtime().SetFleetCount(len(c.Elements))
-			m.runtime().SetFleetAt(time.Now().Add(-c.Age()))
-			if c.Age() < cacheFresh {
-				m.setCacheState(cacheCached)
-			}
-		}
+		m.runtime().PeekCache(m.tenant().TSGID)
 	}
 	return m.readFlows()
 }
@@ -456,11 +365,8 @@ func newElementTable() table.Model {
 	return t
 }
 
-// table.MoveUp raises the viewport offset while the cursor falls, so the
-// highlight walks off the top and a held k stops appearing to do anything.
 func (m *tuiModel) moveCursorTo(n int) {
-	m.runtime().SetCursor(n)
-	m.syncCursor()
+	m.moveCursor(n - m.cursor())
 }
 
 func (m *tuiModel) syncCursor() {
@@ -479,6 +385,7 @@ func (m *tuiModel) syncCursor() {
 		return
 	}
 
+	// table.MoveUp raises the viewport offset while the cursor falls
 	fresh := newElementTable()
 	fresh.SetColumns(m.table.Columns())
 	fresh.SetRows(rows)
@@ -490,7 +397,8 @@ func (m *tuiModel) syncCursor() {
 }
 
 func (m *tuiModel) moveCursor(delta int) {
-	m.moveCursorTo(m.cursor() + delta)
+	_ = m.runtime().Run("list.cursor", map[string]string{"to": fmt.Sprintf("%+d", delta)})
+	m.syncCursor()
 }
 
 func (m tuiModel) cursor() int {
@@ -532,13 +440,8 @@ const cacheFresh = config.CacheFresh
 
 func (m tuiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.spinner.Tick}
-	if m.cacheState() == cacheUpdating && m.hasTenant() {
-		f := app.TenantFlags(m.store(), m.tenant(), m.ionUser())
-		if f.ValidateCreds() == nil {
-			cmds = append(cmds, connect(m.ctx, m.store(), f))
-		} else {
-			cmds = cmds[:1]
-		}
+	if m.cacheState() == cacheUpdating && m.hasTenant() && m.runtime().NeedsConnect(m.tenant().TSGID) {
+		cmds = append(cmds, fleetLoad(m.ctx, m.runtime()))
 	}
 	cmds = append(cmds, probeTermColor())
 	return tea.Batch(cmds...)
@@ -549,65 +452,14 @@ func (m tuiModel) refreshNow() (tea.Model, tea.Cmd) {
 		m.status = "no tenant selected"
 		return m, nil
 	}
-	f := app.TenantFlags(m.store(), m.tenant(), m.ionUser())
-	if err := f.ValidateCreds(); err != nil {
-		m.status = err.Error()
-		m.setCacheState(cacheFailed)
-		return m, nil
-	}
-	m.flags = f
 	m.status = ""
 	m.runtime().ResetHAProgress()
 	return m.refreshActive()
 }
 
-func connect(ctx context.Context, st *config.Store, f app.Flags) tea.Cmd {
+func signIn(ctx context.Context, rt *runtime.Runtime) tea.Cmd {
 	return func() tea.Msg {
-		c, err := app.NewClient(ctx, st, f, io.Discard)
-		if err != nil {
-			if errors.Is(err, saseauth.ErrInteractiveRequired) {
-				return needsSignInMsg{}
-			}
-			return clientErrMsg(err.Error())
-		}
-		return clientReadyMsg{client: c}
-	}
-}
-
-func signIn(ctx context.Context, f app.Flags, st *config.Store) tea.Cmd {
-	return func() tea.Msg {
-		httpClient := &http.Client{Timeout: f.HTTPTimeout}
-		src := app.BrowserSource(f, httpClient, st)
-		if err := src.SignIn(ctx); err != nil {
-			return signedInMsg{err: err}
-		}
-		ident := src.Identity()
-		if !ident.ScopedTo(f.TSGID) {
-			return signedInMsg{err: fmt.Errorf("signed in, but the token is scoped to %q rather than tenant %s", ident.Scope, f.TSGID)}
-		}
-
-		c, err := app.NewClient(ctx, st, f, io.Discard)
-		if err != nil {
-			return signedInMsg{err: fmt.Errorf("signed in, but the saved credential did not work: %w", err)}
-		}
-		prof, err := c.Profile(ctx)
-		if err != nil {
-			return signedInMsg{err: fmt.Errorf("signed in, but the API rejected the token: %w", err)}
-		}
-		return signedInMsg{client: c, ident: ident, profile: prof, ttl: src.LastTTL()}
-	}
-}
-
-func watchToken(ch <-chan error) tea.Cmd {
-	if ch == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		err, ok := <-ch
-		if !ok {
-			return tokenErrMsg{stopped: true}
-		}
-		return tokenErrMsg{err: err}
+		return signedInMsg{err: rt.Exec(&runtime.Call{Ctx: ctx}, "auth.tenant")}
 	}
 }
 
@@ -615,6 +467,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 
 	mm, ok := next.(tuiModel)
+	if ok && mm.rt != m.rt {
+		watchRuntime(mm.rt)
+	}
 	if !ok || !mm.tut.on || !mm.tut.passing {
 		return next, cmd
 	}
@@ -667,37 +522,6 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fitEdit()
 		return m, nil
 
-	case clientErrMsg:
-		m.status = string(msg)
-		m.setCacheState(cacheFailed)
-		m.phase = phaseMenu
-		return m, nil
-
-	case tokenErrMsg:
-		if msg.stopped {
-			m.runtime().TokenDied("token expired — sign in again", true)
-			return m, nil
-		}
-		if errors.Is(msg.err, saseauth.ErrInteractiveRequired) {
-			m.runtime().TokenDied("sign-in expired", false)
-			m.status = "sign-in expired — the next action will reopen your browser"
-			return m, nil
-		}
-		m.status = msg.err.Error()
-		if c := m.pool().Get(m.tenant().TSGID); c != nil {
-			return m, watchToken(c.TokenErrors())
-		}
-		return m, nil
-
-	case needsSignInMsg:
-		if m.phase == phaseMenu {
-			m.status = "sign-in required — pick the browser sign-in below"
-			m.setCacheState(cacheFailed)
-			return m, nil
-		}
-		m.signInResume = true
-		return m.startSignInAuto()
-
 	case tenantsWarmedMsg:
 		return m.onTenantsWarmed(msg)
 
@@ -707,145 +531,54 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.phase = phaseMenu
 			return m, nil
 		}
-		if err := app.SaveDiscovery(m.store(), msg.d); err != nil {
-			m.status = err.Error()
-		}
-		m.runtime().SetIdentity(msg.d.Identity)
-		m.runtime().MarkBrowserSignedIn()
-		m.runtime().SetDiscovered(msg.d.Tenants)
 		next, cmd := m.startTenantPick()
 		return next, cmd
 
 	case tokenRefreshedMsg:
 		if msg.err != nil {
 			if errors.Is(msg.err, saseauth.ErrInteractiveRequired) {
-				m.runtime().TokenDied("sign-in expired", false)
 				m.signInResume = false
 				return m.startSignInAuto()
 			}
 			m.status = "token refresh failed: " + msg.err.Error()
 			return m, nil
 		}
-		m.runtime().TokenRenewed(msg.ident, msg.ttl)
 		m.status = "token refreshed"
-		m.pool().Drop(m.tenant().TSGID)
 		return m, nil
 
 	case signedInMsg:
 		if msg.err != nil {
 			m.status = "sign-in failed: " + msg.err.Error()
-			m.setCacheState(cacheFailed)
 			m.signInResume = false
 			m.phase = phaseMenu
 			return m, nil
 		}
-		m.pool().Set(m.tenant().TSGID, msg.client)
-		m.runtime().MarkBrowserSignedIn()
-		m.runtime().TokenAlive()
 		m.status = ""
-		watch := watchToken(msg.client.TokenErrors())
-
 		if targets := m.resumeSessions; len(targets) > 0 {
 			m.resumeSessions = nil
 			next, cmd := m.openSessions(targets)
-			return next, tea.Batch(watch, cmd)
+			return next, cmd
 		}
 		if targets := m.resumeData; len(targets) > 0 {
 			m.resumeData = nil
 			next, cmd := m.openDataTabs(targets)
-			return next, tea.Batch(watch, cmd)
+			return next, cmd
 		}
 		if m.signInResume {
 			m.signInResume = false
 			next, cmd := m.startContinue()
-			return next, tea.Batch(watch, cmd)
+			return next, cmd
 		}
 
-		m.runtime().SignedIn(msg.ident, msg.profile, msg.ttl)
 		m.phase = phaseSignedIn
 		next, cmd := m.refreshActive()
-		return next, tea.Batch(m.spinner.Tick, watch, cmd)
+		return next, tea.Batch(m.spinner.Tick, cmd)
 
-	case clientReadyMsg:
-		m.pool().Set(m.tenant().TSGID, msg.client)
-		watch := watchToken(msg.client.TokenErrors())
-		if m.cacheState() == cacheCached {
-			if m.phase == phaseLoading {
-				m.phase = phasePicking
-			}
-			return m, watch
-		}
-		next, cmd := m.refreshActive()
-		return next, tea.Batch(watch, cmd)
+	case fleetDoneMsg:
+		return m.onFleetDone(msg)
 
-	case elementsErrMsg:
-		if app.IsAuthFailure(string(msg)) {
-			m.runtime().TokenDied("sign-in expired", false)
-			m.signInResume = true
-			return m.startSignInAuto()
-		}
-		m.status = string(msg)
-		m.setCacheState(cacheFailed)
-		if len(m.rows()) == 0 {
-			m.phase = phaseMenu
-		}
-		return m, nil
-
-	case tenantConnectedMsg:
-		if m.connectWait > 0 {
-			m.connectWait--
-		}
-		var watch tea.Cmd
-		if msg.err != nil {
-			m.tenantErr(msg.tsg, m.tenantName(msg.tsg), msg.err)
-		} else {
-			m.pool().Set(msg.tsg, msg.client)
-			if msg.fresh {
-				watch = watchToken(msg.client.TokenErrors())
-			}
-		}
-		if m.connectWait > 0 {
-			return m, watch
-		}
-		if cmds := m.resumeRun; len(cmds) > 0 {
-			m.resumeRun = nil
-			next, cmd := m.startRun(cmds)
-			return next, tea.Batch(watch, cmd)
-		}
-		if targets := m.resumeSessions; len(targets) > 0 {
-			m.resumeSessions = nil
-			next, cmd := m.openSessions(targets)
-			return next, tea.Batch(watch, cmd)
-		}
-		if targets := m.resumeData; len(targets) > 0 {
-			m.resumeData = nil
-			next, cmd := m.openDataTabs(targets)
-			return next, tea.Batch(watch, cmd)
-		}
-		return m, watch
-
-	case tenantElementsMsg:
-		var ha, cells tea.Cmd
-		m.runtime().ApplyLoad(runtime.Load{TSG: msg.tsg, Tenant: msg.tenant, Elements: msg.elements,
-			Sites: msg.sites, SiteErr: msg.siteErr, Err: msg.err})
-		m.setElements(m.rows())
-		if msg.err != nil {
-			m.tenantErr(msg.tsg, msg.tenant, msg.err)
-		} else {
-			if msg.siteErr != nil && m.status == "" {
-				m.status = msg.tenant + ": site names unavailable: " + shortTenantErr(msg.siteErr)
-			}
-			if w := haClusters(msg.elements); len(w.elements) > 0 {
-				m.runtime().StartHA(msg.tsg, w.runtime())
-				ha = loadHABulk(m.ctx, m.runtime(), msg.tsg, w)
-			}
-			cells = tea.Batch(m.startCells(), m.readFleets())
-		}
-
-		if m.phase == phaseLoading && len(m.rows()) > 0 {
-			m.phase = phasePicking
-		}
-		return m, tea.Batch(ha, cells)
+	case runtimeMsg:
+		return m.onRuntime(msg)
 
 	case spinner.TickMsg:
 		if !m.wantsSpinner() {
@@ -872,9 +605,8 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sessionErrMsg:
 		m.connecting = ""
-		if app.IsAuthFailure(msg.err) {
+		if m.runtime().NeedsSignIn([]string{msg.target.tsg}) {
 			m.dialDone(msg.target.eid)
-			m.runtime().TokenDied("sign-in expired", false)
 			return m.signInThenSessions(m.lastTargets)
 		}
 		m.dialFailed(msg.target.eid, msg.err)
@@ -895,6 +627,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.phase = phasePicking
 		}
 		return m, waitForSession(m.sessions().Dirty())
+
+	case batchStartedMsg:
+		return m.onBatchStarted(msg)
 
 	case eventMsg:
 		return m.onEvent(sase.Event(msg))
@@ -917,11 +652,17 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, statsTick()
 
-	case dataLoadedMsg:
-		return m.onDataLoaded(msg)
+	case dataDoneMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		}
+		return m, nil
 
 	case compareDoneMsg:
 		return m.onCompareDone(msg)
+
+	case writePlannedMsg:
+		return m.onWritePlanned(msg)
 
 	case writeRecsMsg:
 		return m.onWriteRecs(msg)
@@ -938,23 +679,8 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commandsSavedMsg:
 		return m.onCommandsSaved(msg)
 
-	case haStatesMsg:
-		return m.onHAStates(msg)
-
-	case haTickMsg:
-		return m.onHATick(msg.tsg)
-
 	case scriptDoneMsg:
 		return m.onScriptDone(msg)
-
-	case fetchedMsg:
-		return m.onFetchedCells(msg)
-
-	case fleetReadMsg:
-		return m.onFleetRead(msg)
-
-	case fetchTickMsg:
-		return m.onFetchTick(msg)
 
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
@@ -984,7 +710,7 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.filter, cmd = m.filter.Update(msg)
 			m.applyFilter()
-			return m, tea.Batch(cmd, m.askVisibleHA(), m.askVisibleCells())
+			return m, cmd
 		}
 		return m, nil
 
@@ -1064,7 +790,6 @@ func (m tuiModel) wantsSpinner() bool {
 
 func (m *tuiModel) setElements(els []elementRow) {
 	m.runtime().SetElements(els)
-	m.computeScope()
 
 	names := make([]string, 0, len(els))
 	for _, el := range m.rows() {
@@ -1077,36 +802,7 @@ func (m *tuiModel) setElements(els []elementRow) {
 	m.applyFilter()
 }
 
-func (m *tuiModel) siteName(el elementRow) string {
-	return m.record(el).SiteLabel()
-}
-
-func (m *tuiModel) record(el elementRow) search.Record {
-	return search.Of(el.Element, el.TSG, el.Tenant, search.SiteMap(m.siteMap()))
-}
-
-func (m *tuiModel) showTenantColumn() bool { return m.tenantCount > 1 }
-
-func (m *tuiModel) showHAColumn() bool {
-	for _, r := range m.rows() {
-		if r.ClusterID() != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func (m *tuiModel) showSerialColumn() bool {
-	for _, r := range m.rows() {
-		if r.Serial != "" {
-			return true
-		}
-	}
-	return false
-}
-
 func (m *tuiModel) rebuildRows() {
-	m.rowCtx = rowContext{}
 	cols := m.columns()
 	if !sameColumns(cols, m.listCols) {
 		m.listCols, m.listCache = cols, nil
@@ -1461,46 +1157,14 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		var cmd tea.Cmd
 		m.filter, cmd = m.filter.Update(msg)
 		m.applyFilter()
-		return m, tea.Batch(cmd, m.askVisibleHA(), m.askVisibleCells())
-	}
-
-	if key == "alt+w" {
-		m.status = ""
-		m.phase = m.listReturn()
-		return m, nil
-	}
-	if next, handled := m.onTabKey(key); handled {
-		return next, nil
-	}
-
-	switch key {
-	case "ctrl+]":
-		if m.sessions().Count() > 0 {
-			m.phase = phaseSession
-		}
-		return m, nil
+		return m, cmd
 	}
 
 	m.listNav(key)
 	return m, nil
 }
 
-func (m tuiModel) pickTargets() []sessionTarget {
-	var out []sessionTarget
-	for _, el := range m.rows() {
-		if !m.isSelected(el.Key()) {
-			continue
-		}
-		out = append(out, sessionTarget{eid: el.ID, name: el.Label(), tsg: el.TSG})
-	}
-	if len(out) > 0 {
-		return out
-	}
-	if el, ok := m.current(); ok {
-		return []sessionTarget{{eid: el.ID, name: el.Label(), tsg: el.TSG}}
-	}
-	return nil
-}
+func (m tuiModel) pickTargets() []sessionTarget { return targetsOf(m.runtime().Targets()) }
 
 func (m tuiModel) onPickEnter() (tea.Model, tea.Cmd) {
 	if m.mode() == modeBatch && m.selectedCount() == 0 {
@@ -1514,25 +1178,12 @@ func (m tuiModel) onPickTargets(targets []sessionTarget) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	for _, want := range targets {
-		m.runtime().ClearIssue(want.tsg)
-	}
-
 	if m.mode() == modeData {
 		return m.openDataTabs(targets)
 	}
 
 	for _, want := range targets {
-		t, ok := m.tenantOf(want.tsg)
-		if !ok {
-			t = config.Tenant{Name: want.tsg, TSGID: want.tsg, Auth: config.AuthBrowser}
-			for _, r := range m.rows() {
-				if r.TSG == want.tsg {
-					t.Name = r.Tenant
-					break
-				}
-			}
-		}
+		t := m.runtime().TenantFor(want.tsg)
 		if app.NeedsIONPassword(m.store(), t, m.ionUserFor(t)) {
 			return m.openPasswordForm(t, m.ionUserFor(t))
 		}
@@ -1567,18 +1218,10 @@ func (m tuiModel) onCommandKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		if pick, ok := m.cmdPick.current(); ok {
 			return m.insertBatchCommand(pick), nil
 		}
-		if t := m.tenant(); len(t.Users) > 1 {
-			next := t.Users[0].Name
-			for i, u := range t.Users {
-				if u.Name == m.ionUser() {
-					next = t.Users[(i+1)%len(t.Users)].Name
-				}
-			}
-			m.runtime().SetIONUser(next)
-		}
+		_ = m.runtime().Run("user.next", nil)
 		return m, nil
 	case "enter":
-		cmds := app.SplitCommands([]string{m.cmdInput.Value()})
+		cmds := runtime.SplitCommands(m.cmdInput.Value())
 		if len(cmds) == 0 {
 			m.status = "enter at least one command"
 			return m, nil
@@ -1601,62 +1244,45 @@ func (m tuiModel) rowsFor(targets []sessionTarget) []elementRow {
 	return out
 }
 
-func (m tuiModel) selectedRows() ([]elementRow, []string) {
-	var picked []elementRow
-	var ids []string
-	for _, el := range m.rows() {
-		if m.isSelected(el.Key()) {
-			picked = append(picked, el)
-			ids = append(ids, el.ID)
+func (m tuiModel) startRun(cmds []string) (tea.Model, tea.Cmd) {
+	return m.startRunOn(cmds, m.runtime().Selected())
+}
+
+func (m tuiModel) startRunOn(cmds []string, picked []elementRow) (tea.Model, tea.Cmd) {
+	m.status = "starting the run"
+	for _, tsg := range tsgsOfRows(picked) {
+		if m.runtime().NeedsConnect(tsg) {
+			m.status = "connecting tenants"
+			break
 		}
 	}
-	return picked, ids
+	rt, ctx := m.runtime(), m.ctx
+	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		events, err := rt.StartBatch(ctx, cmds, picked)
+		return batchStartedMsg{events: events, err: err}
+	})
 }
 
-func (m tuiModel) startRun(cmds []string) (tea.Model, tea.Cmd) {
-	picked, ids := m.selectedRows()
-	return m.startRunOn(cmds, picked, ids)
-}
-
-func (m tuiModel) startRunOn(cmds []string, picked []elementRow, ids []string) (tea.Model, tea.Cmd) {
-	if err := m.runtime().CheckCommands(cmds); err != nil {
-		m.status = err.Error()
+func (m tuiModel) onBatchStarted(msg batchStartedMsg) (tea.Model, tea.Cmd) {
+	var mismatch *runtime.MacroMismatchError
+	if errors.As(msg.err, &mismatch) {
+		m.status = ""
+		m.askMacro, m.askMacroOn, m.askMacroWhy = msg.macro, msg.rows, mismatch.Why
 		return m, nil
 	}
-	if _, err := m.runtime().BatchTargets(picked); err != nil {
-		m.status = err.Error()
+	if msg.err != nil {
+		m.status = msg.err.Error()
 		return m, nil
 	}
-
-	if conn := m.ensureClients(tsgsOfRows(picked)); len(conn) > 0 {
-		m.resumeRun = cmds
-		m.connectWait = len(conn)
-		m.status = "connecting tenants"
-		return m, tea.Batch(append(conn, m.spinner.Tick)...)
-	}
-
-	targets, err := m.runtime().BatchTargets(picked)
-	if err != nil {
-		m.status = err.Error()
-		return m, nil
-	}
-	opts, err := m.runtime().RunOptions(cmds, targets)
-	if err != nil {
-		m.status = err.Error()
-		return m, nil
-	}
-
 	m.cmdInput.Blur()
 	m.status = ""
-	save := m.recordRun(cmds, picked)
 	m.resMatches = nil
 	m.resOpen, m.resScroll = false, 0
 	m.resFilter.SetValue("")
 	m.resFilterOn = false
 	m.phase = phaseRunning
-	m.events = m.runtime().RunBatch(m.ctx, opts, targets)
-
-	return m, tea.Batch(waitForEvent(m.events), m.spinner.Tick, save)
+	m.events = msg.events
+	return m, tea.Batch(waitForEvent(m.events), m.spinner.Tick)
 }
 
 func (m *tuiModel) applyFilter() {
@@ -1877,7 +1503,7 @@ func (m tuiModel) viewRunning() string {
 	var b strings.Builder
 
 	b.WriteString(ui.Banner(m.width, m.height))
-	b.WriteString(ui.StyleCmd.Render(strings.Join(m.flags.Commands, ", ")) + "\n")
+	b.WriteString(ui.StyleCmd.Render(strings.Join(m.batch().Commands, ", ")) + "\n")
 
 	counts := fmt.Sprintf("  %d/%d", m.batch().Finished, m.total())
 	if m.batch().Failed > 0 {
@@ -1912,4 +1538,17 @@ func (m tuiModel) viewRunning() string {
 	}
 
 	return b.String()
+}
+
+func (m tuiModel) listBack() (tea.Model, tea.Cmd) {
+	m.status = ""
+	m.phase = m.listReturn()
+	return m, nil
+}
+
+func (m tuiModel) toSessions() (tea.Model, tea.Cmd) {
+	if m.sessions().Count() > 0 {
+		m.phase = phaseSession
+	}
+	return m, nil
 }

@@ -185,10 +185,9 @@ func TestTokenRefreshUpdatesTheLineAndDropsTheOldClient(t *testing.T) {
 	setTestClient(&m, nil)
 	m.pool().Set("111", nil)
 
-	mm, _ := m.Update(tokenRefreshedMsg{
-		ident: saseauth.Identity{TSG: "111", SessionExpires: time.Now().Add(8 * time.Hour)},
-		ttl:   899 * time.Second,
-	})
+	m.runtime().TokenRenewed(saseauth.Identity{TSG: "111", SessionExpires: time.Now().Add(8 * time.Hour)}, 899*time.Second)
+	m.pool().Drop("111")
+	mm, _ := m.Update(tokenRefreshedMsg{})
 	got := mm.(tuiModel)
 
 	if got.status != "token refreshed" {
@@ -245,7 +244,7 @@ func TestServiceAccountLineNamesWhichAccountIsAttached(t *testing.T) {
 	m.cfg().Tenants[0].ClientID = "iontk@1234567890.iam.panserviceaccount.com"
 	m.runtime().ReplaceTenant(m.cfg().Tenants[0])
 	m.width = 120
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "1", Name: "s0100-rtr-01"},
 		{ID: "2", Name: "s0100-rtr-02"},
 	})
@@ -277,8 +276,8 @@ func TestServiceAccountLineCountsOnlyItsOwnElements(t *testing.T) {
 	m := authModel(t, config.AuthServiceAccount)
 	m.runtime().ReplaceTenant(m.cfg().Tenants[0])
 
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "a", Name: "one"}})
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a", Name: "one"}})
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{
 		{ID: "b", Name: "two"},
 		{ID: "c", Name: "three"},
 	})
@@ -308,4 +307,21 @@ func TestServiceAccountLineSaysWhenNoClientIDWasSaved(t *testing.T) {
 	if got := plain(m.authLine()); !strings.Contains(got, "client id not saved") {
 		t.Errorf("authLine() = %q, want it to say the client id is missing", got)
 	}
+}
+
+func mergeForTest(m *tuiModel, tsg, tenant string, els []api.Element) {
+	m.runtime().MergeTenant(tsg, tenant, els)
+	m.setElements(m.rows())
+}
+
+func firstKey(km keymap, screen, action string) string {
+	if keys := km.keysFor(screen, action); len(keys) > 0 {
+		return keys[0]
+	}
+	return ""
+}
+
+func sessionText(m tuiModel) string {
+	content, _ := m.renderSession()
+	return content
 }

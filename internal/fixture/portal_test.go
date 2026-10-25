@@ -62,10 +62,11 @@ func TestADisconnectedFixtureElementHasEveryChannelDown(t *testing.T) {
 			continue
 		}
 		c := fixtureClient(s, s.Tenants[0].TSGID)
-		st, err := c.ElementStatus(t.Context(), el.ID)
-		if err != nil {
-			t.Fatalf("ElementStatus(%q) error = %v", el.ID, err)
+		snap := c.ElementSnapshot(t.Context(), el.apiElement())
+		if snap.StatusErr != nil {
+			t.Fatalf("status of %q: %v", el.ID, snap.StatusErr)
 		}
+		st := snap.Status
 		if len(st.Channels) == 0 {
 			t.Fatal("no channels at all")
 		}
@@ -140,16 +141,15 @@ func TestPortalEndpointsAreTenantScopedToo(t *testing.T) {
 	c := fixtureClient(s, acme.TSGID)
 
 	theirs := lab.Elements[0].apiElement()
-	if _, err := c.ElementStatus(t.Context(), theirs.ID); err == nil {
+	theirs.SiteID = acme.Elements[0].apiElement().SiteID
+	snap := c.ElementSnapshot(t.Context(), theirs)
+	if snap.StatusErr == nil {
 		t.Error("another tenant's element status resolved")
 	}
-
-	ours := acme.Elements[0].apiElement()
-	_, err := c.ListInterfaces(t.Context(), ours.SiteID, theirs.ID)
-	if err == nil {
+	if snap.IfacesErr == nil {
 		t.Fatal("another tenant's interfaces resolved")
 	}
-	if !strings.Contains(err.Error(), "404") {
-		t.Errorf("error = %q, want a 404", err)
+	if !strings.Contains(snap.IfacesErr.Error(), "404") {
+		t.Errorf("error = %q, want a 404", snap.IfacesErr)
 	}
 }

@@ -21,11 +21,11 @@ var loginCmd = deprecated(&cobra.Command{
 }, "iontk auth login")
 
 func runLogin(ctx context.Context) error {
-	st := app.OpenStore()
-	if st == nil {
+	rt := cliRuntime()
+	if rt.Store() == nil {
 		return fmt.Errorf("login needs the config store, which could not be opened")
 	}
-	tenants, err := searchScope(st)
+	tenants, err := rt.SearchScope(flagTenant, app.Defaults.TSGID)
 	if err != nil {
 		return err
 	}
@@ -34,7 +34,7 @@ func runLogin(ctx context.Context) error {
 		names[i] = t.Name
 	}
 	say := func(l string) { fmt.Fprintln(os.Stderr, l) }
-	return cliRuntime().Exec(&runtime.Call{Ctx: ctx, Out: say, Args: map[string]string{"tenants": strings.Join(names, ",")}}, "auth.login")
+	return rt.Exec(&runtime.Call{Ctx: ctx, Out: say, Args: map[string]string{"tenants": strings.Join(names, ",")}}, "auth.login")
 }
 
 func deprecated(c *cobra.Command, now string) *cobra.Command {

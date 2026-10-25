@@ -41,7 +41,10 @@ type Session struct {
 	text   chan string
 	auto   *autologin
 	notify func(string)
+	ctx    context.Context
 	cancel context.CancelFunc
+	taps   []chan []byte
+	quiet  bool
 
 	mu       sync.Mutex
 	err      error
@@ -89,6 +92,7 @@ func Open(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds
 		auto:      newAutologin(creds),
 		notify:    notify,
 		lastSeen:  time.Now(),
+		ctx:       ctx,
 		cancel:    cancel,
 		pingEvery: pingEvery,
 		pongWait:  pongWait,
@@ -104,6 +108,7 @@ func Open(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds
 }
 
 func (s *Session) pumpOutput(ctx context.Context) {
+	defer s.stopTaps()
 	for {
 		_, data, err := s.conn.Read(ctx)
 		if err != nil {
@@ -127,7 +132,15 @@ func (s *Session) pumpOutput(ctx context.Context) {
 		s.mu.Lock()
 		s.gotData = true
 		s.lastSeen = time.Now()
+		taps := s.taps
 		s.mu.Unlock()
+		for _, t := range taps {
+			select {
+			case t <- append([]byte(nil), data...):
+			case <-ctx.Done():
+				return
+			}
+		}
 
 		s.mu.Lock()
 		send, ok := s.auto.feed(data)
@@ -231,11 +244,20 @@ func (s *Session) markHung() {
 		s.hung = true
 	}
 	s.mu.Unlock()
+	s.stopTaps()
 	s.markDirty()
 }
 
-// the SASE side accepts a toolkit websocket for an element that is not there,
-// and that session sits mute until the handshake deadline fails it
+func (s *Session) stopTaps() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.taps {
+		close(t)
+	}
+	s.taps, s.quiet = nil, true
+}
+
+// SASE accepts a websocket for a missing element, then stays mute
 func (s *Session) Answered() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -295,6 +317,7 @@ func (s *Session) fail(err error) {
 		s.err = err
 	}
 	s.mu.Unlock()
+	s.stopTaps()
 	s.markDirty()
 }
 
@@ -344,8 +367,7 @@ func (s *Session) LineEmpty() bool {
 	return len(s.line) == 0
 }
 
-// the device echoes a recalled or completed command we never typed, so the
-// screen is the only place the real line is
+// the device echoes recalled or completed commands we never typed
 func (s *Session) Line() string {
 	if line := s.screenLine(); line != "" {
 		return line
@@ -387,6 +409,22 @@ func (s *Session) Insert(text string) {
 	s.SendText(text)
 }
 
+func (s *Session) Tap() <-chan []byte {
+	ch := make(chan []byte, 64)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.quiet {
+		close(ch)
+		return ch
+	}
+	s.taps = append(s.taps, ch)
+	return ch
+}
+
+func (s *Session) WriteRaw(p []byte) error {
+	return s.conn.Write(s.ctx, websocket.MessageText, p)
+}
+
 func (s *Session) SendText(text string) {
 	select {
 	case s.text <- text:
@@ -420,8 +458,7 @@ func (s *Session) Close() {
 	s.cancel()
 	_ = s.conn.Close(websocket.StatusNormalClosure, "")
 
-	// Unblocks pumpInput without calling Emulator.Close, whose unsynchronized
-	// closed flag races its own Read in x/vt v0.1.0.
+	// Emulator.Close's closed flag races its own Read in x/vt v0.1.0
 	if pw, ok := s.emu.InputPipe().(*io.PipeWriter); ok {
 		_ = pw.CloseWithError(io.EOF)
 	}

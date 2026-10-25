@@ -3,30 +3,26 @@ package tui
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
-	"tyrtop.com/iontk/internal/saseauth"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/ui"
 )
 
-func discoverTenants(ctx context.Context, timeout time.Duration, st *config.Store) tea.Cmd {
+func discoverTenants(ctx context.Context, rt *runtime.Runtime) tea.Cmd {
 	return func() tea.Msg {
-		opt := app.BrowserOptions(&http.Client{Timeout: timeout}, st)
-		d, err := saseauth.Discover(ctx, opt, "")
-		return discoveredMsg{d: d, err: err}
+		return discoveredMsg{err: rt.Exec(&runtime.Call{Ctx: ctx}, "auth.signin")}
 	}
 }
 
 func (m tuiModel) startDiscover() (tea.Model, tea.Cmd) {
 	m.status = ""
 	m.phase = phaseDiscover
-	return m, tea.Batch(m.spinner.Tick, discoverTenants(m.ctx, app.Defaults.HTTPTimeout, m.store()))
+	return m, tea.Batch(m.spinner.Tick, discoverTenants(m.ctx, m.runtime()))
 }
 
 func (m tuiModel) viewDiscover() string {
@@ -112,16 +108,7 @@ func (m tuiModel) useTenant(c tenantChoice) (tuiModel, error) {
 		return m, err
 	}
 	m.forgetRows()
-	if cache, err := m.store().Cache(t.TSGID); err == nil && cache != nil && len(cache.Elements) > 0 {
-		m.runtime().SetFleetCount(len(cache.Elements))
-		m.runtime().SetFleetAt(time.Now().Add(-cache.Age()))
-		m.setCacheState(cacheCached)
-		if cache.Age() >= cacheFresh {
-			m.setCacheState(cacheUpdating)
-		}
-	} else {
-		m.setCacheState(cacheUpdating)
-	}
+	m.runtime().PeekCache(t.TSGID)
 	return m, nil
 }
 
@@ -129,16 +116,6 @@ func (m tuiModel) browserTenants() []tenantChoice {
 	var out []tenantChoice
 	for _, c := range m.tenantChoices() {
 		if c.known || (c.saved && m.tenantAuth(c) == config.AuthBrowser) {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-func (m tuiModel) serviceTenants() []tenantChoice {
-	var out []tenantChoice
-	for _, c := range m.tenantChoices() {
-		if c.saved && m.tenantAuth(c) != config.AuthBrowser {
 			out = append(out, c)
 		}
 	}
@@ -192,24 +169,23 @@ func (m tuiModel) saveTenantPick() (tea.Model, tea.Cmd) {
 	if warm := m.cfg().AddedTenants(); m.runtime().BrowserSignedIn() && len(warm) > 0 {
 		m.runtime().SetWarming(len(warm))
 		m.phase = phaseWarming
-		return m, tea.Batch(m.spinner.Tick, warmTenants(m.ctx, m.store(), warm))
+		return m, tea.Batch(m.spinner.Tick, warmTenants(m.ctx, m.runtime()))
 	}
 
 	m.phase = phaseMenu
-	m.loadFromCache()
-	if m.cacheState() != cacheCached {
-		return m.refreshActive()
-	}
-	return m, nil
+	return m.loadFleet()
 }
 
 type tenantsWarmedMsg struct {
 	results []app.TenantWarm
 }
 
-func warmTenants(ctx context.Context, st *config.Store, tenants []config.Tenant) tea.Cmd {
+func warmTenants(ctx context.Context, rt *runtime.Runtime) tea.Cmd {
 	return func() tea.Msg {
-		return tenantsWarmedMsg{results: app.WarmEach(ctx, st, tenants)}
+		c := &runtime.Call{Ctx: ctx}
+		_ = rt.Exec(c, "auth.warm")
+		results, _ := c.Result.([]app.TenantWarm)
+		return tenantsWarmedMsg{results: results}
 	}
 }
 
@@ -227,8 +203,6 @@ func (m tuiModel) viewWarming() string {
 
 func (m tuiModel) onTenantsWarmed(msg tenantsWarmedMsg) (tea.Model, tea.Cmd) {
 	m.phase = phaseMenu
-	m.runtime().SetWarming(0)
-	app.WarmInto(m.runtime(), msg.results)
 
 	var failed []string
 	for _, r := range msg.results {
@@ -240,12 +214,7 @@ func (m tuiModel) onTenantsWarmed(msg tenantsWarmedMsg) (tea.Model, tea.Cmd) {
 	note := strings.Join(failed, "; ")
 	m.status = note
 
-	m.loadFromCache()
-	if m.cacheState() == cacheCached {
-		return m, nil
-	}
-
-	next, cmd := m.refreshActive()
+	next, cmd := m.loadFleet()
 	mm := next.(tuiModel)
 	if note != "" {
 		mm.status = note

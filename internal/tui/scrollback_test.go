@@ -68,7 +68,7 @@ var (
 func TestSessionPaneScrollsBackThroughWhatTheDeviceSaid(t *testing.T) {
 	m, _ := scrolledPane(t)
 
-	live := plain(m.viewSession())
+	live := plain(sessionText(m))
 	if !strings.Contains(live, "L060") {
 		t.Fatalf("the live pane is not at the end of the output:\n%s", live)
 	}
@@ -80,7 +80,7 @@ func TestSessionPaneScrollsBackThroughWhatTheDeviceSaid(t *testing.T) {
 	if m.sesScroll == 0 {
 		t.Fatal("shift+pgup did not lift the pane off the live bottom")
 	}
-	back := plain(m.viewSession())
+	back := plain(sessionText(m))
 	if strings.Contains(back, "L060") {
 		t.Errorf("a page back and the last line is still showing:\n%s", back)
 	}
@@ -88,7 +88,7 @@ func TestSessionPaneScrollsBackThroughWhatTheDeviceSaid(t *testing.T) {
 	for range 10 {
 		m = press(m, keyPgUp)
 	}
-	top := plain(m.viewSession())
+	top := plain(sessionText(m))
 	if !strings.Contains(top, "L001") {
 		t.Errorf("scrolling back never reached the first line:\n%s", top)
 	}
@@ -107,12 +107,12 @@ func TestSessionPaneScrollsBackThroughWhatTheDeviceSaid(t *testing.T) {
 func TestScrolledPaneSaysItIsNotLive(t *testing.T) {
 	m, _ := scrolledPane(t)
 
-	if got := plain(m.viewSession()); strings.Contains(got, "scrolled back") {
+	if got := plain(sessionText(m)); strings.Contains(got, "scrolled back") {
 		t.Errorf("the live pane claims to be scrolled back:\n%s", got)
 	}
 
 	m = press(m, keyPgUp)
-	got := plain(m.viewSession())
+	got := plain(sessionText(m))
 	if !strings.Contains(got, "scrolled back") || !strings.Contains(got, "alt+end") {
 		t.Errorf("a scrolled pane does not say so, or does not say how to get back:\n%s", got)
 	}
@@ -128,10 +128,10 @@ func TestScrolledPaneSaysItIsNotLive(t *testing.T) {
 func TestScrollingKeepsTheFrameHeight(t *testing.T) {
 	m, _ := scrolledPane(t)
 
-	want := len(strings.Split(m.viewSession(), "\n"))
+	want := len(strings.Split(sessionText(m), "\n"))
 	for i, k := range []tea.Key{keyPgUp, keyPgUp, keyPgDown, keyLive} {
 		m = press(m, k)
-		if got := len(strings.Split(m.viewSession(), "\n")); got != want {
+		if got := len(strings.Split(sessionText(m), "\n")); got != want {
 			t.Errorf("key %d left the frame %d lines tall, want %d", i, got, want)
 		}
 	}
@@ -176,7 +176,7 @@ func TestSwitchingTabsReturnsToLive(t *testing.T) {
 	if m.sesScroll == 0 {
 		t.Fatal("shift+pgup did not move the pane")
 	}
-	if got := m.selectTab(m.currentTab()).sesScroll; got != 0 {
+	if got := selectTabOf(m, m.currentTab()).sesScroll; got != 0 {
 		t.Errorf("sesScroll = %d after a tab switch, want 0", got)
 	}
 }

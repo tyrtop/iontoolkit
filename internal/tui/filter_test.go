@@ -21,12 +21,12 @@ func filterModel(t *testing.T) tuiModel {
 		"111/s200": "Store 0200",
 		"222/s9":   "ORD Plant",
 	})
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "e1", Name: "s0100-rtr-01", SiteID: "s100", Model: "ion1200", Software: "6.5.1", HWID: "HW-AAA", Connected: true},
 		{ID: "e2", Name: "s0100-rtr-02", SiteID: "s100", Model: "ion3200", Software: "6.5.1", HWID: "HW-BBB"},
 		{ID: "e3", Name: "s0200-rtr-01", SiteID: "s200", Model: "ion1200", Software: "6.4.3", HWID: "HW-CCC", Connected: true},
 	})
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{
 		{ID: "e4", Name: "ord-gw-01", SiteID: "s9", Model: "ion1200", Software: "6.5.1", HWID: "HW-DDD", Connected: true},
 	})
 	return m
@@ -134,8 +134,8 @@ func TestFilterKeepsTheCursorInRange(t *testing.T) {
 
 func TestFilterWithNoTenantColumnStillSearchesTenant(t *testing.T) {
 	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "e1", Name: "s0100-rtr-01"}})
-	if m.showTenantColumn() {
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "e1", Name: "s0100-rtr-01"}})
+	if tenantCountOf(m) > 1 {
 		t.Fatal("one tenant should not show the column")
 	}
 	m.filter.SetValue("tractor")
@@ -171,7 +171,7 @@ var _ = config.AuthBrowser
 func rankModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "e1", Name: "s5024-rtr-01", Model: "ion1200", Connected: true},
 		{ID: "e2", Name: "s0500-rtr-01", Model: "ion1200", Connected: true},
 		{ID: "e3", Name: "s0502-rtr-01", Model: "ion1200", Connected: true},
@@ -202,7 +202,7 @@ func TestGeneralSectionRowsAreAllReachable(t *testing.T) {
 
 func TestResultsStayInNameOrder(t *testing.T) {
 	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "e1", Name: "s5024-rtr-02", Model: "ion 1200"},
 		{ID: "e2", Name: "s5024-rtr-01", Model: "ion 1200"},
 	})
@@ -223,7 +223,7 @@ func searchEnterModel(t *testing.T) tuiModel {
 	if err := m.store().Secrets.Set(config.IONPassKey("111", "ops"), "pw"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "e1", Name: "s5024-rtr-01", Model: "ion 1200", Connected: true},
 		{ID: "e2", Name: "s5024-rtr-02", Model: "ion 1200", Connected: true},
 		{ID: "e3", Name: "s0100-rtr-01", Model: "ion 1200", Connected: true},
@@ -280,7 +280,7 @@ func TestOneMatchInBatchModeSelectsAndStays(t *testing.T) {
 		t.Errorf("phase = %v, want to stay on the list in batch mode", got.phase)
 	}
 	if got.selectedCount() != 1 || !got.isSelected("111/e2") {
-		t.Errorf("selected = %v, want the single match selected", got.selection())
+		t.Errorf("selected = %v, want the single match selected", got.runtime().Selection())
 	}
 	if got.connecting != "" {
 		t.Error("batch mode started a session")
@@ -288,8 +288,8 @@ func TestOneMatchInBatchModeSelectsAndStays(t *testing.T) {
 }
 
 func TestSeveralMatchesJustApplyTheFilter(t *testing.T) {
-	for _, mode := range []pickMode{modeShell, modeBatch} {
-		t.Run(mode.String(), func(t *testing.T) {
+	for _, mode := range []string{modeShell, modeBatch} {
+		t.Run(mode, func(t *testing.T) {
 			m := searchEnterModel(t)
 			m.setMode(mode)
 			m.filterOn = true
@@ -309,7 +309,7 @@ func TestSeveralMatchesJustApplyTheFilter(t *testing.T) {
 				t.Errorf("phase = %v, want to stay on the narrowed list", got.phase)
 			}
 			if got.selectedCount() != 0 {
-				t.Errorf("selected = %v, want nothing chosen for an ambiguous query", got.selection())
+				t.Errorf("selected = %v, want nothing chosen for an ambiguous query", got.runtime().Selection())
 			}
 			if got.filter.Value() != "s5024" {
 				t.Errorf("filter = %q, want the query kept", got.filter.Value())
@@ -397,7 +397,7 @@ func TestASingleMatchStillChecksCredentials(t *testing.T) {
 func TestFilterHintSaysWhatEnterWillDo(t *testing.T) {
 	tests := []struct {
 		name  string
-		mode  pickMode
+		mode  string
 		query string
 		want  string
 	}{
@@ -429,7 +429,7 @@ func TestClearingTheSelection(t *testing.T) {
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
 	got := mm.(tuiModel)
 	if got.selectedCount() != 0 {
-		t.Errorf("selected = %v, want it emptied", got.selection())
+		t.Errorf("selected = %v, want it emptied", got.runtime().Selection())
 	}
 	if !strings.Contains(got.status, "cleared 3") {
 		t.Errorf("status = %q, want the count reported", got.status)
@@ -542,31 +542,31 @@ func TestScopeIsComputedOnceNotPerRender(t *testing.T) {
 		t.Errorf("scopeLabel() = %q with nothing loaded, want the current tenant", got)
 	}
 
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{{ID: "a"}})
-	if m.tenantCount != 1 {
-		t.Errorf("tenantCount = %d, want 1", m.tenantCount)
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a"}})
+	if tenantCountOf(m) != 1 {
+		t.Errorf("tenantCount = %d, want 1", tenantCountOf(m))
 	}
 	if got := m.scopeLabel(); got != "Tractor Supply" {
 		t.Errorf("scopeLabel() = %q, want the single tenant", got)
 	}
-	if m.showTenantColumn() {
+	if tenantCountOf(m) > 1 {
 		t.Error("the tenant column showed for one tenant")
 	}
 
-	m.mergeTenantElements("222", "Niagara Bottling", []api.Element{{ID: "c"}})
-	if m.tenantCount != 2 {
-		t.Errorf("tenantCount = %d, want 2", m.tenantCount)
+	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c"}})
+	if tenantCountOf(m) != 2 {
+		t.Errorf("tenantCount = %d, want 2", tenantCountOf(m))
 	}
 	if got := m.scopeLabel(); got != "2 tenants" {
 		t.Errorf("scopeLabel() = %q, want a count", got)
 	}
-	if !m.showTenantColumn() {
+	if !(tenantCountOf(m) > 1) {
 		t.Error("the tenant column did not show for two tenants")
 	}
 
-	m.mergeTenantElements("222", "Niagara Bottling", nil)
-	if m.tenantCount != 1 {
-		t.Errorf("tenantCount = %d, want 1 after the second tenant emptied", m.tenantCount)
+	mergeForTest(&m, "222", "Niagara Bottling", nil)
+	if tenantCountOf(m) != 1 {
+		t.Errorf("tenantCount = %d, want 1 after the second tenant emptied", tenantCountOf(m))
 	}
 }
 
@@ -581,7 +581,7 @@ func TestUndoingAClearedSelection(t *testing.T) {
 			mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
 			cleared := mm.(tuiModel)
 			if cleared.selectedCount() != 0 {
-				t.Fatalf("selected = %v, want it cleared", cleared.selection())
+				t.Fatalf("selected = %v, want it cleared", cleared.runtime().Selection())
 			}
 			if !strings.Contains(cleared.status, "alt+z to undo") {
 				t.Errorf("status = %q, want the undo offered", cleared.status)
@@ -590,10 +590,10 @@ func TestUndoingAClearedSelection(t *testing.T) {
 			mm, _ = cleared.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModAlt}), key)
 			got := mm.(tuiModel)
 			if got.selectedCount() != 2 {
-				t.Fatalf("selected = %v, want both restored", got.selection())
+				t.Fatalf("selected = %v, want both restored", got.runtime().Selection())
 			}
 			if !got.isSelected("111/e1") || !got.isSelected("111/e2") {
-				t.Errorf("selected = %v, want the same two elements", got.selection())
+				t.Errorf("selected = %v, want the same two elements", got.runtime().Selection())
 			}
 			if !strings.Contains(got.status, "restored 2") {
 				t.Errorf("status = %q, want the count reported", got.status)
@@ -631,7 +631,7 @@ func TestUndoRestoresRatherThanReplaces(t *testing.T) {
 	mm, _ = m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModAlt}), "alt+z")
 	got := mm.(tuiModel)
 	if got.selectedCount() != 2 || !got.isSelected("111/e1") || !got.isSelected("111/e3") {
-		t.Errorf("selected = %v, want the restored and the newly picked", got.selection())
+		t.Errorf("selected = %v, want the restored and the newly picked", got.runtime().Selection())
 	}
 }
 
@@ -709,7 +709,7 @@ func typeIntoFilter(t *testing.T, m tuiModel, query string) tuiModel {
 
 func TestSearchAcceptsJAndK(t *testing.T) {
 	m := filterModel(t)
-	m.mergeTenantElements("333", "Kroger", []api.Element{
+	mergeForTest(&m, "333", "Kroger", []api.Element{
 		{ID: "e9", Name: "jfk-gw-01", SiteID: "s1", Model: "ion1200"},
 	})
 
@@ -919,7 +919,7 @@ func TestAltHAndAltLSwitchTabs(t *testing.T) {
 
 func TestTheSerialIsOnTheRowAndSearchable(t *testing.T) {
 	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "e1", Name: "s5024-rtr-01", Model: "ion1200", Serial: "ION1200ABC123", Connected: true},
 		{ID: "e2", Name: "s0500-rtr-01", Model: "ion1200", Serial: "ION1200XYZ789"},
 	})
@@ -927,7 +927,7 @@ func TestTheSerialIsOnTheRowAndSearchable(t *testing.T) {
 	m.width, m.height = 160, 30
 	m.rebuildRows()
 
-	if !m.showSerialColumn() {
+	if !(m.runtime().ListWhen()["serials"] == true) {
 		t.Fatal("the sn column is hidden on a list whose records carry serials")
 	}
 	out := plain(m.viewPicking())
@@ -949,7 +949,7 @@ func TestTheSerialIsOnTheRowAndSearchable(t *testing.T) {
 
 func TestConnectedRowsAreGreenAndOfflineKeepsRed(t *testing.T) {
 	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "e2", Name: "s0500-rtr-01", Model: "ion1200"},
 		{ID: "e1", Name: "s5024-rtr-01", Model: "ion1200", Connected: true},
 	})
@@ -1027,7 +1027,7 @@ func TestColumnsAreSizedToTheirContent(t *testing.T) {
 
 func TestRenderTheElementListWithSerials(t *testing.T) {
 	m := multiModel(t)
-	m.mergeTenantElements("111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
 		{ID: "e1", Name: "s5024-rtr-01", Model: "ion 1200", Serial: "ION1200ABC123", Connected: true,
 			SpokeHA: &api.SpokeHA{ClusterID: "c1"}, SiteID: "s1"},
 		{ID: "e2", Name: "s5024-rtr-02", Model: "ion 1200", Serial: "ION1200DEF456", Connected: true,
@@ -1176,7 +1176,7 @@ func TestEnterSelectsTheRowInBatchMode(t *testing.T) {
 	got := next.(tuiModel)
 
 	if got.selectedCount() != 1 {
-		t.Fatalf("selected = %v, want the row under the cursor ticked", got.selection())
+		t.Fatalf("selected = %v, want the row under the cursor ticked", got.runtime().Selection())
 	}
 	if got.phase != phasePicking {
 		t.Errorf("phase = %v, want to still be on the list", got.phase)

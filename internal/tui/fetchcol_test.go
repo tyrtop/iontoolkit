@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/column"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -57,12 +58,18 @@ func uptimeRow(id string) map[string]any {
 }
 
 const uptimeColumn = `kind: list
+endpoints:
+  - name: status
+    path: /sdwan/v2.6/api/elements/{element_id}/status
+  - name: query
+    method: POST
+    path: /sdwan/v2.6/api/elements/status/query
 columns:
   - name
   - name: uptime
     header: Uptime
-    fetch: /sdwan/v2.6/api/elements/{element_id}/status
-    bulk: POST /sdwan/v2.6/api/elements/status/query
+    fetch: status
+    bulk: query
     value: "{{ .uptime }}"
 `
 
@@ -72,7 +79,11 @@ func fetchModel(t *testing.T, n int) (tuiModel, *fakePortal) {
 	if m.columnsErr != "" {
 		t.Fatalf("the file was refused: %s", m.columnsErr)
 	}
-	if _, ok := m.fetchSpecOf("uptime"); !ok {
+	fetches := false
+	for _, c := range m.listCols {
+		fetches = fetches || (c.name == "uptime" && c.fetch != nil)
+	}
+	if !fetches {
 		t.Fatalf("columns = %v, want one that fetches", columnNames(&m))
 	}
 	return m, &fakePortal{row: uptimeRow}
@@ -80,17 +91,9 @@ func fetchModel(t *testing.T, n int) (tuiModel, *fakePortal) {
 
 func runFetch(t *testing.T, m tuiModel, p *fakePortal, ids ...string) tuiModel {
 	t.Helper()
-	col, _ := m.fetchSpecOf("uptime")
-	cmd := m.fetchChunk(p, col, "1", ids)
-	if cmd == nil {
-		t.Fatal("fetchChunk built nothing")
-	}
-	msg, ok := cmd().(fetchedMsg)
-	if !ok {
-		t.Fatalf("message = %T, want the column's own", msg)
-	}
-	next, _ := m.onFetchedCells(msg)
-	return next.(tuiModel)
+	rt := m.runtime()
+	rt.ApplyCells(rt.FetchCellsWith(t.Context(), p, runtime.CellJob{Col: "uptime", TSG: "1", IDs: ids}))
+	return settle(t, m)
 }
 
 func TestAFetchedColumnFillsFromOneQuery(t *testing.T) {
@@ -175,7 +178,7 @@ func TestAnElementTheCallRefusedReadsAsAQuestion(t *testing.T) {
 
 func TestLastRunsValuesShowWithAnAsteriskUntilTheyAreRead(t *testing.T) {
 	m, portal := fetchModel(t, 2)
-	m.loadCachedCells("1", map[string]map[string]string{"uptime": {"0": "up 0 earlier"}})
+	m.runtime().SetCachedCells("1", map[string]map[string]string{"uptime": {"0": "up 0 earlier"}})
 	m.forgetRows()
 	m.rebuildRows()
 	m.moveCursorTo(1)
@@ -195,26 +198,25 @@ func TestLastRunsValuesShowWithAnAsteriskUntilTheyAreRead(t *testing.T) {
 
 func TestTheRestOfTheFleetWaitsForATick(t *testing.T) {
 	m, portal := fetchModel(t, 260)
-	col, _ := m.fetchSpecOf("uptime")
+	rt := m.runtime()
 
 	ids := make([]string, 0, 260)
 	for i := range 260 {
 		ids = append(ids, fmt.Sprint(i))
 	}
-	msg := m.fetchChunk(portal, col, "1", ids)().(fetchedMsg)
-	if len(msg.cells) != fetchChunkSize {
-		t.Fatalf("%d cells in the first chunk, want %d", len(msg.cells), fetchChunkSize)
+	res := rt.FetchCellsWith(t.Context(), portal, runtime.CellJob{Col: "uptime", TSG: "1", IDs: ids})
+	if len(res.Cells) != fetchChunkSize {
+		t.Fatalf("%d cells in the first chunk, want %d", len(res.Cells), fetchChunkSize)
 	}
-	if len(msg.rest) != 60 {
-		t.Fatalf("%d left over, want 60", len(msg.rest))
+	if len(res.Rest) != 60 {
+		t.Fatalf("%d left over, want 60", len(res.Rest))
 	}
 
-	next, cmd := m.onFetchedCells(msg)
-	m = next.(tuiModel)
-	if len(m.runtime().CellsQueued("uptime", "1")) != 60 {
+	next := rt.ApplyCells(res)
+	if len(rt.CellsQueued("uptime", "1")) != 60 {
 		t.Error("the rest of the fleet was not queued")
 	}
-	if cmd == nil {
+	if !next.Tick {
 		t.Fatal("nothing was scheduled for the rest")
 	}
 	if !m.fetchWorking() {
@@ -230,7 +232,7 @@ func TestTheRowsOnScreenAreAskedForFirst(t *testing.T) {
 	for i := range 400 {
 		ids = append(ids, fmt.Sprint(i))
 	}
-	first := m.visibleFirst("1", ids)
+	first := m.runtime().NearestElements("1", ids)
 
 	at := -1
 	for i, id := range first[:40] {
@@ -243,23 +245,29 @@ func TestTheRowsOnScreenAreAskedForFirst(t *testing.T) {
 	}
 }
 
-func TestACursorMoveAsksForTheRowsItLandedOn(t *testing.T) {
-	m, _ := fetchModel(t, 60)
-	if cmd := m.askVisibleCells(); cmd == nil {
-		t.Fatal("nothing was asked for the rows on screen")
+func TestTheNextChunkStartsAtTheCursor(t *testing.T) {
+	m, portal := fetchModel(t, 260)
+	rt := m.runtime()
+	ids := make([]string, 0, 260)
+	for i := range 260 {
+		ids = append(ids, fmt.Sprint(i))
 	}
-	if !m.runtime().CellsOut("uptime", "1") {
-		t.Error("the column is not marked as in flight, so a second move would ask twice")
+	rt.ApplyCells(rt.FetchCellsWith(t.Context(), portal, runtime.CellJob{Col: "uptime", TSG: "1", IDs: ids}))
+	m.moveCursorTo(250)
+
+	job, ok := rt.NextCells("uptime", "1")
+	if !ok || job.IDs[0] != "250" {
+		t.Errorf("next chunk = %v, want it to start at the row under the cursor", job.IDs)
 	}
-	if cmd := m.askVisibleCells(); cmd != nil {
-		t.Error("it asked again while the first ask was still out")
+	if !rt.CellsOut("uptime", "1") {
+		t.Error("the column is not marked as in flight, so it could be asked twice")
 	}
 }
 
 func TestAFetchedColumnIsRefusedWhenItCannotBeDrawn(t *testing.T) {
 	for _, tt := range []struct{ name, yaml, want string }{
-		{"a path off the api", "kind: list\ncolumns:\n  - name\n  - name: x\n    fetch: /api/x\n    value: \"{{ .x }}\"\n", "/sdwan/"},
-		{"no value", "kind: list\ncolumns:\n  - name\n  - name: x\n    fetch: /sdwan/v2.0/api/x\n", "says no value"},
+		{"a path off the api", "kind: list\nendpoints:\n  - name: x\n    path: /api/x\ncolumns:\n  - name\n  - name: x\n    fetch: x\n    value: \"{{ .x }}\"\n", "/sdwan/"},
+		{"no value", "kind: list\nendpoints:\n  - name: x\n    path: /sdwan/v2.0/api/x\ncolumns:\n  - name\n  - name: x\n    fetch: x\n", "says no value"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := listModelFrom(t, tt.yaml, 2)
@@ -289,12 +297,9 @@ func TestTheSweepSaysWhereItIsWhileItRuns(t *testing.T) {
 
 func TestADroppedTenantLeavesTheColumnAlone(t *testing.T) {
 	m, portal := fetchModel(t, 2)
-	col, _ := m.fetchSpecOf("uptime")
-
-	cmd := m.fetchChunk(nil, col, "1", []string{"0"})
-	msg := cmd().(fetchedMsg)
-	next, _ := m.onFetchedCells(msg)
-	m = next.(tuiModel)
+	rt := m.runtime()
+	rt.ApplyCells(rt.FetchCellsWith(t.Context(), nil, runtime.CellJob{Col: "uptime", TSG: "1", IDs: []string{"0"}}))
+	m = settle(t, m)
 
 	if got := plain(columnCell(t, &m, 0, "uptime")); got != "?" {
 		t.Errorf("row 0 = %q, want a question when there is no client", got)

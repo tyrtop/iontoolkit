@@ -6,7 +6,6 @@ import (
 	"strings"
 	"tyrtop.com/iontk/internal/app"
 
-	"tyrtop.com/iontk/internal/column"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/view"
@@ -16,9 +15,9 @@ func ViewsDir(st *config.Store) string { return app.ViewsDir(st) }
 
 func legacyViewsPath(st *config.Store) string { return app.LegacyViewsPath(st) }
 
-func (m *tuiModel) loadRuntime(st *config.Store) {
-	m.runtime().SetViews(app.LoadDataViews(st))
-	m.loadColumns(st)
+func (m *tuiModel) drawRuntime(l app.List) {
+	st := m.store()
+	m.loadColumns(l)
 
 	files, err := view.Load(ViewsDir(st))
 	if err != nil {
@@ -27,21 +26,6 @@ func (m *tuiModel) loadRuntime(st *config.Store) {
 
 	for _, f := range files {
 		switch f.Kind {
-		case view.KindList:
-			set, perr := column.Parse(f.Bytes)
-			if perr != nil {
-				m.columnsErr = joinErr(m.columnsErr, filepath.Base(f.Source)+": "+perr.Error())
-				continue
-			}
-			base, _ := defaultColumns()
-			cols, berr := buildColumns(set, base)
-			if berr != nil {
-				m.columnsErr = joinErr(m.columnsErr, filepath.Base(f.Source)+": "+berr.Error())
-				continue
-			}
-			m.listSpec, m.listFrom = cols, f.Source
-			m.runtime().SetColumns(set.Columns)
-
 		case view.KindMenu:
 			entries, perr := parseMenu(f.Bytes, m.runsCommand)
 			if perr != nil {
@@ -52,8 +36,6 @@ func (m *tuiModel) loadRuntime(st *config.Store) {
 		}
 	}
 	m.viewFiles = files
-	m.loadWrites(st)
-	app.ReloadCommands(m.runtime())
 	m.loadKeys(st)
 }
 
@@ -81,12 +63,17 @@ func (m tuiModel) actionsErr() string {
 }
 
 func (m tuiModel) runtimeErr() error {
-	for _, e := range []string{m.columnsErr, m.runtime().ViewsErr(), m.menuErr, m.keysErr, m.actionsErr(), m.writesErr} {
+	for _, e := range []string{m.columnsErr, m.runtime().ViewsErr(), m.menuErr, m.keysErr, m.actionsErr(), m.writesErr()} {
 		if e != "" {
 			return fmt.Errorf("%s", e)
 		}
 	}
 	return nil
+}
+
+func (m tuiModel) writesErr() string {
+	_, problem := m.runtime().Writes()
+	return problem
 }
 
 func joinErr(have, add string) string {
@@ -97,32 +84,4 @@ func joinErr(have, add string) string {
 		return have
 	}
 	return have + "; " + add
-}
-
-func (m tuiModel) sourceOf(kind, name string) (string, bool) {
-	for _, f := range m.viewFiles {
-		if f.Kind == kind && (name == "" || strings.EqualFold(f.Name, name)) {
-			return f.Source, true
-		}
-	}
-	return "", false
-}
-
-func (m tuiModel) viewFileCount(kind string) int {
-	n := 0
-	for _, f := range m.viewFiles {
-		if f.Kind == kind {
-			n++
-		}
-	}
-	return n
-}
-
-func (m tuiModel) runtimeLine() string {
-	dir := ViewsDir(m.store())
-	if dir == "" {
-		return ""
-	}
-	n := len(m.viewFiles)
-	return fmt.Sprintf("%d files", n)
 }

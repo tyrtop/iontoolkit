@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 
 	"tyrtop.com/iontk/internal/column"
 	"tyrtop.com/iontk/internal/logging"
-	"tyrtop.com/iontk/internal/script"
 )
 
 const (
@@ -73,6 +71,7 @@ func (rt *Runtime) editCells(edit func(s *cellsState)) {
 
 func (rt *Runtime) SetColumns(specs []column.Spec) {
 	rt.editCells(func(s *cellsState) { s.specs = specs })
+	rt.changed(Event{Area: AreaCells, Rows: true})
 }
 
 func (rt *Runtime) Columns() []column.Spec {
@@ -106,6 +105,7 @@ func (rt *Runtime) SetCells(col string, cells map[string]Cell) {
 			s.cells[col][k] = c
 		}
 	})
+	rt.changed(Event{Area: AreaCells, Rows: true})
 }
 
 func (rt *Runtime) SetCachedCells(tsg string, saved map[string]map[string]string) {
@@ -125,6 +125,7 @@ func (rt *Runtime) SetCachedCells(tsg string, saved map[string]map[string]string
 			}
 		}
 	})
+	rt.changed(Event{Area: AreaCells, Rows: true})
 }
 
 func (rt *Runtime) CellsWorking() bool {
@@ -171,66 +172,35 @@ func (rt *Runtime) MarkCellsOut(col, tsg string) {
 	rt.editCells(func(s *cellsState) { s.out[cellKey(col, tsg)] = true })
 }
 
-func (rt *Runtime) StartCells() []CellJob {
+func (rt *Runtime) StartCells(tsg string) []CellJob {
 	rows := rt.Elements()
 	var jobs []CellJob
 	for _, col := range rt.Columns() {
 		if !col.PerElement() {
 			continue
 		}
-		queued := map[string][]string{}
+		var ids []string
 		for _, el := range rows {
-			if _, have := rt.Cell(col.Name, el.Key()); have {
+			if el.TSG != tsg {
 				continue
 			}
-			queued[el.TSG] = append(queued[el.TSG], el.ID)
-		}
-		tsgs := make([]string, 0, len(queued))
-		for tsg := range queued {
-			tsgs = append(tsgs, tsg)
-		}
-		sort.Strings(tsgs)
-		for _, tsg := range tsgs {
-			ids := queued[tsg]
-			at := cellKey(col.Name, tsg)
-			rt.mu.RLock()
-			busy := rt.cells.out[at] || len(rt.cells.queue[at]) > 0
-			rt.mu.RUnlock()
-			if busy {
+			if c, have := rt.Cell(col.Name, el.Key()); have && !c.Cached && !c.Failed {
 				continue
 			}
-			rt.editCells(func(s *cellsState) { s.total[at], s.out[at] = len(ids), true })
-			jobs = append(jobs, CellJob{Col: col.Name, TSG: tsg, IDs: rt.NearestElements(tsg, ids)})
+			ids = append(ids, el.ID)
 		}
-	}
-	return jobs
-}
-
-func (rt *Runtime) CellsWanted() []CellJob {
-	rows, matched, cursor := rt.Elements(), rt.MatchIndices(), rt.Cursor()
-	rt.mu.RLock()
-	h := max(4, rt.ha.viewport)
-	rt.mu.RUnlock()
-	from, to := max(0, cursor-h), min(len(matched), cursor+h)
-	var jobs []CellJob
-	for _, col := range rt.Columns() {
-		if !col.PerElement() {
+		if len(ids) == 0 {
 			continue
 		}
-		want := map[string][]string{}
-		for _, i := range matched[from:to] {
-			el := rows[i]
-			if _, have := rt.Cell(col.Name, el.Key()); have {
-				continue
+		at, start := cellKey(col.Name, tsg), false
+		rt.editCells(func(s *cellsState) {
+			if s.out[at] || len(s.queue[at]) > 0 {
+				return
 			}
-			want[el.TSG] = append(want[el.TSG], el.ID)
-		}
-		for tsg, ids := range want {
-			if rt.CellsOut(col.Name, tsg) {
-				continue
-			}
-			rt.MarkCellsOut(col.Name, tsg)
-			jobs = append(jobs, CellJob{Col: col.Name, TSG: tsg, IDs: ids})
+			s.total[at], s.done[at], s.out[at], start = len(ids), 0, true, true
+		})
+		if start {
+			jobs = append(jobs, CellJob{Col: col.Name, TSG: tsg, IDs: rt.NearestElements(tsg, ids)})
 		}
 	}
 	return jobs
@@ -302,7 +272,7 @@ type CellReader interface {
 }
 
 func bulkCells(ctx context.Context, r CellReader, col column.Spec, tsg string, ids []string) (map[string]Cell, error) {
-	body, err := r.QueryJSON(ctx, col.Bulk, col.Key, ids, CellChunk, 1)
+	body, err := r.QueryJSON(ctx, col.BulkEndpoint.Path, col.Key, ids, CellChunk, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -365,9 +335,9 @@ func (rt *Runtime) oneByOne(ctx context.Context, r CellReader, col column.Spec, 
 }
 
 func (rt *Runtime) oneCell(ctx context.Context, r CellReader, col column.Spec, el Element) (string, error) {
-	path := script.Fill(col.Fetch, ElementVars(el), nil)
-	if i := strings.Index(path, "{"); i >= 0 {
-		return "", fmt.Errorf("%s: nothing fills %s", col.Name, path[i:])
+	path, err := col.Endpoint.Fill(ElementVars(el))
+	if err != nil {
+		return "", err
 	}
 	body, err := r.GetJSON(ctx, path)
 	if err != nil {
@@ -438,6 +408,18 @@ func (rt *Runtime) ApplyCells(res CellResult) CellsNext {
 			s.queue[at] = res.Rest
 		}
 	})
+	keys := make([]string, 0, len(res.Cells))
+	for k := range res.Cells {
+		keys = append(keys, k)
+	}
+	rt.changed(Event{Area: AreaCells, Rows: true, Keys: keys})
+	if res.Err != "" {
+		rt.note(res.Col + ": " + res.Err)
+	}
+	if res.Bulk != "" && res.Bulk != "used" {
+		rt.note(fmt.Sprintf("%s one call per element (%s): the query was refused — %s",
+			res.Col, rt.SweepETA(res.TSG, rt.CellsLeft(res.Col, res.TSG)), res.Bulk))
+	}
 	return CellsNext{Tick: len(res.Rest) > 0, Save: res.Cells}
 }
 
@@ -470,53 +452,49 @@ func (rt *Runtime) ResetCells() {
 	specs := rt.cells.specs
 	rt.cells = cellsState{specs: specs}
 	rt.mu.Unlock()
-	rt.changed(Event{Area: AreaCells})
+	rt.changed(Event{Area: AreaCells, Rows: true})
 }
 
 type TableJob struct {
+	Name string
 	Path string
 	Key  string
 	TSG  string
 }
 
 type TableResult struct {
-	Path string
+	Name string
 	TSG  string
 	Rows map[string]map[string]any
 	Err  string
 }
 
-func (rt *Runtime) TablesWanted() []TableJob {
-	tenants := map[string]bool{}
-	for _, el := range rt.Elements() {
-		tenants[el.TSG] = true
-	}
+func (rt *Runtime) TablesWanted(tsg string) []TableJob {
 	var jobs []TableJob
 	for _, spec := range rt.Columns() {
 		if !spec.Fleet() || TableSubject(spec.Fetch) != "" {
 			continue
 		}
-		for tsg := range tenants {
-			at := cellKey(spec.Fetch, tsg)
-			rt.mu.RLock()
-			s := rt.cells
-			skip := s.tOut[at] || s.tables[at] != nil || s.tErr[at] != ""
-			rt.mu.RUnlock()
-			if skip {
-				continue
+		at, start := cellKey(spec.Fetch, tsg), false
+		rt.editCells(func(s *cellsState) {
+			if s.tOut[at] || s.tables[at] != nil {
+				return
 			}
-			rt.editCells(func(s *cellsState) { s.tOut[at] = true })
-			jobs = append(jobs, TableJob{Path: spec.Fetch, Key: spec.Key, TSG: tsg})
+			delete(s.tErr, at)
+			s.tOut[at], start = true, true
+		})
+		if start {
+			jobs = append(jobs, TableJob{Name: spec.Fetch, Path: spec.Endpoint.Path, Key: spec.Key, TSG: tsg})
 		}
 	}
 	return jobs
 }
 
-func TableSubject(path string) string {
-	switch {
-	case strings.HasSuffix(path, "/"+column.ElementsSrc):
+func TableSubject(uses string) string {
+	switch uses {
+	case column.ElementsSrc:
 		return column.FromElement
-	case strings.HasSuffix(path, "/"+column.SitesSrc):
+	case column.SitesSrc:
 		return column.FromSite
 	}
 	return ""
@@ -531,7 +509,7 @@ func (rt *Runtime) ReadTable(ctx context.Context, job TableJob) TableResult {
 }
 
 func (rt *Runtime) ReadTableWith(ctx context.Context, c CellReader, job TableJob) TableResult {
-	res := TableResult{Path: job.Path, TSG: job.TSG}
+	res := TableResult{Name: job.Name, TSG: job.TSG}
 	if c == nil {
 		res.Err = "no client for this tenant"
 		return res
@@ -575,7 +553,7 @@ func RowsByKey(body []byte, key string) (map[string]map[string]any, error) {
 }
 
 func (rt *Runtime) ApplyTable(res TableResult) {
-	at := cellKey(res.Path, res.TSG)
+	at := cellKey(res.Name, res.TSG)
 	rt.editCells(func(s *cellsState) {
 		delete(s.tOut, at)
 		if res.Err != "" {
@@ -584,19 +562,23 @@ func (rt *Runtime) ApplyTable(res TableResult) {
 		}
 		s.tables[at] = res.Rows
 	})
+	if res.Err != "" {
+		rt.note(res.Name + ": " + res.Err)
+	}
+	rt.changed(Event{Area: AreaCells, Rows: true})
 }
 
-func (rt *Runtime) Table(path, tsg string) map[string]map[string]any {
+func (rt *Runtime) Table(name, tsg string) map[string]map[string]any {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	return rt.cells.tables[cellKey(path, tsg)]
+	return rt.cells.tables[cellKey(name, tsg)]
 }
 
-func (rt *Runtime) TableWorking(path string) bool {
+func (rt *Runtime) TableWorking(name string) bool {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	for at, out := range rt.cells.tOut {
-		if out && strings.HasPrefix(at, path+"\x00") {
+		if out && strings.HasPrefix(at, name+"\x00") {
 			return true
 		}
 	}

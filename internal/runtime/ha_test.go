@@ -1,12 +1,18 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/fixture"
@@ -22,8 +28,13 @@ tenants:
 
 func haRuntime(t *testing.T) *Runtime {
 	t.Helper()
+	return haRuntimeWith(t, haFleet, nil)
+}
+
+func haRuntimeWith(t *testing.T, fleet string, wrap func(http.RoundTripper) http.RoundTripper) *Runtime {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "fixtures.yaml")
-	os.WriteFile(path, []byte(haFleet), 0o600)
+	os.WriteFile(path, []byte(fleet), 0o600)
 	set, err := fixture.Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +44,11 @@ func haRuntime(t *testing.T) *Runtime {
 	rt.SetElements(nil)
 	rt.UseConnector(Connector{
 		Connect: func(_ context.Context, _ *config.Store, t config.Tenant) (*api.Client, error) {
-			c := &http.Client{Transport: set.Transport(t.TSGID)}
+			tr := set.Transport(t.TSGID)
+			if wrap != nil {
+				tr = wrap(tr)
+			}
+			c := &http.Client{Transport: tr}
 			return api.NewClient(c, c, "fixture", false, 100, 100), nil
 		},
 		Explain: func(err error) string { return err.Error() },
@@ -91,7 +106,7 @@ func TestApplySaysWhatComesNext(t *testing.T) {
 	}
 
 	next = rt.ApplyHA(HAResult{TSG: "1", Bulk: "403 forbidden", Rest: [][2]string{{"s", "c2"}}})
-	if len(next.Pairs) != 1 || !rt.HAInFlight("1") || rt.HA().Bulk != "403 forbidden" {
+	if len(next.Pairs) != 1 || !rt.HAWorking() || rt.HA().Bulk != "403 forbidden" {
 		t.Errorf("a refused bulk read: %+v %+v", next, rt.HA())
 	}
 
@@ -120,18 +135,6 @@ func TestWorkNearestTheCursorGoesFirst(t *testing.T) {
 	if pairs[0][1] != "cg" {
 		t.Errorf("pairs = %v", pairs)
 	}
-
-	rt.SetViewport(4)
-	wanted := rt.HAWanted()["1"]
-	if len(wanted) != 8 || wanted[0] != "c" {
-		t.Errorf("wanted around the cursor = %v", wanted)
-	}
-	rt.SetHA(map[string]string{"1/g": HAActive})
-	for _, id := range rt.HAWanted()["1"] {
-		if id == "g" {
-			t.Error("a row already known was asked for again")
-		}
-	}
 }
 
 func TestASweepWithNothingLoadedLoadsTheFleetFirst(t *testing.T) {
@@ -150,5 +153,215 @@ func TestASweepWithNothingLoadedLoadsTheFleetFirst(t *testing.T) {
 	empty := New()
 	if err := empty.Exec(&Call{}, "ha.sweep"); err == nil {
 		t.Error("a sweep with no tenant at all succeeded")
+	}
+}
+
+type laterQueriesRefused struct {
+	next    http.RoundTripper
+	mu      sync.Mutex
+	queries int
+}
+
+func cannedAnswer(req *http.Request, status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Status: http.StatusText(status), Header: http.Header{},
+		Body: io.NopCloser(strings.NewReader(body)), Request: req}
+}
+
+// the portal answers only the elements a query names, one page
+func (r *laterQueriesRefused) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method != http.MethodPost || !strings.HasSuffix(req.URL.Path, "/spokeclusters/status/query") {
+		return r.next.RoundTrip(req)
+	}
+	body, _ := io.ReadAll(req.Body)
+	var q struct {
+		Params struct {
+			Element struct {
+				In []string `json:"in"`
+			} `json:"element_id"`
+		} `json:"query_params"`
+		Page int `json:"dest_page"`
+	}
+	json.Unmarshal(body, &q)
+	if q.Page > 1 {
+		return cannedAnswer(req, http.StatusOK, `{"items":[]}`), nil
+	}
+	r.mu.Lock()
+	r.queries++
+	n := r.queries
+	r.mu.Unlock()
+	if n > 1 {
+		return cannedAnswer(req, http.StatusForbidden, `{}`), nil
+	}
+	asked := map[string]bool{}
+	for _, id := range q.Params.Element.In {
+		asked[id] = true
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	resp, err := r.next.RoundTrip(req)
+	if err != nil {
+		return resp, err
+	}
+	var env struct {
+		Items []map[string]any `json:"items"`
+	}
+	json.NewDecoder(resp.Body).Decode(&env)
+	resp.Body.Close()
+	var kept []map[string]any
+	for _, row := range env.Items {
+		if id, _ := row["element_id"].(string); asked[id] {
+			kept = append(kept, row)
+		}
+	}
+	out, _ := json.Marshal(map[string]any{"items": kept})
+	resp.Body, resp.ContentLength = io.NopCloser(bytes.NewReader(out)), int64(len(out))
+	resp.Header.Del("Content-Length")
+	return resp, nil
+}
+
+func TestALaterHAChunkThatIsRefusedFallsBackToTheClustersLeft(t *testing.T) {
+	refused := &laterQueriesRefused{}
+	rt := haRuntimeWith(t, pairedFleet(api.ClusterQueryLimit/2+10), func(next http.RoundTripper) http.RoundTripper {
+		refused.next = next
+		return refused
+	})
+	w := HAClusters(elementsOf(rt))
+	if len(w.Elements) <= api.ClusterQueryLimit {
+		t.Fatalf("%d clustered elements fit one query, so this proves nothing", len(w.Elements))
+	}
+	rt.SweepHA(t.Context(), "111", w, 0)
+	if refused.queries < 2 {
+		t.Fatalf("%d chunks asked, want the second refused", refused.queries)
+	}
+	if h := rt.HA(); h.Done < h.Total || h.Failed != 0 || rt.HAWorking() {
+		t.Errorf("after the sweep: %+v", h)
+	}
+	for _, r := range rt.Elements() {
+		if word, _ := rt.HAState(r); r.ClusterID() != "" && word != HAActive && word != HAStandby {
+			t.Errorf("%s reads %q, want it read one cluster at a time", r.Name, word)
+		}
+	}
+}
+
+func TestStoppingTheSweepsEndsThemAndClosingEndsTheFeed(t *testing.T) {
+	rt := New()
+	ctx, done, _ := rt.sweeping(t.Context())
+	go func() {
+		<-ctx.Done()
+		done()
+	}()
+	stopped := make(chan struct{})
+	go func() {
+		rt.StopSweeps()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("StopSweeps did not stop the sweep running and return")
+	}
+	if ctx, done, _ := rt.sweeping(t.Context()); ctx.Err() != nil {
+		t.Error("a sweep after the reset started stopped")
+	} else {
+		done()
+	}
+
+	rt.Close()
+	for {
+		select {
+		case _, ok := <-rt.Changes():
+			if !ok {
+				return
+			}
+		case <-time.After(time.Second):
+			t.Fatal("the change feed of a closed runtime never ended")
+		}
+	}
+}
+
+func TestARefreshThatFollowsWaitsForItsReads(t *testing.T) {
+	rt := haRuntime(t)
+	var said []string
+	if err := rt.Exec(&Call{Ctx: t.Context(), Args: map[string]string{"follow": "yes"},
+		Out: func(s string) { said = append(said, s) }}, "fleet.refresh"); err != nil {
+		t.Fatal(err)
+	}
+	if h := rt.HA(); h.Total == 0 || h.Done != h.Total || rt.HAWorking() {
+		t.Errorf("fleet.refresh follow=yes returned with HA at %+v\n%s", h, strings.Join(said, "\n"))
+	}
+}
+
+func pairedFleet(sites int) string {
+	var fleet strings.Builder
+	fleet.WriteString("tenants:\n  - name: Acme Co\n    tsg_id: \"111\"\n    elements:\n")
+	for i := 1; i <= sites; i++ {
+		for _, r := range []string{"01", "02"} {
+			fmt.Fprintf(&fleet, "      - name: store-%04d-rtr-%s\n        site: Store %04d\n        connected: true\n        ha: true\n", i, r, i)
+		}
+	}
+	return fleet.String()
+}
+
+func TestAStoppedHASweepLeavesNothingQueued(t *testing.T) {
+	rt := haRuntimeWith(t, pairedFleet(api.ClusterQueryLimit/2+10), nil)
+	w := HAClusters(elementsOf(rt))
+	ctx, done, _ := rt.sweeping(t.Context())
+	go func() {
+		defer done()
+		rt.SweepHA(ctx, "111", w, time.Hour)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(rt.Queued("111")) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the first chunk never queued the rest")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	rt.StopSweeps()
+	if rt.HAWorking() {
+		t.Errorf("after the stop: %+v, want nothing queued or in flight", rt.HA())
+	}
+}
+
+type hangingPortal struct{ asked chan struct{} }
+
+func (h hangingPortal) RoundTrip(req *http.Request) (*http.Response, error) {
+	select {
+	case h.asked <- struct{}{}:
+	default:
+	}
+	<-req.Context().Done()
+	return nil, req.Context().Err()
+}
+
+func TestARefreshStoppedPartWayAddsNoRows(t *testing.T) {
+	hang := hangingPortal{asked: make(chan struct{}, 1)}
+	rt := haRuntimeWith(t, haFleet, nil)
+	rt.ResetClients()
+	rt.SetElements(nil)
+	rt.UseConnector(Connector{
+		Connect: func(_ context.Context, _ *config.Store, _ config.Tenant) (*api.Client, error) {
+			c := &http.Client{Transport: hang}
+			return api.NewClient(c, c, "fixture", false, 100, 100), nil
+		},
+		Explain: func(err error) string { return err.Error() },
+	})
+	finished := make(chan struct{})
+	go func() {
+		rt.RefreshTenants(&Call{Ctx: t.Context()}, rt.FleetTenants(), true)
+		close(finished)
+	}()
+	select {
+	case <-hang.asked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the refresh never asked the portal")
+	}
+	rt.StopSweeps()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stop did not end the refresh")
+	}
+	if n := len(rt.Elements()); n != 0 || rt.Fleet().Issues["111"] != "" {
+		t.Errorf("after the stop: %d rows, issue %q, want the refresh dropped", n, rt.Fleet().Issues["111"])
 	}
 }

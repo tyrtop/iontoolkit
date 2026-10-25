@@ -8,52 +8,109 @@ import (
 )
 
 const (
-	scrAny      = ""
-	scrMenu     = "menu"
-	scrElements = "elements"
-	scrData     = "data"
+	scrAny       = ""
+	scrMenu      = "menu"
+	scrElements  = "elements"
+	scrData      = "data"
+	scrSession   = "session"
+	scrResults   = "results"
+	scrMacros    = "macros"
+	scrWorkflows = "workflows"
 )
 
-func screens() []string { return []string{scrAny, scrMenu, scrElements, scrData} }
+func screens() []string {
+	return []string{scrAny, scrMenu, scrElements, scrData, scrSession, scrResults, scrMacros, scrWorkflows}
+}
 
 type builtinAction struct {
 	name   string
 	screen string
-	keys   []string
 	run    func(m tuiModel) (tea.Model, tea.Cmd)
 }
 
 func builtinActions() []builtinAction {
-	return []builtinAction{
-		{name: "edit-yaml", screen: scrAny, keys: []string{editKey}, run: tuiModel.openEdit},
-		{name: "stats", screen: scrAny, keys: []string{"alt+i"}, run: tuiModel.toggleStats},
-		{name: "command-line", screen: scrMenu, keys: []string{":"}, run: tuiModel.openCmdline},
-		{name: "command-line", screen: scrElements, keys: []string{":"}, run: tuiModel.openCmdline},
-		{name: "command-line", screen: scrData, keys: []string{":"}, run: tuiModel.openCmdline},
+	out := []builtinAction{
+		{name: "edit-yaml", screen: scrAny, run: tuiModel.openEdit},
+		{name: "stats", screen: scrAny, run: tuiModel.toggleStats},
+		{name: "command-line", screen: scrMenu, run: tuiModel.openCmdline},
+		{name: "command-line", screen: scrElements, run: tuiModel.openCmdline},
+		{name: "command-line", screen: scrData, run: tuiModel.openCmdline},
 
 		{name: "elements", screen: scrMenu, run: tuiModel.menuElements},
 		{name: "service-accounts", screen: scrMenu, run: tuiModel.menuServiceAccounts},
 		{name: "sign-in", screen: scrMenu, run: tuiModel.menuSignIn},
 		{name: "refresh-token", screen: scrMenu, run: tuiModel.startTokenRefresh},
 		{name: "macros", screen: scrMenu, run: tuiModel.openMacros},
+		{name: "workflows", screen: scrMenu, run: tuiModel.openWorkflows},
 		{name: "settings", screen: scrMenu, run: tuiModel.menuSettings},
-		{name: "quit", screen: scrMenu, keys: []string{"q"}, run: tuiModel.menuQuit},
-		{name: "quit-closing-sessions", screen: scrMenu, keys: []string{"alt+w"}, run: tuiModel.menuQuitClosing},
-		{name: "auth-mode", screen: scrMenu, keys: []string{"alt+m", "alt+a"}, run: tuiModel.cycleAuthMode},
-		{name: "reopen-tab", screen: scrMenu, keys: []string{"alt+t"}, run: tuiModel.reopenFromMenu},
+		{name: "quit", screen: scrMenu, run: tuiModel.menuQuit},
+		{name: "quit-closing-sessions", screen: scrMenu, run: tuiModel.menuQuitClosing},
+		{name: "auth-mode", screen: scrMenu, run: tuiModel.cycleAuthMode},
+		{name: "reopen-tab", screen: scrMenu, run: tuiModel.reopenFromMenu},
 
-		{name: "filter", screen: scrElements, keys: []string{"/"}, run: tuiModel.openFilter},
-		{name: "show-selected", screen: scrElements, keys: []string{"alt+s"}, run: tuiModel.toggleShowSelected},
-		{name: "clear-selection", screen: scrElements, keys: []string{"alt+c"}, run: tuiModel.clearSelection},
-		{name: "undo-clear", screen: scrElements, keys: []string{"alt+z", "ctrl+z"}, run: tuiModel.undoClear},
-		{name: "select-everything", screen: scrElements, keys: []string{"ctrl+a"}, run: tuiModel.tickEveryMatch},
-		{name: "refresh", screen: scrElements, keys: []string{"alt+r"}, run: tuiModel.refreshNow},
-		{name: "cycle-mode", screen: scrElements, keys: []string{"alt+m", "alt+a"}, run: tuiModel.cycleMode},
-		{name: "ion-users", screen: scrElements, keys: []string{"alt+u"}, run: tuiModel.openIONUsers},
-		{name: "jump-up", screen: scrElements, keys: []string{"alt+up", "alt+k"}, run: tuiModel.jumpUp},
-		{name: "jump-down", screen: scrElements, keys: []string{"alt+down", "alt+j"}, run: tuiModel.jumpDown},
-		{name: "reopen-tab", screen: scrElements, keys: []string{"alt+t"}, run: tuiModel.reopenLastTab},
+		{name: "filter", screen: scrElements, run: tuiModel.openFilter},
+		{name: "show-selected", screen: scrElements, run: tuiModel.toggleShowSelected},
+		{name: "clear-selection", screen: scrElements, run: tuiModel.clearSelection},
+		{name: "undo-clear", screen: scrElements, run: tuiModel.undoClear},
+		{name: "select-everything", screen: scrElements, run: tuiModel.tickEveryMatch},
+		{name: "refresh", screen: scrElements, run: tuiModel.refreshNow},
+		{name: "cycle-mode", screen: scrElements, run: tuiModel.cycleMode},
+		{name: "ion-users", screen: scrElements, run: tuiModel.openIONUsers},
+		{name: "jump-up", screen: scrElements, run: tuiModel.jumpUp},
+		{name: "jump-down", screen: scrElements, run: tuiModel.jumpDown},
+		{name: "reopen-tab", screen: scrElements, run: tuiModel.reopenLastTab},
+		{name: "back", screen: scrElements, run: tuiModel.listBack},
+		{name: "to-sessions", screen: scrElements, run: tuiModel.toSessions},
+		{name: "next-tab", screen: scrElements, run: tuiModel.nextTab},
+		{name: "prev-tab", screen: scrElements, run: tuiModel.prevTab},
+
+		{name: "back", screen: scrData, run: tuiModel.dataBack},
+		{name: "filter", screen: scrData, run: tuiModel.openDataFilter},
+		{name: "refresh", screen: scrData, run: tuiModel.refreshData},
+		{name: "compare", screen: scrData, run: tuiModel.startCompare},
+		{name: "edit-record", screen: scrData, run: tuiModel.startWrite},
+		{name: "export", screen: scrData, run: tuiModel.exportDataPage},
+		{name: "next-tab", screen: scrData, run: tuiModel.nextTab},
+		{name: "prev-tab", screen: scrData, run: tuiModel.prevTab},
+		{name: "close-tab", screen: scrData, run: tuiModel.closeTab},
+
+		{name: "back", screen: scrSession, run: tuiModel.sessionBack},
+		{name: "reopen-tab", screen: scrSession, run: tuiModel.reopenLastTab},
+		{name: "favourites", screen: scrSession, run: tuiModel.openFavourites},
+		{name: "export", screen: scrSession, run: onActiveSession(tuiModel.exportSession)},
+		{name: "mouse", screen: scrSession, run: onActiveSession(tuiModel.toggleMouse)},
+		{name: "redial", screen: scrSession, run: onActiveSession(tuiModel.redialIfDead)},
+		{name: "next-tab", screen: scrSession, run: tuiModel.nextTab},
+		{name: "prev-tab", screen: scrSession, run: tuiModel.prevTab},
+		{name: "detach-tab", screen: scrSession, run: tuiModel.detachTab},
+		{name: "close-tab", screen: scrSession, run: tuiModel.closeTab},
 	}
+	out = append(out,
+		builtinAction{name: "back", screen: scrResults, run: tuiModel.resultsBack},
+		builtinAction{name: "open", screen: scrResults, run: tuiModel.toggleResult},
+		builtinAction{name: "filter", screen: scrResults, run: tuiModel.openResultsFilter},
+		builtinAction{name: "export", screen: scrResults, run: tuiModel.exportResults},
+		builtinAction{name: "next-format", screen: scrResults, run: func(m tuiModel) (tea.Model, tea.Cmd) { return m.onResultsOutputKey("f") }},
+		builtinAction{name: "next-orient", screen: scrResults, run: func(m tuiModel) (tea.Model, tea.Cmd) { return m.onResultsOutputKey("o") }},
+		builtinAction{name: "save", screen: scrResults, run: func(m tuiModel) (tea.Model, tea.Cmd) { return m.onResultsOutputKey("s") }},
+	)
+	out = append(out,
+		builtinAction{name: "back", screen: scrMacros, run: tuiModel.macrosBack},
+		builtinAction{name: "filter", screen: scrMacros, run: tuiModel.openMacroFilter},
+		builtinAction{name: "edit", screen: scrMacros, run: tuiModel.editMacro},
+		builtinAction{name: "undo", screen: scrMacros, run: tuiModel.undoMacroDelete},
+		builtinAction{name: "open", screen: scrMacros, run: tuiModel.pickMacro},
+
+		builtinAction{name: "back", screen: scrWorkflows, run: tuiModel.workflowsBack},
+		builtinAction{name: "filter", screen: scrWorkflows, run: tuiModel.openWorkflowFilter},
+		builtinAction{name: "edit", screen: scrWorkflows, run: tuiModel.openEdit},
+		builtinAction{name: "open", screen: scrWorkflows, run: tuiModel.pickWorkflow},
+	)
+	for n := 1; n <= 9; n++ {
+		out = append(out, builtinAction{name: fmt.Sprintf("favourite-%d", n), screen: scrSession,
+			run: func(m tuiModel) (tea.Model, tea.Cmd) { return m.useFavourite(n) }})
+	}
+	return out
 }
 
 func builtinAt(screen, name string) (builtinAction, bool) {
@@ -83,6 +140,16 @@ func (m tuiModel) screen() string {
 		return scrElements
 	case phaseData:
 		return scrData
+	case phaseSession:
+		return scrSession
+	case phaseResults:
+		return scrResults
+	case phaseMacros:
+		return scrMacros
+	case phaseWorkflows:
+		if m.wf.step == wfList {
+			return scrWorkflows
+		}
 	}
 	return scrAny
 }
@@ -121,11 +188,7 @@ const actionDepth = 8
 
 func (m tuiModel) menuElements() (tea.Model, tea.Cmd) {
 	if m.mode() == modeMacro {
-		mode := modeShell
-		if saved, ok := parseMode(m.cfg().DefaultMode); ok {
-			mode = saved
-		}
-		m.setMode(mode)
+		m.runtime().Disarm()
 	}
 	return m.startContinue()
 }
@@ -161,9 +224,7 @@ func (m tuiModel) menuQuitClosing() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) cycleAuthMode() (tea.Model, tea.Cmd) {
-	m.setAuthMode(m.authMode().next())
-	m.cfg().AuthMode = m.authMode().String()
-	if err := m.store().SaveConfig(m.cfg()); err != nil {
+	if err := m.runtime().Run("auth.mode", nil); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}

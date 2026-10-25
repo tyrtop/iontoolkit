@@ -1,11 +1,14 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"tyrtop.com/iontk/internal/runtime"
+	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/write"
 	"tyrtop.com/iontk/internal/script"
 	"tyrtop.com/iontk/internal/workflow"
@@ -21,13 +24,15 @@ const WorkflowPrefix = "workflow."
 
 func registerCommands(rt *runtime.Runtime) {
 	rt.Register(writeCommand())
-	for _, c := range siteCommands() {
-		rt.Register(c)
-	}
+	rt.Register(writeRecordsCommand())
 	for _, c := range authCommands() {
 		rt.Register(c)
 	}
-	ReloadCommands(rt)
+	for _, c := range resetCommands() {
+		rt.Register(c)
+	}
+	rt.Register(reloadCommand())
+	rt.Register(saveCommand())
 }
 
 func ReloadCommands(rt *runtime.Runtime) {
@@ -83,7 +88,8 @@ func workflowCommand(w workflow.Workflow) runtime.Command {
 	}
 	return runtime.Command{
 		Name: WorkflowPrefix + w.Name, Help: w.Title, Long: w.Description, Slow: true,
-		Args: args, Writes: true, Each: each,
+		Source: filepath.Join(w.Dir, workflow.ManifestName),
+		Args:   args, Writes: true, Each: each,
 		Run: func(rt *runtime.Runtime, c *runtime.Call) error {
 			if each != "" && c.Arg(each) != "" {
 				return runEach(rt, c, w, each)
@@ -94,9 +100,22 @@ func workflowCommand(w workflow.Workflow) runtime.Command {
 }
 
 func runWorkflow(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, input map[string]string) error {
+	exec := scriptExec(rt, c, true)
 	host := workflow.Host{
-		Exec:     scriptExec(rt, c, true),
-		Export:   func(text, slug string) (string, error) { return Export(rt.Store(), slug, "txt", text) },
+		Exec: func(sc script.Call) ([]string, any, error) {
+			e, ok := w.Endpoint(strings.TrimPrefix(sc.Name, EndpointPrefix))
+			if sc.Line != "" || !strings.HasPrefix(sc.Name, EndpointPrefix) || !ok {
+				return exec(sc)
+			}
+			var said []string
+			call := &runtime.Call{Ctx: c.Ctx, Args: sc.Args, DoIt: c.DoIt, Out: func(l string) {
+				said = append(said, l)
+				c.Say("%s", l)
+			}}
+			err := callEndpoint(rt, call, WorkflowPrefix+w.Name, e)
+			return said, call.Result, err
+		},
+		Export:   func(text, slug, ext string) (string, error) { return rt.Export(slug, ext, text) },
 		OnStatus: func(line string) { c.Say("%s", line) },
 	}
 	res, err := w.Run(c.Ctx, input, host, c.DoIt)
@@ -113,6 +132,9 @@ func scriptExec(rt *runtime.Runtime, c *runtime.Call, echo bool) func(script.Cal
 				return nil, nil, err
 			}
 			name, args, rest = cmd.Name, a, r
+		}
+		if cmd, ok := rt.Command(name); ok && cmd.FrontOnly {
+			return nil, nil, fmt.Errorf("%s is not open to scripts", name)
 		}
 		var said []string
 		call := &runtime.Call{Ctx: c.Ctx, Args: args, Rest: rest, DoIt: c.DoIt, Out: func(l string) {
@@ -152,14 +174,15 @@ func runEach(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each str
 				input[k] = v
 			}
 		}
-		inputs[i] = input
+		in, err := w.CheckInputs(input)
+		if err != nil {
+			return fmt.Errorf("run %d: %w; no run was started", i+1, err)
+		}
+		inputs[i] = in
 		if len(w.Inputs) == 0 || !c.DoIt {
 			continue
 		}
-		v := strings.TrimSpace(input[w.Inputs[0].Name])
-		if v == "" {
-			v = strings.TrimSpace(w.Inputs[0].Default)
-		}
+		v := in[w.Inputs[0].Name]
 		if at, dup := seen[v]; dup && v != "" {
 			return fmt.Errorf("runs %d and %d both have %s %s, and two runs at once would act on the same one",
 				at, i+1, w.Inputs[0].Name, v)
@@ -226,10 +249,11 @@ func runTags(w workflow.Workflow, runs []map[string]string) []string {
 }
 
 type WriteRun struct {
-	Spec  write.Spec
-	Plans []write.ElementPlans
-	Sent  int
-	Fail  int
+	Spec    write.Spec
+	Plans   []write.ElementPlans
+	Sent    int
+	Fail    int
+	Blocked string
 }
 
 func (r *WriteRun) PlannedWrites() []script.Write {
@@ -258,14 +282,86 @@ func writeCommand() runtime.Command {
 	}
 }
 
+func writeSpec(rt *runtime.Runtime, what string) (write.Spec, error) {
+	specs, problem := rt.Writes()
+	if problem != "" {
+		return write.Spec{}, errors.New(problem)
+	}
+	if specs == nil {
+		return write.Spec{}, fmt.Errorf("no writes are loaded")
+	}
+	spec, ok := specs.Spec(what)
+	if !ok {
+		return write.Spec{}, fmt.Errorf("nothing called %q can be written; there is %s", what, strings.Join(specs.Names(), ", "))
+	}
+	return spec, nil
+}
+
+type writeGroup struct {
+	portal runtime.Portal
+	tenant runtime.Tenant
+	els    []api.Element
+	plans  []write.ElementPlans
+}
+
+func writeTargets(rt *runtime.Runtime, c *runtime.Call, arg string) ([]*writeGroup, error) {
+	rows := rt.ElementsArg(c, arg)
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("no elements")
+	}
+	var groups []*writeGroup
+	at := map[string]*writeGroup{}
+	for _, r := range rows {
+		g := at[r.TSG]
+		if g == nil {
+			p, t, err := rt.PortalFor(c.Ctx, r.TSG)
+			if err != nil {
+				return nil, err
+			}
+			g = &writeGroup{portal: p, tenant: t}
+			at[r.TSG] = g
+			groups = append(groups, g)
+		}
+		g.els = append(g.els, r.Element)
+	}
+	return groups, nil
+}
+
+func writeRecordsCommand() runtime.Command {
+	return runtime.Command{
+		Name: "write.records", Slow: true,
+		Help: "the records of one kind an element has, as writes.yaml reads them: what=interface element=ID",
+		Args: []runtime.Arg{
+			{Name: "what", Required: true, Help: "which kind of record, a name in writes.yaml"},
+			{Name: "element", Required: true, Help: "the element's ID"},
+		},
+		Run: func(rt *runtime.Runtime, c *runtime.Call) error {
+			spec, err := writeSpec(rt, c.Arg("what"))
+			if err != nil {
+				return err
+			}
+			groups, err := writeTargets(rt, c, "element")
+			if err != nil {
+				return err
+			}
+			el := groups[0].els[0]
+			recs, err := spec.Records(c.Ctx, groups[0].portal, write.ElementVars(el))
+			if err != nil {
+				return err
+			}
+			c.Result = recs
+			for _, r := range recs {
+				c.Say("%s", spec.LabelOf(write.ElementVars(el), r))
+			}
+			return nil
+		},
+	}
+}
+
 func runWrite(rt *runtime.Runtime, c *runtime.Call) error {
-	specs, err := LoadWrites(rt.Store(), WritesFile)
+	spec, err := writeSpec(rt, c.Arg("what"))
 	if err != nil {
 		return err
-	}
-	spec, ok := specs.Spec(c.Arg("what"))
-	if !ok {
-		return fmt.Errorf("nothing called %q can be written; there is %s", c.Arg("what"), strings.Join(specs.Names(), ", "))
 	}
 	set := map[string]string{}
 	for _, w := range c.Rest {
@@ -279,19 +375,29 @@ func runWrite(rt *runtime.Runtime, c *runtime.Call) error {
 		return err
 	}
 
-	p, tenant, err := rt.Portal(c.Ctx)
+	groups, err := writeTargets(rt, c, "elements")
 	if err != nil {
 		return err
 	}
-	guard := guardFor(rt, tenant)
-	if c.DoIt {
-		if err := guard.Ready(spec); err != nil {
-			return err
+	var blocked error
+	for _, g := range groups {
+		if err := guardFor(rt, g.tenant).Ready(spec); err != nil && blocked == nil {
+			blocked = err
 		}
 	}
+	if c.DoIt && blocked != nil {
+		return blocked
+	}
 
-	all := write.PlanElements(c.Ctx, p, spec, splitList(c.Arg("elements"), ","), splitList(c.Arg("match"), ";"), set)
+	var all []write.ElementPlans
+	for _, g := range groups {
+		g.plans = write.PlanElements(c.Ctx, g.portal, spec, g.els, runtime.SplitList(c.Arg("match"), ";"), set)
+		all = append(all, g.plans...)
+	}
 	run := &WriteRun{Spec: spec, Plans: all}
+	if blocked != nil {
+		run.Blocked = blocked.Error()
+	}
 	c.Result = run
 	for _, l := range write.PlanLines(all) {
 		c.Say("%s", l)
@@ -307,24 +413,19 @@ func runWrite(rt *runtime.Runtime, c *runtime.Call) error {
 	}
 
 	c.Say("")
-	run.Sent, run.Fail, err = guard.ApplyAll(c.Ctx, p, spec, all, func(element string, p write.Plan, err error) {
-		if err != nil {
-			c.Say("failed  %s %s: %s", element, p.Label, err)
-			return
-		}
-		c.Say("sent    %s %s", element, p.Label)
-	})
+	var errs []error
+	for _, g := range groups {
+		sent, failed, err := guardFor(rt, g.tenant).ApplyAll(c.Ctx, g.portal, spec, g.plans, func(element string, p write.Plan, err error) {
+			if err != nil {
+				c.Say("failed  %s %s: %s", element, p.Label, err)
+				return
+			}
+			c.Say("sent    %s %s", element, p.Label)
+		})
+		run.Sent, run.Fail = run.Sent+sent, run.Fail+failed
+		errs = append(errs, err)
+	}
 	c.Say("")
 	c.Say("%d sent, %d failed", run.Sent, run.Fail)
-	return err
-}
-
-func splitList(s, sep string) []string {
-	var out []string
-	for _, part := range strings.Split(s, sep) {
-		if part = strings.TrimSpace(part); part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
+	return errors.Join(errs...)
 }

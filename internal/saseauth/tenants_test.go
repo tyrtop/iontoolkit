@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// The shape here is the one the portal actually returns, nested children and all.
+// as the portal actually returns it, nested children and all
 const tenancyBody = `{"items":[
   {"id":"1643707006","display_name":"CIS root","vertical":"Telecommunications","children":[
      {"id":"1750385018","display_name":"Reseller","children":[
@@ -127,7 +127,7 @@ func TestListTenantsEdgeCases(t *testing.T) {
 }
 
 func TestListTenantsDefaultsToTheRealEndpoint(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, TenancyURL+"?hierarchy=true", nil)
+	req, err := http.NewRequest(http.MethodGet, (Options{}).url("tenant_service_groups"), nil)
 	if err != nil {
 		t.Fatalf("the default endpoint is not a usable URL: %v", err)
 	}

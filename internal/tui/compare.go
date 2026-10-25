@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,41 +8,34 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/dataview"
 	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/ui"
 )
 
 type compareDoneMsg struct {
-	eid   string
 	check runtime.Check
+	err   error
 }
 
 func (m tuiModel) startCompare() (tea.Model, tea.Cmd) {
-	if tab, ok := m.activeData(); !ok || tab.Check.Loading {
-		return m, nil
-	}
-	tab, err := m.runtime().BeginCheck()
-	if err != nil {
-		m.status = err.Error()
-		if errors.Is(err, runtime.ErrNoLogin) {
-			m.status += " — alt+u adds one"
-		}
-		return m, nil
-	}
 	m.status = ""
 	rt, ctx := m.runtime(), m.ctx
 	return m, tea.Batch(func() tea.Msg {
-		ctx, cancel := context.WithTimeout(ctx, app.Defaults.ElementTimeout)
-		defer cancel()
-		return compareDoneMsg{eid: tab.EID, check: rt.RunCheck(ctx, tab)}
+		c := &runtime.Call{Ctx: ctx}
+		err := rt.Exec(c, "data.check")
+		done, _ := c.Result.(runtime.Check)
+		return compareDoneMsg{check: done, err: err}
 	}, m.spinner.Tick)
 }
 
 func (m tuiModel) onCompareDone(msg compareDoneMsg) (tea.Model, tea.Cmd) {
-	m.runtime().SetCheck(msg.eid, msg.check)
-	if msg.check.Err == "" {
+	switch {
+	case errors.Is(msg.err, runtime.ErrNoLogin):
+		m.status = msg.err.Error() + " — alt+u adds one"
+	case msg.err != nil:
+		m.status = msg.err.Error()
+	default:
 		m.status = runtime.CheckSummary(msg.check.ByView)
 	}
 	return m, nil

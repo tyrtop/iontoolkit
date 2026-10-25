@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"tyrtop.com/iontk/internal/runtime"
 
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
@@ -101,6 +102,13 @@ func newBatchModel(events <-chan sase.Event, commands []string, total int, sink 
 
 func (m batchModel) Init() tea.Cmd {
 	return tea.Batch(waitForEvent(m.events), m.spinner.Tick)
+}
+
+type batchStartedMsg struct {
+	events <-chan sase.Event
+	err    error
+	macro  string
+	rows   []runtime.Element
 }
 
 func waitForEvent(ch <-chan sase.Event) tea.Cmd {

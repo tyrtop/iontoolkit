@@ -90,8 +90,6 @@ type Query []string
 
 func Parse(s string) Query { return strings.Fields(strings.ToLower(s)) }
 
-func (q Query) Empty() bool { return len(q) == 0 }
-
 func (q Query) Match(r Record) bool {
 	if len(q) == 0 {
 		return true

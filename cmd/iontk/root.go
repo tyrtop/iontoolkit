@@ -93,15 +93,11 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
 	SilenceErrors: true,
 
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		var toStderr io.Writer
-		if app.LogLevelAsked() != "" && !wantsTheTerminal(cmd) {
-			toStderr = cmd.ErrOrStderr()
-		}
-		if err := app.StartLogging(app.OpenStore(), toStderr); err != nil {
+		if logErr != nil {
 			if app.LogLevel != "" {
-				return err
+				return logErr
 			}
-			fmt.Fprintln(cmd.ErrOrStderr(), err)
+			fmt.Fprintln(cmd.ErrOrStderr(), logErr)
 		}
 		logging.L().Info("iontk starting", "version", buildVersion(),
 			"command", cmd.CommandPath(), "args", strings.Join(os.Args[1:], " "))
@@ -137,11 +133,8 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
 		default:
 			tui.Version = buildVersion()
 			tui.Tenant = flagTenant
-			tui.Columns = flagColumns
-			tui.Fixtures = flagFixtures
 			tui.Demo = flagDemo
-			tui.Keybinds = flagKeybinds
-			return tui.Run(cmd.Context())
+			return tui.Run(cmd.Context(), cliRuntime())
 		}
 	},
 }
@@ -205,15 +198,42 @@ func prepare(argv []string) error {
 	fs.AddFlagSet(rootCmd.PersistentFlags())
 	fs.BoolP("help", "h", false, "")
 	_ = fs.Parse(argv)
+	fs.Visit(func(f *pflag.Flag) {
+		if sv, ok := f.Value.(pflag.SliceValue); ok {
+			_ = sv.Replace(nil)
+		}
+	})
 
 	_ = godotenv.Load()
 	app.ThemesFile = flagThemes
+	app.ColumnsFile = flagColumns
 	app.ViewsFolder = flagViews
 	app.ActionsFolder = flagActions
+	app.FixturesFile = flagFixtures
+	app.KeybindsFile = flagKeybinds
 	if err := workflowByPath(fs.Args()); err != nil {
 		return err
 	}
-	return loadFixtures(os.Stderr)
+	if err := loadFixtures(os.Stderr); err != nil {
+		return err
+	}
+	startLogging(fs.Args())
+	return nil
+}
+
+var logErr error
+
+func startLogging(words []string) {
+	terminal := wantsTheTerminal(rootCmd)
+	if len(words) > 0 {
+		c, _, err := rootCmd.Find(words)
+		terminal = err == nil && c != rootCmd && wantsTheTerminal(c)
+	}
+	var toStderr io.Writer
+	if app.LogLevelAsked() != "" && !terminal {
+		toStderr = os.Stderr
+	}
+	logErr = app.StartLogging(app.OpenStore(), toStderr)
 }
 
 var workflowAliases = map[string]string{}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"tyrtop.com/iontk/internal/column"
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
@@ -17,9 +18,13 @@ func TestTheRealClientListsFixtureElements(t *testing.T) {
 	s := load(t, demo)
 	c := fixtureClient(s, s.Tenants[0].TSGID)
 
-	els, err := c.ListElements(t.Context())
+	list, err := column.Builtin()
 	if err != nil {
-		t.Fatalf("ListElements() error = %v", err)
+		t.Fatal(err)
+	}
+	els, err := c.ListElementsFrom(t.Context(), listPath(t, list, column.ElementsSrc))
+	if err != nil {
+		t.Fatalf("ListElementsFrom() error = %v", err)
 	}
 	if len(els) != 2 {
 		t.Fatalf("got %d elements, want 2: %+v", len(els), els)
@@ -28,9 +33,9 @@ func TestTheRealClientListsFixtureElements(t *testing.T) {
 		t.Errorf("first element = %+v", els[0])
 	}
 
-	sites, err := c.ListSites(t.Context())
+	sites, err := c.ListSitesFrom(t.Context(), listPath(t, list, column.SitesSrc))
 	if err != nil {
-		t.Fatalf("ListSites() error = %v", err)
+		t.Fatalf("ListSitesFrom() error = %v", err)
 	}
 	if len(sites) != 2 {
 		t.Errorf("got %d sites, want 2: %+v", len(sites), sites)
@@ -107,4 +112,13 @@ func TestAnInterfaceEditIsKeptAndEverythingElseIsRefused(t *testing.T) {
 			t.Errorf("%s %s was taken", tt.method, tt.path)
 		}
 	}
+}
+
+func listPath(t *testing.T, set *column.Set, name string) string {
+	t.Helper()
+	p, err := set.Calls().Path(name, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

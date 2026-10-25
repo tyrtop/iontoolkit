@@ -9,11 +9,6 @@ import (
 
 type commandsSavedMsg struct{ err string }
 
-func (m *tuiModel) recordUse(command, model string) tea.Cmd {
-	m.runtime().RecordUse(model, command)
-	return m.saveCommands()
-}
-
 func (m tuiModel) saveCommands() tea.Cmd {
 	rt := m.runtime()
 	if rt.Store() == nil {
@@ -34,28 +29,10 @@ func (m tuiModel) onCommandsSaved(msg commandsSavedMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m tuiModel) modelOf(tsg, eid string) string { return m.runtime().ModelOf(tsg, eid) }
-
 func (m *tuiModel) recordSessionLine() tea.Cmd {
 	s := m.sessions().Active()
-	if s == nil {
+	if s == nil || !m.runtime().RecordLine(s) {
 		return nil
-	}
-	line := s.Line()
-	if line == "" {
-		return nil
-	}
-	return m.recordUse(line, m.modelOf(m.tsgForElement(s.ElementID), s.ElementID))
-}
-
-func (m *tuiModel) recordRun(cmds []string, rows []elementRow) tea.Cmd {
-	seen := map[string]bool{}
-	for _, r := range rows {
-		if seen[r.Model] {
-			continue
-		}
-		seen[r.Model] = true
-		m.runtime().RecordUse(r.Model, cmds...)
 	}
 	return m.saveCommands()
 }

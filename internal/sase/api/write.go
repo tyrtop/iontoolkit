@@ -22,5 +22,5 @@ func (s *Client) Send(ctx context.Context, method, path string, body []byte) ([]
 	if err := checkPath(path, "write"); err != nil {
 		return nil, err
 	}
-	return s.call(ctx, method+" "+strings.TrimPrefix(path, "/"), method, apiHost+path, body, true)
+	return s.call(ctx, method+" "+strings.TrimPrefix(path, "/"), method, apiHost()+path, body, true)
 }

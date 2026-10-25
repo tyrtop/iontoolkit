@@ -1,0 +1,3 @@
+endpoints:
+  - name: element
+    path: /sdwan/v3.2/api/elements/{element_id}

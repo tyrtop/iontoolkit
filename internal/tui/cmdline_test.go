@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -113,5 +115,28 @@ func TestAMenuEntryCanBeARuntimeCommand(t *testing.T) {
 	m = enter(m)
 	if !strings.HasPrefix(m.status, "> t ") {
 		t.Errorf("status = %q, want the one tenant listed", m.status)
+	}
+}
+
+func TestReloadOnTheCommandLineRedrawsTheList(t *testing.T) {
+	m := pickModel(t)
+	dir := ViewsDir(m.store())
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	list := "kind: list\nendpoints:\n  - name: elements\n    path: /sdwan/v3.2/api/elements\n" +
+		"columns:\n  - name: name\n    fetch: elements\n    value: \"{{ .label }}\"\n" +
+		"  - name: model\n    header: Hardware\n    fetch: elements\n    value: \"{{ .model_name }}\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "elements.yaml"), []byte(list), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := m.execLine("reload")
+	got := next.(tuiModel)
+	titles := ""
+	for _, c := range got.listSpec {
+		titles += c.title + " "
+	}
+	if got.listFrom == "" || !strings.Contains(titles, "Hardware") {
+		t.Errorf("after reload the list draws %q from %q, want the new file's columns", titles, got.listFrom)
 	}
 }

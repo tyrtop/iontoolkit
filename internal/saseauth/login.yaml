@@ -1,0 +1,13 @@
+host: https://auth.apps.paloaltonetworks.com
+values:
+  client_id: scm
+  callback: https://stratacloudmanager.paloaltonetworks.com/authentication/callback
+endpoints:
+  - name: authorize
+    path: /am/oauth2/authorize
+  - name: token
+    method: POST
+    path: /am/oauth2/access_token
+  - name: tenant_service_groups
+    host: https://api.apps.paloaltonetworks.com
+    path: /tenancy/v1/tenant_service_groups?hierarchy=true

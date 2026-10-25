@@ -1,9 +1,6 @@
 package dataview
 
 import (
-	"fmt"
-	"strings"
-
 	"tyrtop.com/iontk/internal/tmpl"
 )
 
@@ -78,17 +75,3 @@ func Render(v View, d *Data) Rendered {
 func eval(text string, ctx map[string]any) string { return tmpl.Eval(text, ctx) }
 
 func truthy(s string) bool { return tmpl.Truthy(s) }
-
-func expand(text string, ctx map[string]any) (string, error) {
-	got := eval(text, ctx)
-	if strings.HasPrefix(got, "!") {
-		return "", fmt.Errorf("%s", strings.TrimPrefix(got, "!"))
-	}
-	if err := checkPath(got); err != nil {
-		return "", fmt.Errorf("%q expanded to %q, which %w", text, got, err)
-	}
-	if strings.Contains(got, "//") {
-		return "", fmt.Errorf("%q expanded to %q: an id in the path is empty", text, got)
-	}
-	return got, nil
-}

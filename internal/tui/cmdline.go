@@ -5,6 +5,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -133,8 +134,11 @@ func (m tuiModel) execCommand(cmd runtime.Command, args map[string]string, rest 
 	}
 
 	var lines []string
-	err := m.runtime().Exec(&runtime.Call{Ctx: m.ctx, Args: args, Rest: rest,
-		Out: func(l string) { lines = append(lines, l) }}, cmd.Name)
+	c := &runtime.Call{Ctx: m.ctx, Args: args, Rest: rest, Out: func(l string) { lines = append(lines, l) }}
+	err := m.runtime().Exec(c, cmd.Name)
+	if l, ok := c.Result.(app.List); ok {
+		m.drawRuntime(l)
+	}
 	m.syncFromRuntime()
 	switch {
 	case err != nil:

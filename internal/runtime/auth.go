@@ -46,6 +46,25 @@ func (rt *Runtime) TokenDead() string { return rt.readAuth().dead }
 
 func (rt *Runtime) BrowserSignedIn() bool { return rt.readAuth().browser }
 
+func (rt *Runtime) HasSignIn() bool {
+	if rt.BrowserSignedIn() {
+		return true
+	}
+	st := rt.Store()
+	if st == nil {
+		return false
+	}
+	if c, err := st.TenantCache(); err == nil && c != nil && len(c.Tenants) > 0 {
+		return true
+	}
+	t, ok := rt.Tenant()
+	if !ok {
+		return false
+	}
+	v, err := st.Secrets.Get(config.RefreshTokenKey(t.TSGID))
+	return err == nil && v != ""
+}
+
 func (rt *Runtime) SetIdentity(i saseauth.Identity) {
 	rt.editAuth(func(a *authState) { a.ident = i })
 }

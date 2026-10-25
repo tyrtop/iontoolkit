@@ -123,3 +123,19 @@ func TestDropCache(t *testing.T) {
 		t.Errorf("DropCache on missing file = %v, want nil", err)
 	}
 }
+
+func TestSavingTheElementsAgainKeepsTheHAAndCells(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.SaveCache(&ElementCache{TSGID: "1", Elements: []api.Element{{ID: "1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	s.SaveHA("1", map[string]string{"1": "active"})
+	s.SaveCells("1", "uptime", map[string]string{"1": "3d"})
+	if err := s.SaveCache(&ElementCache{TSGID: "1", Elements: []api.Element{{ID: "1"}, {ID: "2"}}}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := s.Cache("1")
+	if c == nil || len(c.Elements) != 2 || c.HA["1"] != "active" || c.Cells["uptime"]["1"] != "3d" {
+		t.Errorf("after a second refresh: %+v", c)
+	}
+}

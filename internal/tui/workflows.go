@@ -42,6 +42,9 @@ type wfState struct {
 
 	direct bool
 	back   tuiPhase
+
+	filter   textinput.Model
+	filterOn bool
 }
 
 type wfLineMsg string
@@ -53,14 +56,37 @@ func (m tuiModel) openWorkflows() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) openCommands(prefix, title string) tuiModel {
-	m.wf = wfState{prefix: prefix, title: title}
+	m.wf = wfState{prefix: prefix, title: title, filter: newMacroFilter()}
 	m.phase = phaseWorkflows
 	m.status = strings.Join(m.runtime().Warnings(), "; ")
 	return m
 }
 
 func (m tuiModel) listedCommands() []runtime.Command {
-	return m.runtime().CommandsNamed(m.wf.prefix)
+	return m.runtime().CommandsMatching(m.wf.prefix, m.wf.filter.Value())
+}
+
+func (m tuiModel) onWorkflowFilterKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
+	switch {
+	case key == "esc":
+		m.wf.filterOn = false
+		m.wf.filter.SetValue("")
+		m.wf.filter.Blur()
+		m.wf.cursor = 0
+		return m, nil
+	case key == "enter":
+		m.wf.filterOn = false
+		m.wf.filter.Blur()
+		return m, nil
+	case key == "backspace" && m.wf.filter.Value() == "":
+		m.wf.filterOn = false
+		m.wf.filter.Blur()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.wf.filter, cmd = m.wf.filter.Update(msg)
+	m.wf.cursor = 0
+	return m, cmd
 }
 
 func (m tuiModel) openWorkflowForm() tuiModel {
@@ -97,28 +123,12 @@ func (m tuiModel) formValues() map[string]string {
 	return out
 }
 
-func (m tuiModel) wfDoitBlocked() string {
-	return ""
-}
-
-func (m tuiModel) bindPortal(tsg string) {
-	name := m.tenantName(tsg)
-	m.runtime().UsePortal(func(context.Context) (runtime.Portal, runtime.Tenant, error) {
-		c := m.tenantClient(tsg)
-		if c == nil {
-			return nil, runtime.Tenant{}, fmt.Errorf("could not reach %s", name)
-		}
-		return c, runtime.Tenant{TSG: tsg, Name: name}, nil
-	})
-}
-
 func (m tuiModel) startWorkflow(doit bool) (tea.Model, tea.Cmd) {
 	values := m.formValues()
 	if err := m.runtime().CheckArgs(m.wf.cmd.Name, values); err != nil {
 		m.wf.err = err.Error()
 		return m, nil
 	}
-	m.bindPortal(m.tenant().TSGID)
 
 	ctx, stop := context.WithCancel(m.ctx)
 	events := make(chan tea.Msg, 64)
@@ -167,21 +177,17 @@ func (m tuiModel) onWorkflowDone(msg wfDoneMsg) (tea.Model, tea.Cmd) {
 func (m tuiModel) onWorkflowKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
 	switch m.wf.step {
 	case wfList:
+		if m.wf.filterOn {
+			return m.onWorkflowFilterKey(msg, key)
+		}
+		if next, cmd, ran := m.bindingOn(scrWorkflows, key); ran {
+			return next, cmd
+		}
 		switch key {
-		case "esc", "q":
-			m.phase = phaseMenu
-			if m.wf.back != 0 {
-				m.phase = m.wf.back
-			}
 		case "up", "k":
 			m.wf.cursor = max(0, m.wf.cursor-1)
 		case "down", "j":
-			m.wf.cursor = min(len(m.listedCommands())-1, m.wf.cursor+1)
-		case "enter":
-			if len(m.listedCommands()) > 0 {
-				m.wf.values = nil
-				m = m.openWorkflowForm()
-			}
+			m.wf.cursor = max(0, min(len(m.listedCommands())-1, m.wf.cursor+1))
 		}
 
 	case wfForm:
@@ -224,10 +230,6 @@ func (m tuiModel) onWorkflowKey(msg tea.KeyPressMsg, key string) (tea.Model, tea
 			if m.wf.doit || m.wf.err != "" || !m.wf.cmd.Writes {
 				return m, nil
 			}
-			if why := m.wfDoitBlocked(); why != "" {
-				m.wf.err = why
-				return m, nil
-			}
 			return m.startWorkflow(true)
 		case "down", "j":
 			m.wf.scroll = min(m.wf.scroll+1, max(0, len(m.wf.lines)-1))
@@ -248,30 +250,64 @@ func (m tuiModel) moveWorkflowFocus(by int) tuiModel {
 	return m
 }
 
+func (m tuiModel) viewCommandList() string {
+	var b strings.Builder
+	all := m.runtime().CommandsNamed(m.wf.prefix)
+	b.WriteString(ui.StyleCmd.Render(strings.ToLower(m.wf.title)))
+	b.WriteString(ui.StyleDim.Render(fmt.Sprintf("   %d element(s) selected", len(m.runtime().Selected()))))
+	if m.wf.filterOn || m.wf.filter.Value() != "" {
+		b.WriteString("   " + m.wf.filter.View())
+	}
+	b.WriteString("\n\n")
+
+	width := max(20, m.width-2)
+	line := func(here bool, plain, styled string) string {
+		if here {
+			return ui.StyleRow.Render(fmt.Sprintf("%-*s", width, ui.Truncate(plain, width))) + "\n"
+		}
+		return "  " + styled + "\n"
+	}
+
+	list := m.listedCommands()
+	switch {
+	case len(all) == 0:
+		b.WriteString(ui.StyleDim.Render("  nothing here yet — add a folder under workflows/ in the config directory") + "\n")
+	case len(list) == 0:
+		b.WriteString(ui.StyleDim.Render("  nothing matches the filter") + "\n")
+	}
+	for i, c := range list {
+		name := fmt.Sprintf("%-22s", ui.Truncate(strings.TrimPrefix(c.Name, m.wf.prefix), 22))
+		inputs := fmt.Sprintf("%-14s", fmt.Sprintf("%d input(s)", len(c.Args)))
+		tag, plainTag := "", ""
+		if c.Writes {
+			plainTag = "writes  "
+			tag = ui.StyleWarn.Render(plainTag)
+		}
+		about := c.Help
+		if c.Long != "" {
+			about += " · " + c.Long
+		}
+		about = ui.Truncate(about, max(10, m.width-50))
+		b.WriteString(line(i == m.wf.cursor,
+			name+inputs+plainTag+about,
+			ui.StyleElement.Render(name)+ui.StyleDim.Render(inputs)+tag+ui.StyleDim.Render(about)))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(ui.Footer(m.status, "↑↓ move · enter open · e edit · / filter · esc back"))
+	return b.String()
+}
+
 func (m tuiModel) viewWorkflows() string {
+	if m.wf.step == wfList {
+		return m.viewCommandList()
+	}
 	var b strings.Builder
 	width := max(20, m.width-1)
-	title := m.wf.title
-	if m.wf.step != wfList {
-		title += " › " + m.wf.cmd.Help
-	}
-	b.WriteString(ui.StyleCmd.Render(title) + "\n\n")
+	b.WriteString(ui.StyleCmd.Render(m.wf.title+" › "+m.wf.cmd.Help) + "\n\n")
 
 	hint := "esc back"
 	switch m.wf.step {
-	case wfList:
-		cmds := m.listedCommands()
-		if len(cmds) == 0 {
-			b.WriteString(ui.StyleDim.Render("nothing here yet — add a folder under workflows/ in the config directory") + "\n")
-		}
-		for i, c := range cmds {
-			b.WriteString(pickLine(i == m.wf.cursor, c.Help, width) + "\n")
-			if i == m.wf.cursor && c.Long != "" {
-				b.WriteString("    " + ui.StyleDim.Render(ui.Truncate(c.Long, width-4)) + "\n")
-			}
-		}
-		hint = "↑↓ move · enter open · esc menu"
-
 	case wfForm:
 		if d := m.wf.cmd.Long; d != "" {
 			b.WriteString(ui.StyleDim.Render(ui.Truncate(d, width)) + "\n\n")
@@ -346,4 +382,28 @@ func inputLine(values map[string]string) string {
 		parts = append(parts, k+"="+values[k])
 	}
 	return strings.Join(parts, " ")
+}
+
+func (m tuiModel) workflowsBack() (tea.Model, tea.Cmd) {
+	m.phase = phaseMenu
+	m.status = ""
+	if m.wf.back != 0 {
+		m.phase = m.wf.back
+	}
+	return m, nil
+}
+
+func (m tuiModel) openWorkflowFilter() (tea.Model, tea.Cmd) {
+	m.wf.filter.SetValue("")
+	m.wf.cursor = 0
+	m.wf.filterOn = true
+	return m, m.wf.filter.Focus()
+}
+
+func (m tuiModel) pickWorkflow() (tea.Model, tea.Cmd) {
+	if len(m.listedCommands()) > 0 {
+		m.wf.values = nil
+		m = m.openWorkflowForm()
+	}
+	return m, nil
 }

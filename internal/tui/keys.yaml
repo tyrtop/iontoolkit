@@ -1,0 +1,94 @@
+keys:
+  alt+e: edit-yaml
+  alt+i: stats
+screens:
+  menu:
+    ":": command-line
+    "q": quit
+    alt+w: quit-closing-sessions
+    alt+m: auth-mode
+    alt+a: auth-mode
+    alt+t: reopen-tab
+  elements:
+    ":": command-line
+    "/": filter
+    alt+s: show-selected
+    alt+c: clear-selection
+    alt+z: undo-clear
+    ctrl+z: undo-clear
+    ctrl+a: select-everything
+    alt+r: refresh
+    alt+m: cycle-mode
+    alt+a: cycle-mode
+    alt+u: ion-users
+    alt+up: jump-up
+    alt+k: jump-up
+    alt+down: jump-down
+    alt+j: jump-down
+    alt+t: reopen-tab
+    alt+w: back
+    "ctrl+]": to-sessions
+    alt+right: next-tab
+    alt+l: next-tab
+    alt+left: prev-tab
+    alt+h: prev-tab
+  data:
+    ":": command-line
+    esc: back
+    "q": back
+    "ctrl+]": back
+    "/": filter
+    "r": refresh
+    "c": compare
+    "w": edit-record
+    alt+y: export
+    alt+right: next-tab
+    alt+l: next-tab
+    alt+left: prev-tab
+    alt+h: prev-tab
+    alt+w: close-tab
+    alt+k: close-tab
+  session:
+    "ctrl+]": back
+    alt+t: reopen-tab
+    alt+f: favourites
+    alt+y: export
+    alt+v: mouse
+    alt+r: redial
+    alt+right: next-tab
+    alt+l: next-tab
+    alt+left: prev-tab
+    alt+h: prev-tab
+    alt+w: detach-tab
+    alt+k: close-tab
+    alt+1: favourite-1
+    alt+2: favourite-2
+    alt+3: favourite-3
+    alt+4: favourite-4
+    alt+5: favourite-5
+    alt+6: favourite-6
+    alt+7: favourite-7
+    alt+8: favourite-8
+    alt+9: favourite-9
+  results:
+    esc: back
+    "q": back
+    enter: open
+    "/": filter
+    alt+y: export
+    "f": next-format
+    "o": next-orient
+    "s": save
+  macros:
+    esc: back
+    "q": back
+    "/": filter
+    "e": edit
+    "u": undo
+    enter: open
+  workflows:
+    esc: back
+    "q": back
+    "/": filter
+    "e": edit
+    enter: open

@@ -410,6 +410,32 @@ func tenantCommands() []Command {
 	tenantArg := Arg{Name: "tenant", Help: "the tenant's name; the one in use when empty"}
 	return []Command{
 		{
+			Name: "auth.mode", Help: "which sign-ins the tenant list shows: browser or tenant (service accounts); next flips it",
+			Args: []Arg{{Name: "mode", Default: "next"}},
+			Run: func(rt *Runtime, c *Call) error {
+				mode := c.Arg("mode")
+				switch mode {
+				case "next", "":
+					mode = AuthTenant
+					if rt.AuthMode() == AuthTenant {
+						mode = AuthBrowser
+					}
+				case AuthBrowser, AuthTenant:
+				default:
+					return fmt.Errorf("auth.mode: %q is not %s or %s", mode, AuthBrowser, AuthTenant)
+				}
+				rt.SetAuthMode(mode)
+				if cfg := rt.Config(); cfg != nil {
+					cfg.AuthMode = mode
+					if err := rt.saveConfig(); err != nil {
+						return err
+					}
+				}
+				c.Say("showing %s sign-ins", mode)
+				return nil
+			},
+		},
+		{
 			Name: "tenant.list", Help: "the saved tenants, the one in use marked",
 			Run: func(rt *Runtime, c *Call) error {
 				cfg := rt.Config()
@@ -603,6 +629,24 @@ func tenantCommands() []Command {
 					return err
 				}
 				return rt.SetDefaultUser(name, c.Arg("user"))
+			},
+		},
+		{
+			Name: "user.next", Help: "runs from here log in as the next of the tenant in use's ION users",
+			Run: func(rt *Runtime, c *Call) error {
+				t, ok := rt.Tenant()
+				if !ok || len(t.Users) < 2 {
+					return nil
+				}
+				next := t.Users[0].Name
+				for i, u := range t.Users {
+					if u.Name == rt.IONUser() {
+						next = t.Users[(i+1)%len(t.Users)].Name
+					}
+				}
+				rt.SetIONUser(next)
+				c.Say("ION user %s", next)
+				return nil
 			},
 		},
 		{

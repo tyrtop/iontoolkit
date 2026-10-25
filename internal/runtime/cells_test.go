@@ -51,18 +51,26 @@ func (r *reader) QueryJSON(_ context.Context, _, field string, ids []string, _, 
 func cellsRuntime(t *testing.T, n int, bulk bool, ids ...string) *Runtime {
 	t.Helper()
 	spec := `
+endpoints:
+  - name: uptime
+    path: /sdwan/v2.0/api/elements/{element_id}/uptime
+  - name: query
+    method: POST
+    path: /sdwan/v2.0/api/elements/query
+  - name: zones
+    path: /sdwan/v2.0/api/zones
 columns:
   - name: uptime
     header: Up
-    fetch: /sdwan/v2.0/api/elements/{element_id}/uptime
+    fetch: uptime
     value: "{{ .uptime }}"
 `
 	if bulk {
-		spec += "    bulk: /sdwan/v2.0/api/elements/query\n    key: element_id\n"
+		spec += "    bulk: query\n    key: element_id\n"
 	}
 	spec += `  - name: zone
     header: Zone
-    fetch: /sdwan/v2.0/api/zones
+    fetch: zones
     key: id
     on: id
     value: "{{ .name }}"
@@ -87,7 +95,7 @@ columns:
 
 func TestABulkColumnReadsAChunkAndQueuesTheRest(t *testing.T) {
 	rt := cellsRuntime(t, CellChunk+5, true)
-	jobs := rt.StartCells()
+	jobs := rt.StartCells("1")
 	if len(jobs) != 1 || jobs[0].Col != "uptime" || len(jobs[0].IDs) != CellChunk+5 || !rt.CellsWorking() {
 		t.Fatalf("jobs = %d, working %v", len(jobs), rt.CellsWorking())
 	}
@@ -116,7 +124,7 @@ func TestABulkColumnReadsAChunkAndQueuesTheRest(t *testing.T) {
 func TestARefusedBulkQueryFallsBackOneByOne(t *testing.T) {
 	rt := cellsRuntime(t, 3, true, "a", "bad", "c")
 	r := &reader{bulkErr: errors.New("403 not for this tenant")}
-	res := rt.FetchCellsWith(context.Background(), r, rt.StartCells()[0])
+	res := rt.FetchCellsWith(context.Background(), r, rt.StartCells("1")[0])
 	rt.ApplyCells(res)
 	if !strings.Contains(rt.CellsBulk("uptime"), "403") || len(r.gets) != 3 {
 		t.Errorf("bulk %q, gets %v", rt.CellsBulk("uptime"), r.gets)
@@ -129,18 +137,22 @@ func TestARefusedBulkQueryFallsBackOneByOne(t *testing.T) {
 	}
 }
 
-func TestCellsAlreadyKnownAreNotAskedAgain(t *testing.T) {
+func TestOnlyACellReadThisSessionIsLeftAlone(t *testing.T) {
 	rt := cellsRuntime(t, 3, false)
 	rt.SetCachedCells("1", map[string]map[string]string{"uptime": {"0": "up 0 earlier"}})
-	jobs := rt.StartCells()
-	if len(jobs) != 1 || strings.Join(jobs[0].IDs, ",") != "1,2" {
-		t.Errorf("jobs = %+v", jobs)
+	jobs := rt.StartCells("1")
+	if len(jobs) != 1 || strings.Join(jobs[0].IDs, ",") != "0,1,2" {
+		t.Errorf("jobs = %+v, want the cached cell read again too", jobs)
 	}
 	if c, _ := rt.Cell("uptime", "1/0"); !c.Cached || c.Text != "up 0 earlier" {
-		t.Errorf("cached cell = %+v", c)
+		t.Errorf("cached cell = %+v, want it shown while it is read", c)
 	}
-	if again := rt.StartCells(); len(again) != 0 {
-		t.Errorf("a second start asked again: %+v", again)
+	if again := rt.StartCells("1"); len(again) != 0 {
+		t.Errorf("a second start while the first reads asked again: %+v", again)
+	}
+	rt.ApplyCells(CellResult{Col: "uptime", TSG: "1", Cells: map[string]Cell{"1/0": {Text: "up 0"}, "1/1": {Text: "up 1"}, "1/2": {Failed: true}}})
+	if again := rt.StartCells("1"); len(again) != 1 || strings.Join(again[0].IDs, ",") != "2" {
+		t.Errorf("the next load asked for %+v, want only the failed cell", again)
 	}
 
 	if err := rt.Store().SaveCache(&config.ElementCache{TSGID: "1", FetchedAt: time.Now()}); err != nil {
@@ -155,16 +167,44 @@ func TestCellsAlreadyKnownAreNotAskedAgain(t *testing.T) {
 
 func TestATableColumnIsOneReadPerTenantJoinedByKey(t *testing.T) {
 	rt := cellsRuntime(t, 2, false)
-	jobs := rt.TablesWanted()
-	if len(jobs) != 1 || jobs[0].Path != "/sdwan/v2.0/api/zones" || !rt.TableWorking("/sdwan/v2.0/api/zones") {
+	jobs := rt.TablesWanted("1")
+	if len(jobs) != 1 || jobs[0].Path != "/sdwan/v2.0/api/zones" || !rt.TableWorking("zones") {
 		t.Fatalf("jobs = %+v", jobs)
 	}
-	if again := rt.TablesWanted(); len(again) != 0 {
+	if again := rt.TablesWanted("1"); len(again) != 0 {
 		t.Error("a table already being read was asked for again")
 	}
 	rt.ApplyTable(rt.ReadTableWith(context.Background(), &reader{}, jobs[0]))
-	rows := rt.Table("/sdwan/v2.0/api/zones", "1")
-	if rows["z2"]["name"] != "outside" || rt.TableWorking("/sdwan/v2.0/api/zones") {
+	rows := rt.Table("zones", "1")
+	if rows["z2"]["name"] != "outside" || rt.TableWorking("zones") {
 		t.Errorf("rows = %v", rows)
+	}
+}
+
+func TestARowsTextComesFromTheColumnSpecs(t *testing.T) {
+	rt := New()
+	list, err := column.Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.SetColumns(list.Columns)
+	el := Element{Element: api.Element{ID: "1", Name: "s0001-rtr-01", Model: "ion 1200", SiteID: "9",
+		Connected: true, Serial: "SN1"}, TSG: "111", Tenant: "Acme Co"}
+	rt.SetElements([]Element{el})
+	rt.MergeSites(map[string]string{"111/9": "Store 0001"})
+
+	got := map[string]string{}
+	texts := rt.RowText(list.Columns, el)
+	for i, c := range list.Columns {
+		got[c.Name] = texts[i]
+	}
+	for name, want := range map[string]string{"name": "s0001-rtr-01", "site": "Store 0001", "model": "ion 1200",
+		"sn": "SN1", "state": "connected", "tenant": "Acme Co"} {
+		if got[name] != want {
+			t.Errorf("%s = %q, want %q", name, got[name], want)
+		}
+	}
+	if w := rt.ListWhen(); w["serials"] != true || w["clustered"] != false || w["tenants"] != 1 {
+		t.Errorf("ListWhen() = %v", w)
 	}
 }

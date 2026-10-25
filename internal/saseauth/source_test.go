@@ -26,7 +26,7 @@ func TestSourceTokenUsesStoredRefreshToken(t *testing.T) {
 	defer srv.Close()
 
 	var saved atomic.Value
-	src := NewSource("123", "rt1", Options{TokenURL: srv.URL, Client: srv.Client()},
+	src := NewSource("123", "rt1", Options{Host: srv.URL, Client: srv.Client()},
 		func(rt string) error { saved.Store(rt); return nil })
 
 	tok, ttl, err := src.Token(context.Background())
@@ -67,7 +67,7 @@ func TestSourceTokenReportsInteractiveRequired(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			src := NewSource("123", tt.refresh, Options{TokenURL: srv.URL, Client: srv.Client()}, nil)
+			src := NewSource("123", tt.refresh, Options{Host: srv.URL, Client: srv.Client()}, nil)
 			_, _, err := src.Token(context.Background())
 			if !errors.Is(err, ErrInteractiveRequired) {
 				t.Fatalf("Token() error = %v, want it to wrap ErrInteractiveRequired", err)
@@ -83,7 +83,7 @@ func TestSourceTokenSurfacesSaveFailure(t *testing.T) {
 	defer srv.Close()
 
 	want := errors.New("keyring is locked")
-	src := NewSource("123", "rt1", Options{TokenURL: srv.URL, Client: srv.Client()},
+	src := NewSource("123", "rt1", Options{Host: srv.URL, Client: srv.Client()},
 		func(string) error { return want })
 
 	tok, _, err := src.Token(context.Background())
@@ -107,7 +107,7 @@ func TestSourceTokenHonoursContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	src := NewSource("123", "rt1", Options{TokenURL: srv.URL, Client: srv.Client()}, nil)
+	src := NewSource("123", "rt1", Options{Host: srv.URL, Client: srv.Client()}, nil)
 	_, _, err := src.Token(ctx)
 	if err == nil {
 		t.Fatal("Token() error = nil, want a context error")
@@ -134,7 +134,7 @@ func TestSourceFallsBackToTheSharedSeed(t *testing.T) {
 
 	var saved atomic.Value
 	seed := NewSeed("account-rt")
-	src := NewSource("123", "", Options{TokenURL: srv.URL, Client: srv.Client(), Seed: seed},
+	src := NewSource("123", "", Options{Host: srv.URL, Client: srv.Client(), Seed: seed},
 		func(rt string) error { saved.Store(rt); return nil })
 
 	tok, _, err := src.Token(context.Background())
@@ -165,7 +165,7 @@ func TestSourcePrefersItsOwnTokenOverTheSeed(t *testing.T) {
 	defer srv.Close()
 
 	seed := NewSeed("account-rt")
-	src := NewSource("123", "tenant-rt", Options{TokenURL: srv.URL, Client: srv.Client(), Seed: seed}, nil)
+	src := NewSource("123", "tenant-rt", Options{Host: srv.URL, Client: srv.Client(), Seed: seed}, nil)
 	if _, _, err := src.Token(context.Background()); err != nil {
 		t.Fatalf("Token() error = %v", err)
 	}
@@ -196,7 +196,7 @@ func TestConcurrentTenantsEachGetTheirOwnTokenFromOneSeed(t *testing.T) {
 	defer srv.Close()
 
 	seed := NewSeed("account-rt")
-	opt := Options{TokenURL: srv.URL, Client: srv.Client(), Seed: seed}
+	opt := Options{Host: srv.URL, Client: srv.Client(), Seed: seed}
 
 	var wg sync.WaitGroup
 	var ok, interactive atomic.Int32
@@ -248,7 +248,7 @@ func TestARejectedTenantTokenFallsBackToTheSeed(t *testing.T) {
 
 	var saved atomic.Value
 	src := NewSource("123", "expired-rt",
-		Options{TokenURL: srv.URL, Client: srv.Client(), Seed: NewSeed("account-rt")},
+		Options{Host: srv.URL, Client: srv.Client(), Seed: NewSeed("account-rt")},
 		func(rt string) error { saved.Store(rt); return nil })
 
 	tok, _, err := src.Token(context.Background())
@@ -282,7 +282,7 @@ func TestBothRefusalsAreReportedWhenNothingWorks(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := NewSource("123", "expired-rt", Options{TokenURL: srv.URL, Client: srv.Client()}, nil)
+	src := NewSource("123", "expired-rt", Options{Host: srv.URL, Client: srv.Client()}, nil)
 	_, _, err := src.Token(context.Background())
 	if err == nil {
 		t.Fatal("Token() error = nil, want a failure")

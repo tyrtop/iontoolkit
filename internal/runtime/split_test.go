@@ -1,4 +1,4 @@
-package app
+package runtime
 
 import "testing"
 
@@ -18,7 +18,7 @@ func TestSplitCommands(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			got := SplitCommands(tc.in)
+			got := SplitCommands(tc.in...)
 			if len(got) != len(tc.want) {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}

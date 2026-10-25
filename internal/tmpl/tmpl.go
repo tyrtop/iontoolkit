@@ -37,9 +37,6 @@ func (t *T) Render(ctx map[string]any) string {
 	return strings.TrimSpace(strings.ReplaceAll(b.String(), "<no value>", ""))
 }
 
-// a field the element has not got comes out empty, not "<no value>": half of
-// what a file asks for is optional on a given appliance. A file's own mistakes
-// do show, prefixed "!", because nothing else would tell whoever wrote it.
 func Eval(text string, ctx map[string]any) string {
 	t, err := Compile(text)
 	if err != nil {
@@ -60,26 +57,6 @@ func Truthy(s string) bool {
 		return false
 	}
 	return true
-}
-
-// a read of the SASE SD-WAN API and nothing else: no host of its own, no
-// method, no escaping /sdwan with ".."
-func CheckPath(p string) error {
-	if p == "" {
-		return fmt.Errorf("is empty")
-	}
-	if strings.Contains(p, "://") || strings.HasPrefix(p, "//") {
-		return fmt.Errorf("%q names a host; a file gives a path like /sdwan/v3.2/api/elements/{{ .element_id }}", p)
-	}
-	if !strings.HasPrefix(p, "/sdwan/") {
-		return fmt.Errorf("%q does not start with /sdwan/", p)
-	}
-	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
-			return fmt.Errorf("%q walks up out of /sdwan", p)
-		}
-	}
-	return nil
 }
 
 var Funcs = template.FuncMap{

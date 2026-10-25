@@ -24,6 +24,7 @@ func throwaway(t *testing.T) {
 func tree(in io.Reader) *cobra.Command {
 	root := &cobra.Command{Use: "iontk", SilenceUsage: true, SilenceErrors: true}
 	addOwn(root, "batch run", &cobra.Command{Use: "run", RunE: func(*cobra.Command, []string) error { return nil }})
+	theRuntime = nil
 	addRegistry(root, in, cliRuntime().Commands())
 	return root
 }

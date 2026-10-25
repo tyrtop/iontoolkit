@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"tyrtop.com/iontk/internal/ionterm"
@@ -55,7 +54,7 @@ func (rt *Runtime) editDials(edit func(d map[string]Dial)) {
 	}
 	edit(rt.sess.dials)
 	rt.mu.Unlock()
-	rt.changed(Event{Area: AreaSessions})
+	rt.changed(Event{Area: AreaSessions, Rows: true})
 }
 
 func (rt *Runtime) Dials() map[string]Dial {
@@ -127,10 +126,22 @@ func (rt *Runtime) Geometry() (int, int) {
 	return cols, rows
 }
 
+func (rt *Runtime) Reopen() (*ionterm.Session, string, error) {
+	if s, ok := rt.Sessions().Reattach(); ok {
+		return s, "", nil
+	}
+	eid, _, ok := rt.Sessions().LastClosed()
+	if !ok {
+		return nil, "", fmt.Errorf("nothing to reattach")
+	}
+	return nil, eid, nil
+}
+
 func (rt *Runtime) OpenSession(ctx context.Context, eid, name, tsg string) (*ionterm.Session, error) {
-	c := rt.Clients().Get(tsg)
-	if c == nil {
-		return nil, fmt.Errorf("could not reach %s", name)
+	t := rt.TenantFor(tsg)
+	c, err := rt.Connect(ctx, t)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %s", t.Name, rt.explain(err))
 	}
 	rt.mu.RLock()
 	dialer := rt.dev.Dialer
@@ -190,31 +201,42 @@ func sessionCommands() []Command {
 			Name: "session.open", Slow: true, Help: "open a device session on each element: elements=ID,ID (default: the selection)",
 			Args: []Arg{{Name: "elements"}},
 			Run: func(rt *Runtime, c *Call) error {
-				rows := rt.Targets()
-				if ids := c.Arg("elements"); ids != "" {
-					rows = rt.knownRows(c, strings.Split(ids, ","))
-				}
+				rows := rt.ElementsArg(c, "elements")
 				if len(rows) == 0 {
 					return fmt.Errorf("session.open: no elements")
 				}
-				var failed []string
+				rows, note := rt.Reach(rows)
+				if len(rows) == 0 {
+					return errors.New(note)
+				}
+				if note != "" {
+					c.Say("%s", note)
+				}
+				var errs []error
 				for _, r := range rows {
-					if t, ok := rt.TenantOf(r.TSG); ok {
-						if _, err := rt.Connect(c.Ctx, t); err != nil {
-							failed = append(failed, r.Label()+": "+rt.explain(err))
-							continue
-						}
-					}
 					if _, err := rt.OpenSession(c.Ctx, r.ID, r.Label(), r.TSG); err != nil {
-						failed = append(failed, r.Label()+": "+err.Error())
+						rt.Refused(r.TSG, err)
+						errs = append(errs, fmt.Errorf("%s: %w", r.Label(), err))
 						continue
 					}
 					c.Say("%s open", r.Label())
 				}
-				if len(failed) > 0 {
-					return fmt.Errorf("%s", strings.Join(failed, "; "))
+				return errors.Join(errs...)
+			},
+		},
+		{
+			Name: "session.export", Help: "write the active session's scrollback to a file under exports/",
+			Run: func(rt *Runtime, c *Call) error {
+				s := rt.Sessions().Active()
+				if s == nil {
+					return fmt.Errorf("no session open")
 				}
-				return nil
+				where, err := rt.Export(s.Name, "txt", s.Buffer())
+				if err == nil {
+					c.Say("exported %s scrollback to %s", s.Name, where)
+					c.Result = where
+				}
+				return err
 			},
 		},
 		{
@@ -250,6 +272,20 @@ func sessionCommands() []Command {
 					c.Say("detached %s", s.Name)
 				}
 				return nil
+			},
+		},
+		{
+			Name: "session.reopen", Slow: true, Help: "bring back the last session put aside, else open again the last one closed",
+			Run: func(rt *Runtime, c *Call) error {
+				s, eid, err := rt.Reopen()
+				switch {
+				case err != nil:
+					return err
+				case s != nil:
+					c.Say("reattached %s", s.Name)
+					return nil
+				}
+				return rt.Exec(&Call{Ctx: c.Ctx, Out: c.Out, Args: map[string]string{"elements": eid}}, "session.open")
 			},
 		},
 		{

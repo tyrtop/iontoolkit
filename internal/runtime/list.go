@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
+	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/search"
 )
@@ -73,7 +75,7 @@ func (rt *Runtime) SetElements(rows []Element) {
 	}
 	l.refilter()
 	rt.mu.Unlock()
-	rt.changed(Event{Area: AreaList})
+	rt.changed(Event{Area: AreaList, Rows: true})
 }
 
 func (rt *Runtime) Elements() []Element {
@@ -89,23 +91,30 @@ func (rt *Runtime) Sites() search.SiteMap {
 }
 
 func (rt *Runtime) MergeSites(names map[string]string) {
+	if len(names) == 0 {
+		return
+	}
 	rt.mu.Lock()
 	l := &rt.list
-	if names == nil {
-		l.sites = nil
-	} else {
-		next := make(search.SiteMap, len(l.sites)+len(names))
-		for k, v := range l.sites {
-			next[k] = v
-		}
-		for k, v := range names {
-			next[k] = v
-		}
-		l.sites = next
+	next := make(search.SiteMap, len(l.sites)+len(names))
+	for k, v := range l.sites {
+		next[k] = v
 	}
+	for k, v := range names {
+		next[k] = v
+	}
+	l.sites = next
 	l.refilter()
 	rt.mu.Unlock()
-	rt.changed(Event{Area: AreaList})
+	rt.changed(Event{Area: AreaList, Rows: true})
+}
+
+func (rt *Runtime) ClearSites() {
+	rt.mu.Lock()
+	rt.list.sites = nil
+	rt.list.refilter()
+	rt.mu.Unlock()
+	rt.changed(Event{Area: AreaList, Rows: true})
 }
 
 func (l *listState) refilter() {
@@ -147,7 +156,7 @@ func (rt *Runtime) List() List {
 		Cursor:       l.cursor,
 		Selected:     make(map[string]bool, len(l.selected)),
 		ShowSelected: l.showSel,
-		Mode:         l.modeOrDefault(),
+		Mode:         l.modeOrDefault(rt.cfg),
 		Total:        len(l.rows),
 	}
 	for _, i := range l.matches {
@@ -169,27 +178,43 @@ func (rt *Runtime) Current() (Element, bool) {
 	return l.rows[l.matches[l.cursor]], true
 }
 
-func (rt *Runtime) Targets() []Element {
+func (rt *Runtime) Selected() []Element {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	l := rt.list
 	var out []Element
-	for _, r := range l.rows {
-		if l.selected[r.Key()] {
+	for _, r := range rt.list.rows {
+		if rt.list.selected[r.Key()] {
 			out = append(out, r)
 		}
-	}
-	if len(out) == 0 && l.cursor >= 0 && l.cursor < len(l.matches) {
-		out = append(out, l.rows[l.matches[l.cursor]])
 	}
 	return out
 }
 
-func (l listState) modeOrDefault() string {
+func (rt *Runtime) Targets() []Element {
+	if out := rt.Selected(); len(out) > 0 {
+		return out
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	l := rt.list
+	if l.cursor >= 0 && l.cursor < len(l.matches) {
+		return []Element{l.rows[l.matches[l.cursor]]}
+	}
+	return nil
+}
+
+func (l listState) modeOrDefault(c *config.Config) string {
 	if l.mode == "" {
-		return ModeShell
+		return defaultMode(c)
 	}
 	return l.mode
+}
+
+func defaultMode(c *config.Config) string {
+	if c != nil && slices.Contains(modes, c.DefaultMode) {
+		return c.DefaultMode
+	}
+	return ModeShell
 }
 
 func (rt *Runtime) editList(edit func(l *listState) (status string, set bool)) {
@@ -360,7 +385,7 @@ func listCommands() []Command {
 				var bad error
 				rt.editList(func(l *listState) (string, bool) {
 					if want == "" {
-						cur, next := l.modeOrDefault(), ModeShell
+						cur, next := l.modeOrDefault(rt.cfg), ModeShell
 						for i, m := range modes {
 							if m == cur {
 								next = modes[(i+1)%len(modes)]
@@ -493,7 +518,7 @@ func (rt *Runtime) SetCursor(n int) {
 func (rt *Runtime) Mode() string {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	return rt.list.modeOrDefault()
+	return rt.list.modeOrDefault(rt.cfg)
 }
 
 func (rt *Runtime) SetMode(mode string) {
@@ -510,8 +535,56 @@ func (rt *Runtime) ArmMacro(name string) {
 	})
 }
 
+func (rt *Runtime) Disarm() {
+	rt.editList(func(l *listState) (string, bool) {
+		l.mode, l.armed = "", ""
+		return "", false
+	})
+}
+
 func (rt *Runtime) Armed() string {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	return rt.list.armed
+}
+
+func (rt *Runtime) Row(eid string) (Element, bool) {
+	for _, r := range rt.Elements() {
+		if r.ID == eid {
+			return r, true
+		}
+	}
+	return Element{}, false
+}
+
+func (rt *Runtime) RowByKey(key string) (Element, bool) {
+	for _, r := range rt.Elements() {
+		if r.Key() == key {
+			return r, true
+		}
+	}
+	return Element{}, false
+}
+
+func (rt *Runtime) RowTenants() []config.Tenant {
+	var out []config.Tenant
+	seen := map[string]bool{}
+	for _, r := range rt.Elements() {
+		if !seen[r.TSG] {
+			seen[r.TSG] = true
+			out = append(out, rt.TenantFor(r.TSG))
+		}
+	}
+	return out
+}
+
+func (rt *Runtime) Scope() (int, string) {
+	ts := rt.RowTenants()
+	switch len(ts) {
+	case 0:
+		return 0, ""
+	case 1:
+		return 1, ts[0].Name
+	}
+	return len(ts), fmt.Sprintf("%d tenants", len(ts))
 }

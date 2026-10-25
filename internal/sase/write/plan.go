@@ -37,7 +37,7 @@ func (p Plan) Empty() bool { return len(p.Changes) == 0 }
 func (p Plan) Body() ([]byte, error) { return json.Marshal(p.After) }
 
 func (w Spec) Records(ctx context.Context, g Getter, vars map[string]string) ([]map[string]any, error) {
-	path, err := expand(w.List, varsCtx(vars, nil))
+	path, err := w.list.FillFrom(varsCtx(vars, nil))
 	if err != nil {
 		return nil, fmt.Errorf("%s list: %w", w.Name, err)
 	}
@@ -76,7 +76,7 @@ func (w Spec) LabelOf(vars map[string]string, rec map[string]any) string {
 }
 
 func (w Spec) Plan(vars map[string]string, rec map[string]any, set map[string]string) (Plan, error) {
-	path, err := expand(w.Item, varsCtx(vars, rec))
+	path, err := w.item.FillFrom(varsCtx(vars, rec))
 	if err != nil {
 		return Plan{}, fmt.Errorf("%s item: %w", w.Name, err)
 	}
@@ -87,7 +87,7 @@ func (w Spec) Plan(vars map[string]string, rec map[string]any, set map[string]st
 	p := Plan{
 		Spec:   w.Name,
 		Label:  w.LabelOf(vars, rec),
-		Method: w.Method,
+		Method: w.item.Method,
 		Path:   path,
 		Before: rec,
 		After:  after,
@@ -246,18 +246,4 @@ func varsCtx(vars map[string]string, item map[string]any) map[string]any {
 		ctx["item"] = item
 	}
 	return ctx
-}
-
-func expand(text string, ctx map[string]any) (string, error) {
-	got := tmpl.Eval(text, ctx)
-	if strings.HasPrefix(got, "!") {
-		return "", fmt.Errorf("%s", strings.TrimPrefix(got, "!"))
-	}
-	if err := tmpl.CheckPath(got); err != nil {
-		return "", fmt.Errorf("%q expanded to %q, which %w", text, got, err)
-	}
-	if strings.Contains(got, "//") {
-		return "", fmt.Errorf("%q expanded to %q: an id in the path is empty", text, got)
-	}
-	return got, nil
 }

@@ -2,26 +2,16 @@ package tui
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"tyrtop.com/iontk/internal/runtime"
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/app"
-	"tyrtop.com/iontk/internal/config"
-	"tyrtop.com/iontk/internal/fixture"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/ui"
 )
 
 type realWorld struct {
-	held bool
-
-	fixture *fixture.Set
-
-	flags app.Flags
-
-	rt *runtime.Runtime
+	held    bool
+	testing *app.Testing
 
 	resumeData []sessionTarget
 }
@@ -36,71 +26,16 @@ func (m tuiModel) testingBlocked() string {
 	return ""
 }
 
-func FixturesPath(st *config.Store) string {
-	if Fixtures != "" {
-		return Fixtures
-	}
-	if st == nil {
-		return ""
-	}
-	return filepath.Join(st.Root, fixture.FileName)
-}
-
-var Fixtures string
-
-func (m tuiModel) fakeFleet() (*fixture.Set, error) {
-	if path := FixturesPath(m.store()); path != "" {
-		if b, err := os.ReadFile(path); err == nil {
-			return fixture.Parse(b, filepath.Base(path))
-		} else if !os.IsNotExist(err) {
-			return nil, err
-		}
-	}
-	return fixture.Tutorial()
-}
-
 func (m tuiModel) enterTestingWorld() (tuiModel, tea.Cmd) {
-	set, err := m.fakeFleet()
+	tw, err := app.EnterTesting(m.runtime())
 	if err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
-
-	held := realWorld{
-		held:       true,
-		fixture:    app.Fixture,
-		flags:      m.flags,
-		rt:         m.runtime(),
-		resumeData: m.resumeData,
-	}
-
-	app.Fixture = set
-	st, err := app.Store()
-	if err != nil {
-		app.Fixture = held.fixture
-		m.status = err.Error()
-		return m, nil
-	}
-	cfg, err := st.Config()
-	if err != nil {
-		app.Fixture = held.fixture
-		m.status = err.Error()
-		return m, nil
-	}
-
-	m.real = held
-	m.rt = app.NewRuntime(st, cfg)
-	m.rt.SetViews(held.rt.Views(), held.rt.ViewsErr())
-	m.rt.SetColumns(held.rt.Columns())
-	m.setAuthMode(authTenant)
-	m.runtime().UseTenant(cfg.Tenants[0])
-	m.runtime().SetIONUser(m.tenant().DefaultUser())
-	m.flags = app.TenantFlags(st, m.tenant(), m.ionUser())
-
-	m.runtime().ForgetSelection()
-	m.runtime().ResetFleet()
+	m.real = realWorld{held: true, testing: tw, resumeData: m.resumeData}
+	m.rt = tw.Runtime
 	m.resumeData = nil
-	m.setElements(nil)
+	m.listChanged()
 
 	logging.L().Info("testing world entered", "tenant", m.tenant().Name, "tsg", m.tenant().TSGID)
 	next, cmd := m.refreshActive()
@@ -111,18 +46,11 @@ func (m tuiModel) leaveTestingWorld() tuiModel {
 	if !m.real.held {
 		return m
 	}
-
-	m.sessions().CloseAll()
-
 	held := m.real
-	app.Fixture = held.fixture
 	m.real = realWorld{}
-
-	m.flags = held.flags
-	m.rt = held.rt
+	m.rt = held.testing.Leave()
 	m.resumeData = held.resumeData
-	m.runtime().ResetHALive()
-	m.setElements(held.rt.Elements())
+	m.listChanged()
 
 	logging.L().Info("testing world left", "tenant", m.tenant().Name)
 	return m
@@ -177,8 +105,7 @@ func (m tuiModel) openDemo() tuiModel {
 	m.setAuthMode(authTenant)
 	m.runtime().UseTenant(m.cfg().Tenants[0])
 	m.runtime().SetIONUser(m.tenant().DefaultUser())
-	m.flags = app.TenantFlags(m.store(), m.tenant(), m.ionUser())
 	m.phase = phaseMenu
-	m.setCacheState(cacheUpdating)
+	m.runtime().PeekCache(m.tenant().TSGID)
 	return m
 }

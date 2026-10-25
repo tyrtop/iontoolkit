@@ -44,15 +44,6 @@ func NormalizeOrientation(s string) (string, error) {
 	return "", fmt.Errorf("unknown row orientation %q: want one of %s", s, strings.Join(orientations, ", "))
 }
 
-func NextOrientation(o string) string {
-	for i, name := range orientations {
-		if name == o {
-			return orientations[(i+1)%len(orientations)]
-		}
-	}
-	return OrientION
-}
-
 var tabularHeader = []string{"element", "element_id", "model", "software", "connected", "command", "output", "error"}
 
 const (
@@ -116,8 +107,6 @@ func (s *csvSink) Close() error {
 	rows := tabularRows(s.results)
 	orderRows(rows, s.opts.orient)
 
-	// csv.Writer quotes the newlines and commas in command output itself.
-	// Pre-escaping any of it here would double it.
 	cw := csv.NewWriter(s.w)
 	if err := cw.Write(tabularHeader); err != nil {
 		return fmt.Errorf("write header: %w", err)

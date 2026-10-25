@@ -42,8 +42,6 @@ func (m *tuiModel) noteDial(msg dialProgressMsg) {
 	m.runtime().NoteDial(runtime.Dial{EID: msg.eid, Attempt: msg.attempt, Of: msg.of, LastErr: msg.err})
 }
 
-func (m *tuiModel) markDialing(eid string) { m.runtime().MarkDialing(eid) }
-
 func (m *tuiModel) dialDone(eid string) { m.runtime().DialDone(eid) }
 
 func (m *tuiModel) dialFailed(eid, reason string) {
@@ -136,11 +134,6 @@ func (m tuiModel) onRetryKey(key string) (tea.Model, tea.Cmd) {
 		m.phase = phasePicking
 	}
 	return m, nil
-}
-
-func (m *tuiModel) rowStatus(el elementRow) string {
-	glyph, style := m.rowStatusOf(el)
-	return style.Render(glyph)
 }
 
 func (m *tuiModel) rowStatusOf(el elementRow) (string, lipgloss.Style) {

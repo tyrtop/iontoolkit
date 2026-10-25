@@ -39,7 +39,7 @@ func Fetch(ctx context.Context, g Getter, v View, vars Vars) (*Data, error) {
 	ctxMap := varsCtx(vars)
 
 	for _, name := range sortedKeys(v.Fetch) {
-		path, err := expand(v.Fetch[name], ctxMap)
+		path, err := v.pathFor(v.Fetch[name], ctxMap)
 		if err != nil {
 			d.Errs[name] = err.Error()
 			continue
@@ -76,7 +76,7 @@ func Fetch(ctx context.Context, g Getter, v View, vars Vars) (*Data, error) {
 			row["item"] = item
 
 			for _, name := range sortedKeys(sec.Fetch) {
-				path, err := expand(sec.Fetch[name], row)
+				path, err := v.pathFor(sec.Fetch[name], row)
 				if err != nil {
 					row[errKey(name)] = err.Error()
 					continue
@@ -184,4 +184,15 @@ func firstErr(errs map[string]string) string {
 		return errs[k]
 	}
 	return "nothing answered"
+}
+
+func (v View) pathFor(name string, ctx map[string]any) (string, error) {
+	if v.calls == nil {
+		return "", fmt.Errorf("view %q has no endpoints", v.Name)
+	}
+	e, err := v.calls.Get(name)
+	if err != nil {
+		return "", err
+	}
+	return e.FillFrom(ctx)
 }

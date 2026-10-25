@@ -221,8 +221,11 @@ func TestAUserViewFromTheViewsFlagIsOffered(t *testing.T) {
 	body := `
 views:
   - name: Ports only
+    endpoints:
+      - name: ifs
+        path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces
     fetch:
-      ifs: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces
+      ifs: ifs
     sections:
       - title: Just the ports
         for_each: ifs.items
@@ -293,7 +296,7 @@ func TestDataTabsJoinTheTabRing(t *testing.T) {
 	m.runtime().SetDataTabs([]dataTab{{EID: "1", Name: "S0100-RTR-01", TSG: "1"}}, 0)
 	m.phase = phaseData
 
-	if got := m.tabCount(); got != 2 {
+	if got := tabCountOf(m); got != 2 {
 		t.Fatalf("tabCount() = %d, want the list plus the pane", got)
 	}
 	if got := m.currentTab(); got != 1 {
@@ -447,12 +450,12 @@ func runDataLoads(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
 	}
 	got := 0
 	for _, msg := range msgs {
-		loaded, ok := msg.(dataLoadedMsg)
+		done, ok := msg.(dataDoneMsg)
 		if !ok {
 			continue
 		}
 		got++
-		next, _ := m.Update(loaded)
+		next, _ := m.Update(done)
 		m = next.(tuiModel)
 	}
 	if got == 0 {

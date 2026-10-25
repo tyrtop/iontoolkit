@@ -16,11 +16,16 @@ type fakePortal struct {
 	sent     []string
 }
 
-func (f *fakePortal) LookupElement(_ context.Context, eid string) (api.Element, error) {
-	if el, ok := f.elements[eid]; ok {
-		return el, nil
+func (f *fakePortal) rows(ids ...string) []api.Element {
+	var out []api.Element
+	for _, id := range ids {
+		el, ok := f.elements[id]
+		if !ok {
+			el = api.Element{ID: id, SiteID: "gone"}
+		}
+		out = append(out, el)
 	}
-	return api.Element{}, errors.New("element " + eid + ": 404")
+	return out
 }
 
 func (f *fakePortal) GetJSON(_ context.Context, path string) ([]byte, error) {
@@ -63,7 +68,7 @@ func builtinSpec(t *testing.T) Spec {
 
 func TestAWriteRunShowsEveryChangeBeforeSendingAny(t *testing.T) {
 	p := twoStores()
-	all := PlanElements(context.Background(), p, builtinSpec(t), []string{"e1", "e2", "e9"},
+	all := PlanElements(context.Background(), p, builtinSpec(t), p.rows("e1", "e2", "e9"),
 		[]string{"1"}, map[string]string{"description": "uplink"})
 
 	if n := Changes(all); n != 1 {
@@ -75,8 +80,8 @@ func TestAWriteRunShowsEveryChangeBeforeSendingAny(t *testing.T) {
 	if all[1].Element != "S0272-RTR-01" || !all[1].Plans[0].Empty() {
 		t.Errorf("S0272 = %+v, want its interface 1 planned and already so", all[1])
 	}
-	if all[2].Err != "element e9: 404" {
-		t.Errorf("e9 = %+v", all[2])
+	if !strings.Contains(all[2].Err, "404") {
+		t.Errorf("e9 = %+v, want its read's 404", all[2])
 	}
 	if len(p.sent) != 0 {
 		t.Errorf("planning sent %v", p.sent)
@@ -90,7 +95,7 @@ func TestApplySendsOnlyWhatChanged(t *testing.T) {
 	p := twoStores()
 	spec := builtinSpec(t)
 	spec.Verified = true
-	all := PlanElements(context.Background(), p, spec, []string{"e1", "e2"},
+	all := PlanElements(context.Background(), p, spec, p.rows("e1", "e2"),
 		[]string{"*"}, map[string]string{"description": "uplink"})
 
 	log := filepath.Join(t.TempDir(), LogName)
@@ -114,12 +119,11 @@ func TestApplySendsOnlyWhatChanged(t *testing.T) {
 
 func TestMatchByAnyField(t *testing.T) {
 	p := twoStores()
-	all := PlanElements(context.Background(), p, builtinSpec(t), []string{"e1"},
+	all := PlanElements(context.Background(), p, builtinSpec(t), p.rows("e1"),
 		[]string{"used_for=lan"}, map[string]string{"description": "lan side"})
 	if len(all[0].Plans) != 1 || all[0].Plans[0].Before["name"] != "2" {
 		t.Errorf("plans = %+v, want interface 2 only", all[0].Plans)
 	}
-
 }
 
 func TestPlansReadAsLines(t *testing.T) {

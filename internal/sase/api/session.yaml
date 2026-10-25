@@ -1,0 +1,5 @@
+host: wss://api.sase.paloaltonetworks.com
+endpoints:
+  - name: toolkit_session
+    method: WS
+    path: /sdwan/v2.0/api/elements/{element_id}/ws/toolkitsessions?cols={cols}&rows={rows}

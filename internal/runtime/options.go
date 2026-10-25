@@ -46,6 +46,20 @@ func (rt *Runtime) RegisterOption(o Option) {
 	rt.opts[o.Name] = o
 }
 
+func (rt *Runtime) Option(name string) (Option, bool) {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	o, ok := rt.opts[name]
+	return o, ok
+}
+
+func (o Option) Clamp(n int) int {
+	if o.Min == 0 && o.Max == 0 {
+		return n
+	}
+	return min(o.Max, max(o.Min, n))
+}
+
 func (rt *Runtime) Options() []Option {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
@@ -187,14 +201,7 @@ func builtinOptions() []Option {
 		},
 		{
 			Name: "default_mode", Help: "what the element list opens in", Kind: OptChoice, Choices: modes,
-			Get: func(c *config.Config) string {
-				for _, m := range modes {
-					if m == c.DefaultMode {
-						return m
-					}
-				}
-				return ModeShell
-			},
+			Get:   defaultMode,
 			Put:   func(c *config.Config, v string) { c.DefaultMode = v },
 			After: func(rt *Runtime, v string) { rt.SetMode(v) },
 		},
@@ -244,9 +251,15 @@ func builtinOptions() []Option {
 			Put: func(c *config.Config, v string) { c.BatchToFile = v == "true" },
 		},
 		{
+			Name: "tutorial_seen", Help: "the first-run tutorial has been offered; false offers it again", Kind: OptBool,
+			Get: func(c *config.Config) string { return boolText(c.TutorialSeen) },
+			Put: func(c *config.Config, v string) { c.TutorialSeen = v == "true" },
+		},
+		{
 			Name: "batch_dir", Help: "the folder batch results are written to", Kind: OptString,
-			Get: func(c *config.Config) string { return c.BatchDir },
-			Put: func(c *config.Config, v string) { c.BatchDir = v },
+			Get:   func(c *config.Config) string { return c.BatchDir },
+			Put:   func(c *config.Config, v string) { c.BatchDir = v },
+			Check: output.ExpandHome,
 		},
 	}
 }

@@ -71,8 +71,8 @@ func TestTheFolderWinsOverTheSingleFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	Columns, app.ViewsFolder = filepath.Join(root, "columns.yaml"), dir
-	t.Cleanup(func() { Columns, app.ViewsFolder = "", "" })
+	app.ColumnsFile, app.ViewsFolder = filepath.Join(root, "columns.yaml"), dir
+	t.Cleanup(func() { app.ColumnsFile, app.ViewsFolder = "", "" })
 
 	m := listModel(t, 2)
 	if got := columnNames(&m); strings.Join(got, " ") != colCaret+" "+colName+" "+colModel {

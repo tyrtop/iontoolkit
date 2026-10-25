@@ -74,10 +74,6 @@ func Render(screen string, cursorX, cursorY, width, height int) View {
 	}
 }
 
-func Window(screen string, cursorX, cursorY, width, height int) string {
-	return Render(screen, cursorX, cursorY, width, height).Content
-}
-
 func (s *Session) View(width, height int) View {
 	return s.ScrolledView(width, height, 0)
 }

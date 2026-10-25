@@ -199,8 +199,6 @@ var hidden []string
 
 func HideThemes(names []string) { hidden = slices.Clone(names) }
 
-func HiddenThemes() []string { return slices.Clone(hidden) }
-
 func IsHidden(name string) bool {
 	for _, h := range hidden {
 		if strings.EqualFold(h, name) {
@@ -632,8 +630,6 @@ func terminalColor(spec string) color.Color {
 var profile colorprofile.Profile
 
 func SetProfile(p colorprofile.Profile) { profile = p }
-
-func Profile() colorprofile.Profile { return profile }
 
 func TrueColor() bool {
 	return profile == colorprofile.Unknown || profile >= colorprofile.TrueColor

@@ -5,6 +5,7 @@ import (
 
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/logging"
+	"tyrtop.com/iontk/internal/runtime"
 )
 
 func tenantFromEnv() (config.Tenant, bool) {
@@ -31,6 +32,51 @@ func ResolveTenant(cfg *config.Config, name string) (config.Tenant, bool) {
 		return tenantFromEnv()
 	}
 	return config.Tenant{}, false
+}
+
+func StartTenant(rt *runtime.Runtime, name string) ([]string, error) {
+	cfg := configOf(rt)
+	var creds Credentials
+	var err error
+	if rt.Store() != nil {
+		creds, err = resolveCredentials(rt.Store(), cfg, name, BaseFlags())
+	} else {
+		creds, err = ResolveCredentials(nil, name)
+	}
+	t, ok := creds.Tenant, err == nil
+	switch {
+	case err != nil:
+		t, ok = ResolveTenant(cfg, name)
+	case creds.From == FromEnv:
+		t, _ = ResolveTenant(&config.Config{}, "")
+	}
+	if ok {
+		rt.UseTenant(t)
+		rt.SetIONUser(t.DefaultUser())
+	} else {
+		rt.ClearTenant()
+	}
+	mode := cfg.AuthMode
+	if mode != runtime.AuthBrowser && mode != runtime.AuthTenant {
+		mode = ""
+		if ok && !t.UsesBrowser() {
+			mode = runtime.AuthTenant
+		}
+	}
+	if mode != "" {
+		rt.SetAuthMode(mode)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return creds.Lines(), nil
+}
+
+func configOf(rt *runtime.Runtime) *config.Config {
+	if cfg := rt.Config(); cfg != nil {
+		return cfg
+	}
+	return &config.Config{}
 }
 
 func TenantFlags(st *config.Store, t config.Tenant, ionUser string) Flags {

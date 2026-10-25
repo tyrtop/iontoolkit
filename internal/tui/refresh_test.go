@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -205,34 +206,32 @@ func TestRefreshKeybindIsAdvertised(t *testing.T) {
 	}
 }
 
-func TestFreshCacheSkipsTheRefetchOnceAuthenticated(t *testing.T) {
+func TestAFreshCacheFillsTheListWithoutThePortal(t *testing.T) {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
-	m := withWorkspace(withFleet(withStore(tuiModel{
-		ctx:   context.Background(),
-		phase: phaseLoading,
-	}, st, &config.Config{}), cacheCached, 0, time.Time{}), config.Tenant{Name: "Acme Co", TSGID: "1"}, true, "", authBrowser)
-	m.spinner = ui.NewSpinner("")
-
-	mm, cmd := m.Update(clientReadyMsg{client: liveClient()})
-	got := mm.(tuiModel)
-	if cmd != nil {
-		t.Error("a fresh cache still triggered a re-fetch")
-	}
-	if got.phase != phasePicking {
-		t.Errorf("phase = %v, want phasePicking once the client is ready", got.phase)
-	}
-
 	if err := st.Secrets.Set(config.ClientSecretKey("1"), "s"); err != nil {
 		t.Fatalf("seed secret: %v", err)
 	}
-	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
-		{Name: "Acme Co", TSGID: "1", ClientID: "svc", Added: true},
-	}})
-	m.setCacheState(cacheUpdating)
-	_, cmd = m.Update(clientReadyMsg{client: liveClient()})
+	cfg := &config.Config{Tenants: []config.Tenant{{Name: "Acme Co", TSGID: "1", ClientID: "svc", Added: true}}}
+	if err := st.SaveCache(&config.ElementCache{TSGID: "1", FetchedAt: time.Now(),
+		Elements: []api.Element{{ID: "e1", Name: "s0100-rtr-01"}}}); err != nil {
+		t.Fatal(err)
+	}
+	m := withWorkspace(withStore(tuiModel{ctx: context.Background(), phase: phaseMenu}, st, cfg),
+		cfg.Tenants[0], true, "", authTenant)
+	m.spinner = ui.NewSpinner("")
+
+	next, cmd := m.startContinue()
+	got := next.(tuiModel)
+	if got.phase != phasePicking || len(got.rows()) != 1 {
+		t.Fatalf("phase %v with %d rows, want the cached element shown at once", got.phase, len(got.rows()))
+	}
 	if cmd == nil {
-		t.Error("a stale cache did not trigger a fetch")
+		t.Fatal("no load was started")
+	}
+	got.runtime().UseConnector(runtime.Connector{})
+	if err := got.runtime().Exec(&runtime.Call{Ctx: context.Background()}, "fleet.load"); err != nil {
+		t.Errorf("a fresh cache went to the portal: %v", err)
 	}
 }
 
@@ -245,7 +244,8 @@ func TestLaunchRefreshDoesNotHijackTheMenuWithABrowser(t *testing.T) {
 	}, st, &config.Config{}), cacheUpdating, 0, time.Time{}), config.Tenant{Name: "Acme Co", TSGID: "1", Auth: config.AuthBrowser}, true, "", authBrowser)
 	m.spinner = ui.NewSpinner("")
 
-	mm, cmd := m.Update(needsSignInMsg{})
+	m.runtime().TokenDied("sign-in expired", false)
+	mm, cmd := m.Update(fleetDoneMsg{err: errors.New("1 of 1 tenants failed to load")})
 	got := mm.(tuiModel)
 	if got.phase != phaseMenu {
 		t.Errorf("phase = %v, want to stay on the menu rather than open a browser", got.phase)
@@ -261,37 +261,23 @@ func TestLaunchRefreshDoesNotHijackTheMenuWithABrowser(t *testing.T) {
 	}
 }
 
-func TestWatchTokenDoesNotBlockWithoutARefreshLoop(t *testing.T) {
-	if got := watchToken(nil); got != nil {
-		t.Error("watchToken(nil) returned a command, which would block on receive")
-	}
+var errTokenTest = errors.New("token refresh: boom")
 
-	ch := make(chan error, 1)
-	cmd := watchToken(ch)
-	if cmd == nil {
-		t.Fatal("watchToken returned nil for a real channel")
+func TestOpeningTheListWhileALoadRunsStartsNoSecond(t *testing.T) {
+	root := t.TempDir()
+	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
+	if err := st.Secrets.Set(config.ClientSecretKey("1"), "s"); err != nil {
+		t.Fatal(err)
 	}
-	ch <- errTokenTest
-	msg, ok := cmd().(tokenErrMsg)
-	if !ok {
-		t.Fatalf("got %T, want tokenErrMsg", cmd())
+	cfg := &config.Config{Tenants: []config.Tenant{{Name: "Acme Co", TSGID: "1", ClientID: "svc", Added: true}}}
+	m := withWorkspace(withStore(tuiModel{ctx: context.Background(), phase: phaseMenu}, st, cfg),
+		cfg.Tenants[0], true, "", authTenant)
+	m.spinner = ui.NewSpinner("")
+	if _, _, err := m.runtime().BeginRefresh(); err != nil || m.runtime().Fleet().Pending == 0 {
+		t.Fatalf("the refresh did not start (%v), so this proves nothing", err)
 	}
-	if !errors.Is(msg.err, errTokenTest) {
-		t.Errorf("err = %v, want %v", msg.err, errTokenTest)
-	}
-	if msg.stopped {
-		t.Error("stopped = true for a plain error")
-	}
-
-	closed := make(chan error)
-	close(closed)
-	msg, ok = watchToken(closed)().(tokenErrMsg)
-	if !ok {
-		t.Fatal("a closed channel did not produce a tokenErrMsg")
-	}
-	if !msg.stopped {
-		t.Error("stopped = false after the channel closed")
+	_, cmd := m.loadFleet()
+	if _, batch := cmd().(tea.BatchMsg); batch {
+		t.Error("a second load was started beside the one running")
 	}
 }
-
-var errTokenTest = errors.New("token refresh: boom")

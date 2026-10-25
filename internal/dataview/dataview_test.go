@@ -52,18 +52,18 @@ func TestLoadRejectsWhatAViewMayNotCall(t *testing.T) {
 	}{
 		{
 			name: "a host of its own",
-			yaml: `views: [{name: X, fetch: {a: "https://evil.example/x"}, sections: [{title: T, rows: [{label: L, value: V}]}]}]`,
+			yaml: `views: [{name: X, endpoints: [{name: a, host: "https://evil.example", path: /sdwan/x}], fetch: {a: a}, sections: [{title: T, rows: [{label: L, value: V}]}]}]`,
 			want: "names a host",
 		},
 		{
 			name: "outside the sdwan api",
-			yaml: `views: [{name: X, fetch: {a: "/iam/v1/tokens"}, sections: [{title: T, rows: [{label: L, value: V}]}]}]`,
+			yaml: `views: [{name: X, endpoints: [{name: a, path: /iam/v1/tokens}], fetch: {a: a}, sections: [{title: T, rows: [{label: L, value: V}]}]}]`,
 			want: "does not start with /sdwan/",
 		},
 		{
 			name: "walking up out of it",
-			yaml: `views: [{name: X, fetch: {a: "/sdwan/../iam/v1/tokens"}, sections: [{title: T, rows: [{label: L, value: V}]}]}]`,
-			want: "walks up",
+			yaml: `views: [{name: X, endpoints: [{name: a, path: /sdwan/../iam/v1/tokens}], fetch: {a: a}, sections: [{title: T, rows: [{label: L, value: V}]}]}]`,
+			want: "walks out",
 		},
 		{
 			name: "a misspelled key",
@@ -105,16 +105,22 @@ func TestLoadMergesAUserFileOverTheBuiltins(t *testing.T) {
 	body := `
 views:
   - name: Overview
+    endpoints:
+      - name: el
+        path: /sdwan/v3.2/api/elements/{element_id}
     fetch:
-      el: /sdwan/v3.2/api/elements/{{ .element_id }}
+      el: el
     sections:
       - title: Mine
         rows:
           - label: Name
             value: "{{ .el.name }}"
   - name: Extra
+    endpoints:
+      - name: el
+        path: /sdwan/v3.2/api/elements/{element_id}
     fetch:
-      el: /sdwan/v3.2/api/elements/{{ .element_id }}
+      el: el
     sections:
       - title: Also mine
         rows:
@@ -149,7 +155,7 @@ views:
 
 func TestLoadKeepsTheBuiltinsWhenTheUserFileIsBroken(t *testing.T) {
 	path := t.TempDir() + "/views.yaml"
-	if err := writeFile(path, "views: [{name: X, fetch: {a: \"/iam/v1/tokens\"}, sections: [{title: T, rows: [{label: L, value: V}]}]}]"); err != nil {
+	if err := writeFile(path, "views: [{name: X, endpoints: [{name: a, path: /iam/v1/tokens}], fetch: {a: a}, sections: [{title: T, rows: [{label: L, value: V}]}]}]"); err != nil {
 		t.Fatal(err)
 	}
 	set, err := Load(path)
@@ -164,13 +170,18 @@ func TestLoadKeepsTheBuiltinsWhenTheUserFileIsBroken(t *testing.T) {
 const ifaceView = `
 views:
   - name: Interfaces
+    endpoints:
+      - name: ifs
+        path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces
+      - name: st
+        path: /sdwan/v3.9/api/sites/{site_id}/elements/{element_id}/interfaces/{item.id}/status
     fetch:
-      ifs: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces
+      ifs: ifs
     sections:
       - title: Ports
         for_each: ifs.items
         fetch:
-          st: /sdwan/v3.9/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces/{{ .item.id }}/status
+          st: st
         columns:
           - header: PORT
             value: "{{ .item.name }}"
@@ -274,7 +285,7 @@ func TestAnEmptyIdIsNotFetched(t *testing.T) {
 	if len(f.asked) != 0 {
 		t.Errorf("asked %v, want nothing", f.asked)
 	}
-	if !strings.Contains(err.Error(), "empty") {
+	if !strings.Contains(err.Error(), "needs site_id") {
 		t.Errorf("error = %q, want it to name the empty id", err)
 	}
 }
@@ -283,9 +294,14 @@ func TestSectionsAreGatedAndErrorsSurface(t *testing.T) {
 	const view = `
 views:
   - name: V
+    endpoints:
+      - name: el
+        path: /sdwan/v3.2/api/elements/{element_id}
+      - name: cl
+        path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters/{cluster_id}/status
     fetch:
-      el: /sdwan/v3.2/api/elements/{{ .element_id }}
-      cl: /sdwan/v2.0/api/sites/{{ .site_id }}/spokeclusters/{{ .cluster_id }}/status
+      el: el
+      cl: cl
     sections:
       - title: Always
         rows:

@@ -7,18 +7,23 @@ import (
 	"strings"
 	"sync"
 
+	"tyrtop.com/iontk/internal/column"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/endpoint"
+	"tyrtop.com/iontk/internal/sase/write"
 )
 
 type Command struct {
-	Name   string
-	Help   string
-	Long   string
-	Args   []Arg
-	Writes bool
-	Each   string
-	Slow   bool
-	Run    func(rt *Runtime, c *Call) error
+	Name      string
+	Help      string
+	Long      string
+	Source    string
+	Args      []Arg
+	Writes    bool
+	Each      string
+	Slow      bool
+	FrontOnly bool
+	Run       func(rt *Runtime, c *Call) error
 }
 
 type Arg struct {
@@ -50,6 +55,8 @@ func (c *Call) Say(format string, a ...any) {
 type Event struct {
 	Area   string
 	Status string
+	Rows   bool
+	Keys   []string
 }
 
 const (
@@ -76,13 +83,18 @@ type Runtime struct {
 	cmds map[string]Command
 	opts map[string]Option
 
-	store   *config.Store
-	cfg     *config.Config
-	portal  PortalFunc
-	clients *Clients
-	conn    Connector
-	dev     Device
-	paths   ListPaths
+	store      *config.Store
+	cfg        *config.Config
+	portal     PortalFunc
+	clients    *Clients
+	connecting sync.Map
+	conn       Connector
+	dev        Device
+	listCalls  *endpoint.Set
+	writes     *write.Set
+	writesErr  string
+
+	resultsFilter string
 
 	preferAdded bool
 
@@ -98,18 +110,30 @@ type Runtime struct {
 	auth   authState
 	status string
 
-	subMu sync.Mutex
-	subs  map[int]chan Event
-	nextS int
+	subMu   sync.Mutex
+	subs    map[int]chan Event
+	nextS   int
+	changes chan Event
+
+	sweepMu      sync.Mutex
+	sweeps       context.Context
+	stopSweeps   context.CancelFunc
+	sweepWG      *sync.WaitGroup
+	sweepGen     int
+	sweepsClosed bool
 }
 
 func New() *Runtime {
-	rt := &Runtime{cmds: map[string]Command{}, opts: map[string]Option{}, subs: map[int]chan Event{}}
-	for _, c := range concat(listCommands(), optionCommands(), fleetCommands(), haCommands(), batchCommands(), sessionCommands(), dataCommands(), historyCommands(), tenantCommands(), inspectCommands()) {
+	rt := &Runtime{cmds: map[string]Command{}, opts: map[string]Option{}, subs: map[int]chan Event{}, changes: make(chan Event, 1024)}
+	rt.subs[-1] = rt.changes
+	for _, c := range concat(listCommands(), optionCommands(), fleetCommands(), haCommands(), batchCommands(), sessionCommands(), dataCommands(), historyCommands(), tenantCommands(), inspectCommands(), tabCommands(), resultCommands()) {
 		rt.Register(c)
 	}
 	for _, o := range builtinOptions() {
 		rt.RegisterOption(o)
+	}
+	if list, err := column.Builtin(); err == nil {
+		rt.listCalls = list.Calls()
 	}
 	return rt
 }
@@ -215,6 +239,21 @@ func (rt *Runtime) Subscribe() (<-chan Event, func()) {
 			delete(rt.subs, id)
 			close(c)
 		}
+	}
+}
+
+func (rt *Runtime) Changes() <-chan Event { return rt.changes }
+
+func (rt *Runtime) Close() {
+	rt.sweepMu.Lock()
+	rt.sweepsClosed = true
+	rt.sweepMu.Unlock()
+	rt.StopSweeps()
+	rt.subMu.Lock()
+	defer rt.subMu.Unlock()
+	if ch, ok := rt.subs[-1]; ok {
+		delete(rt.subs, -1)
+		close(ch)
 	}
 }
 

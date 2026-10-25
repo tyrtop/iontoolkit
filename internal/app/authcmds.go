@@ -1,8 +1,12 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
+	"tyrtop.com/iontk/internal/saseauth"
 
 	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/ui"
@@ -36,6 +40,69 @@ func WarmInto(rt *runtime.Runtime, results []TenantWarm) {
 
 func authCommands() []runtime.Command {
 	return []runtime.Command{
+		{
+			Name: "auth.tenant", Slow: true,
+			Help: "sign in to the tenant in use with a browser, and keep its client",
+			Run: func(rt *runtime.Runtime, c *runtime.Call) error {
+				t, ok := rt.Tenant()
+				if !ok {
+					return fmt.Errorf("no tenant to sign in to")
+				}
+				if !t.UsesBrowser() {
+					return fmt.Errorf("%s signs in with a service account, not a browser", t.Name)
+				}
+				st := rt.Store()
+				f := TenantFlags(st, t, rt.IONUser())
+				src := BrowserSource(f, &http.Client{Timeout: f.HTTPTimeout}, st)
+				if err := src.SignIn(c.Ctx); err != nil {
+					return err
+				}
+				ident := src.Identity()
+				if !ident.ScopedTo(f.TSGID) {
+					return fmt.Errorf("signed in, but the token is scoped to %q rather than tenant %s", ident.Scope, f.TSGID)
+				}
+				rt.Clients().Drop(t.TSGID)
+				cl, err := rt.Connect(c.Ctx, t)
+				if err != nil {
+					return fmt.Errorf("signed in, but the saved credential did not work: %w", err)
+				}
+				prof, err := cl.Profile(c.Ctx)
+				if err != nil {
+					return fmt.Errorf("signed in, but the API rejected the token: %w", err)
+				}
+				rt.MarkBrowserSignedIn()
+				rt.SignedIn(ident, prof, src.LastTTL())
+				c.Say("signed in to %s as %s", t.Name, ident.Display())
+				return nil
+			},
+		},
+		{
+			Name: "auth.refresh", Slow: true,
+			Help: "renew the browser sign-in of the tenant in use",
+			Run: func(rt *runtime.Runtime, c *runtime.Call) error {
+				t, ok := rt.Tenant()
+				if !ok {
+					return fmt.Errorf("no tenant selected")
+				}
+				if !t.UsesBrowser() {
+					return fmt.Errorf("%s signs in with a service account; its token renews itself", t.Name)
+				}
+				st := rt.Store()
+				f := TenantFlags(st, t, rt.IONUser())
+				src := BrowserSource(f, &http.Client{Timeout: f.HTTPTimeout}, st)
+				_, ttl, err := src.Token(c.Ctx)
+				if err != nil {
+					if errors.Is(err, saseauth.ErrInteractiveRequired) {
+						rt.TokenDied("sign-in expired", false)
+					}
+					return err
+				}
+				rt.TokenRenewed(src.Identity(), ttl)
+				rt.Clients().Drop(t.TSGID)
+				c.Say("token refreshed, %s left", ttl.Round(time.Second))
+				return nil
+			},
+		},
 		{
 			Name: "auth.signin", Slow: true,
 			Help: "sign in to the account with a browser and list its tenants: add=all or add=ID,ID puts those in the fleet",
@@ -117,6 +184,7 @@ func authCommands() []runtime.Command {
 				defer rt.SetWarming(0)
 				results := WarmEach(c.Ctx, st, tenants)
 				WarmInto(rt, results)
+				c.Result = results
 				return WarmReport(results, sayWriter{c})
 			},
 		},

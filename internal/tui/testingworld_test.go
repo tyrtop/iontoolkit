@@ -110,9 +110,9 @@ func TestAltEEditsTheFakeFleetAndReloadsIt(t *testing.T) {
 		t.Errorf("the file holds %q", string(b))
 	}
 
-	set, err := mm.fakeFleet()
+	_, set, err := app.FakeFleet(mm.store())
 	if err != nil {
-		t.Fatalf("fakeFleet() error = %v", err)
+		t.Fatalf("FakeFleet() error = %v", err)
 	}
 	if len(set.Tenants) != 1 || set.Tenants[0].Name != "Test Co" {
 		t.Errorf("the fleet is %+v, want the one just written", set.Tenants)
@@ -142,9 +142,9 @@ func TestTheFileBesideTheConfigWinsOverTheOneIontkShips(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	set, err := m.fakeFleet()
+	_, set, err := app.FakeFleet(m.store())
 	if err != nil {
-		t.Fatalf("fakeFleet() error = %v", err)
+		t.Fatalf("FakeFleet() error = %v", err)
 	}
 	if set.Tenants[0].Name != "Lab Co" {
 		t.Errorf("fleet = %q, want the file beside the config", set.Tenants[0].Name)
@@ -168,7 +168,7 @@ func TestTheTabRingIsNotMixedBetweenWorlds(t *testing.T) {
 	if len(m.dataTabs()) != 0 {
 		t.Errorf("%d data tabs came into the fake world: %+v", len(m.dataTabs()), m.dataTabs())
 	}
-	if got := m.tabCount(); got != 1 {
+	if got := tabCountOf(m); got != 1 {
 		t.Errorf("tabCount() = %d, want the element list alone", got)
 	}
 

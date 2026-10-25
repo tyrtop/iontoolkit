@@ -1,12 +1,20 @@
 package tui
 
 import (
+	_ "embed"
 	"fmt"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
+	"tyrtop.com/iontk/internal/tmpl"
 	"tyrtop.com/iontk/internal/view"
 )
+
+//go:embed menu.yaml
+var menuYAML []byte
+
+var builtinMenu = sync.OnceValues(func() ([]menuEntry, error) { return parseMenu(menuYAML, nil) })
 
 var menuActions = []struct {
 	name   string
@@ -35,6 +43,7 @@ type menuSpec struct {
 type menuEntryS struct {
 	Name  string `yaml:"name"`
 	Label string `yaml:"label"`
+	When  string `yaml:"when"`
 }
 
 func (e *menuEntryS) UnmarshalYAML(n *yaml.Node) error {
@@ -42,8 +51,8 @@ func (e *menuEntryS) UnmarshalYAML(n *yaml.Node) error {
 		return n.Decode(&e.Name)
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
-		if k := n.Content[i].Value; k != "name" && k != "label" {
-			return fmt.Errorf("field %s not found; an entry takes name, label", k)
+		if k := n.Content[i].Value; k != "name" && k != "label" && k != "when" {
+			return fmt.Errorf("field %s not found; an entry takes name, label, when", k)
 		}
 	}
 	type raw menuEntryS
@@ -72,17 +81,25 @@ func parseMenu(b []byte, runs func(string) bool) ([]menuEntry, error) {
 		if e.Name == "" {
 			return nil, fmt.Errorf("entry %d has no name", i+1)
 		}
-		if seen[e.Name] {
+		if seen[e.Name+"\x00"+e.When] {
 			return nil, fmt.Errorf("two entries are called %q", e.Name)
 		}
-		seen[e.Name] = true
+		seen[e.Name+"\x00"+e.When] = true
+		var when *tmpl.T
+		if e.When != "" {
+			t, err := tmpl.Compile(e.When)
+			if err != nil {
+				return nil, fmt.Errorf("entry %q when: %w", e.Name, err)
+			}
+			when = t
+		}
 		at := menuActionNamed(e.Name)
 		if at < 0 && runs != nil && runs(e.Name) {
 			label := e.Label
 			if label == "" {
 				label = e.Name
 			}
-			out = append(out, menuEntry{label: label, action: actCommand, command: e.Name})
+			out = append(out, menuEntry{label: label, action: actCommand, command: e.Name, when: when})
 			continue
 		}
 		if at < 0 {
@@ -94,7 +111,7 @@ func parseMenu(b []byte, runs func(string) bool) ([]menuEntry, error) {
 		if e.Label != "" {
 			label = e.Label
 		}
-		out = append(out, menuEntry{label: label, action: menuActions[at].action})
+		out = append(out, menuEntry{label: label, action: menuActions[at].action, when: when})
 	}
 	if !hasAction(out, actQuit) {
 		return nil, fmt.Errorf("no quit entry: add quit, so the menu says how to leave")
@@ -109,6 +126,15 @@ func menuActionNamed(name string) int {
 		}
 	}
 	return -1
+}
+
+func menuActionName(want menuAction) string {
+	for _, a := range menuActions {
+		if a.action == want {
+			return a.name
+		}
+	}
+	return ""
 }
 
 func menuActionNames() []string {
@@ -134,15 +160,17 @@ func menuSeed(entries []menuEntry) string {
 	b.WriteString("# it; give it a label of your own to change what it says.\n\n")
 	b.WriteString("kind: " + view.KindMenu + "\nentries:\n")
 	for _, e := range entries {
-		if e.action == actCommand {
-			b.WriteString(fmt.Sprintf("  - {name: %q, label: %q}\n", e.command, e.label))
-			continue
+		name := e.command
+		if e.action != actCommand {
+			name = menuActionName(e.action)
 		}
-		for _, a := range menuActions {
-			if a.action == e.action {
-				b.WriteString("  - " + a.name + "\n")
-				break
-			}
+		switch {
+		case e.when != nil:
+			b.WriteString(fmt.Sprintf("  - {name: %q, label: %q, when: %q}\n", name, e.label, e.when.Text()))
+		case e.action == actCommand:
+			b.WriteString(fmt.Sprintf("  - {name: %q, label: %q}\n", name, e.label))
+		default:
+			b.WriteString("  - " + name + "\n")
 		}
 	}
 	return b.String()

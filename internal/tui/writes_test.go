@@ -57,14 +57,14 @@ func editableDataTab(t *testing.T, verified bool) tuiModel {
 	_ = os.Remove(path)
 	t.Cleanup(func() { _ = os.Remove(path); _ = os.Remove(filepath.Join(m.store().Root, write.LogName)) })
 	if verified {
-		body := strings.Replace(write.BuiltinYAML(), "    method: PUT\n", "    method: PUT\n    verified: true\n", 1)
+		body := strings.Replace(write.BuiltinYAML(), "    title: Interface\n", "    title: Interface\n    verified: true\n", 1)
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	m.loadWrites(m.store())
-	if m.writesErr != "" {
-		t.Fatal(m.writesErr)
+	app.ReloadWrites(m.runtime())
+	if problem := m.writesErr(); problem != "" {
+		t.Fatal(problem)
 	}
 	m.phase = phasePicking
 	m.setMode(modeData)
@@ -95,7 +95,9 @@ func reviewDescription(t *testing.T, m tuiModel, to string) tuiModel {
 		t.Fatalf("enter did not open the form, step %d", m.wr.step)
 	}
 	m.wr.inputs[0].SetValue(to)
-	m, _ = typeKey(m, "enter")
+	m, cmd = typeKey(m, "enter")
+	next, _ = m.Update(runUntil[writePlannedMsg](t, cmd))
+	m = next.(tuiModel)
 	if m.wr.step != writeReview {
 		t.Fatalf("enter did not reach the review: %q", m.wr.err)
 	}
@@ -153,8 +155,9 @@ func TestASentEditIsLoggedAndReadBack(t *testing.T) {
 	}
 
 	tab, _ := m.activeData()
-	spec, _ := m.writes.Spec("interface")
-	recs, err := spec.Records(context.Background(), m.tenantClient(tab.TSG), tab.Vars())
+	writes, _ := m.runtime().Writes()
+	spec, _ := writes.Spec("interface")
+	recs, err := spec.Records(context.Background(), m.pool().Get(tab.TSG), tab.Vars())
 	if err != nil {
 		t.Fatal(err)
 	}

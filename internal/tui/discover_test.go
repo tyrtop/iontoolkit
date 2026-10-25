@@ -87,10 +87,17 @@ func TestDiscoveryLandsOnTheWorkingSetPicker(t *testing.T) {
 	m := discoverModel(t)
 	m.phase = phaseDiscover
 
-	mm, _ := m.Update(discoveredMsg{d: saseauth.Discovery{
+	d := saseauth.Discovery{
 		Identity: saseauth.Identity{Name: "Ben Hall", Email: "ben@example.test"},
 		Tenants:  discoveredTenants,
-	}})
+	}
+	if err := app.SaveDiscovery(m.store(), d); err != nil {
+		t.Fatal(err)
+	}
+	m.runtime().SetIdentity(d.Identity)
+	m.runtime().MarkBrowserSignedIn()
+	m.runtime().SetDiscovered(d.Tenants)
+	mm, _ := m.Update(discoveredMsg{})
 	got := mm.(tuiModel)
 
 	if got.phase != phaseTenantPick {
@@ -322,24 +329,6 @@ func TestMenuIsOneEntryPerThing(t *testing.T) {
 	}
 	if !seen[actSignIn] {
 		t.Error("no browser sign-in entry with nothing configured")
-	}
-}
-
-func TestServiceAndBrowserTenantsArePartitioned(t *testing.T) {
-	m := discoverModel(t)
-	seedKnown(t, m, config.KnownTenant{TSGID: "111", Name: "Acme Co"})
-	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
-		{Name: "Browser Co", TSGID: "111", Auth: config.AuthBrowser},
-		{Name: "Legacy Co", TSGID: "999", Auth: config.AuthServiceAccount, ClientID: "svc"},
-	}})
-
-	accounts := m.serviceTenants()
-	if len(accounts) != 1 || accounts[0].tsg != "999" {
-		t.Fatalf("serviceTenants() = %+v, want only the service account", accounts)
-	}
-	browsers := m.browserTenants()
-	if len(browsers) != 1 || browsers[0].tsg != "111" {
-		t.Fatalf("browserTenants() = %+v, want only the discovered tenant", browsers)
 	}
 }
 
@@ -757,11 +746,13 @@ func TestAWarmFailureIsRecordedWithoutKillingTheSignIn(t *testing.T) {
 	m.runtime().MarkBrowserSignedIn()
 	m.spinner = ui.NewSpinner("")
 
-	next, _ := m.onTenantsWarmed(tenantsWarmedMsg{results: []app.TenantWarm{
+	results := []app.TenantWarm{
 		{Tenant: m.cfg().Tenants[0]},
 		{Tenant: m.cfg().Tenants[1], Err: fmt.Errorf("%w: %w; %w",
 			saseauth.ErrInteractiveRequired, saseauth.ErrNoCredential, saseauth.ErrNoSession)},
-	}})
+	}
+	app.WarmInto(m.runtime(), results)
+	next, _ := m.onTenantsWarmed(tenantsWarmedMsg{results: results})
 	mm := next.(tuiModel)
 
 	if mm.tenantIssues()["222"] == "" {

@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/runtime"
 )
 
 func exported(t *testing.T, m tuiModel, cmd tea.Cmd) (string, string) {
@@ -207,7 +207,7 @@ func TestPastingCommandsIntoTheBatchBoxSplitsThem(t *testing.T) {
 	mm, _ := m.Update(tea.PasteMsg{Content: "dump device status\ndump interface status all\n\n uptime \n"})
 	m = mm.(tuiModel)
 
-	got := app.SplitCommands([]string{m.cmdInput.Value()})
+	got := runtime.SplitCommands(m.cmdInput.Value())
 	want := []string{"dump device status", "dump interface status all", "uptime"}
 	if len(got) != len(want) {
 		t.Fatalf("commands = %q, want %q", got, want)

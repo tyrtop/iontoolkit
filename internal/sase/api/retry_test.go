@@ -79,7 +79,7 @@ func TestAConnectionThatNeverCameUpIsTriedAgainEvenForAPost(t *testing.T) {
 	addr := srv.URL
 	srv.Close()
 	c := NewClient(http.DefaultClient, http.DefaultClient, "tok", false, 100, 100)
-	_, status, _, _ := c.attempt(t.Context(), "probe", http.MethodPost, addr+"/x", []byte(`{}`), true)
+	_, status, _, _ := c.attempt(t.Context(), "", "probe", http.MethodPost, addr+"/x", []byte(`{}`), true)
 	if status != noConnection || !again(http.MethodPost, status) {
 		t.Errorf("refused connect: status %d", status)
 	}
@@ -89,7 +89,7 @@ func TestABadCertificateIsNotTriedAgain(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	c := NewClient(http.DefaultClient, http.DefaultClient, "tok", false, 100, 100)
-	_, status, _, err := c.attempt(t.Context(), "probe", http.MethodGet, srv.URL+"/x", nil, false)
+	_, status, _, err := c.attempt(t.Context(), "", "probe", http.MethodGet, srv.URL+"/x", nil, false)
 	if err == nil || again(http.MethodGet, status) {
 		t.Errorf("unknown authority: status %d, err %v", status, err)
 	}
@@ -99,7 +99,7 @@ func TestPlainHTTPOnTheTLSPortIsNotTriedAgain(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	c := NewClient(http.DefaultClient, http.DefaultClient, "tok", false, 100, 100)
-	_, status, _, err := c.attempt(t.Context(), "probe", http.MethodGet, "https"+strings.TrimPrefix(srv.URL, "http")+"/x", nil, false)
+	_, status, _, err := c.attempt(t.Context(), "", "probe", http.MethodGet, "https"+strings.TrimPrefix(srv.URL, "http")+"/x", nil, false)
 	if err == nil || again(http.MethodGet, status) {
 		t.Errorf("scheme mismatch: status %d, err %v", status, err)
 	}
@@ -117,18 +117,8 @@ func TestWritesGetTheSDKsTimeoutAndReadsKeepTheLookupOne(t *testing.T) {
 
 func TestARequestThatNeverReachedTheNetworkIsNotTriedAgain(t *testing.T) {
 	c := NewClient(http.DefaultClient, nil, "tok\r", false, 100, 100)
-	_, status, _, err := c.attempt(t.Context(), "probe", http.MethodPost, "http://127.0.0.1:1/x", []byte(`{}`), true)
+	_, status, _, err := c.attempt(t.Context(), "", "probe", http.MethodPost, "http://127.0.0.1:1/x", []byte(`{}`), true)
 	if err == nil || again(http.MethodPost, status) {
 		t.Errorf("bad header: status %d, err %v", status, err)
-	}
-}
-
-func TestAPatientReadGetsTheSDKsTimeout(t *testing.T) {
-	c := NewClient(&http.Client{Timeout: 15 * time.Second}, nil, "tok", false, 100, 100)
-	if !patient(Patient(t.Context())) || patient(t.Context()) {
-		t.Error("Patient did not mark the context")
-	}
-	if got := c.httpFor(patient(Patient(t.Context()))).Timeout; got != WriteTimeout {
-		t.Errorf("patient read timeout %s", got)
 	}
 }

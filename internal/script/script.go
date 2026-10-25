@@ -167,7 +167,7 @@ func trimLua(s string) string {
 type Run struct {
 	Name   string
 	State  map[string]any
-	Export func(text, slug string) (string, error)
+	Export func(text, slug, ext string) (string, error)
 	Exec   func(Call) ([]string, any, error)
 	Budget time.Duration
 
@@ -268,8 +268,9 @@ func (s *Set) Run(ctx context.Context, r Run) ([]Effect, error) {
 
 	if r.Export != nil {
 		L.SetField(api, "export", L.NewFunction(func(L *lua.LState) int {
-			text, slug := "", optString(L, 2, r.Name)
+			text, slug, ext := "", optString(L, 2, r.Name), optString(L, 3, "txt")
 			if t, ok := L.Get(1).(*lua.LTable); ok {
+				ext = optString(L, 3, "json")
 				var b strings.Builder
 				enc := json.NewEncoder(&b)
 				enc.SetEscapeHTML(false)
@@ -282,7 +283,7 @@ func (s *Set) Run(ctx context.Context, r Run) ([]Effect, error) {
 			} else {
 				text = L.CheckString(1)
 			}
-			where, err := r.Export(text, slug)
+			where, err := r.Export(text, slug, ext)
 			if err != nil {
 				L.RaiseError("export: %s", err)
 				return 0
@@ -297,7 +298,12 @@ func (s *Set) Run(ctx context.Context, r Run) ([]Effect, error) {
 		L.SetField(api, "run", L.NewFunction(func(L *lua.LState) int {
 			call := Call{Line: L.CheckString(1)}
 			if t, ok := L.Get(2).(*lua.LTable); ok {
-				call = Call{Name: call.Line, Args: argsOf(t)}
+				args, err := argsOf(t)
+				if err != nil {
+					L.RaiseError("run %s: %s", call.Line, err)
+					return 0
+				}
+				call = Call{Name: call.Line, Args: args}
 			}
 			said, result, err := r.Exec(call)
 			if err != nil {
@@ -490,19 +496,21 @@ func optDuration(L *lua.LState, at int, def time.Duration) time.Duration {
 	return d
 }
 
-func argsOf(t *lua.LTable) map[string]string {
+func argsOf(t *lua.LTable) (map[string]string, error) {
 	out := map[string]string{}
+	var bad error
 	t.ForEach(func(k, v lua.LValue) {
 		if inner, ok := v.(*lua.LTable); ok {
 			b, err := json.Marshal(tableFromLua(inner))
-			if err == nil {
-				out[k.String()] = string(b)
+			if err != nil && bad == nil {
+				bad = fmt.Errorf("%s: %w", k.String(), err)
 			}
+			out[k.String()] = string(b)
 			return
 		}
 		out[k.String()] = v.String()
 	})
-	return out
+	return out, bad
 }
 
 func plain(v any) any {

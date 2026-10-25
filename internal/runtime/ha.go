@@ -2,11 +2,13 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"tyrtop.com/iontk/internal/column"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/sase/api"
 )
@@ -76,7 +78,6 @@ type haState struct {
 	queue    map[string][]string
 	inFlight map[string]bool
 	bulk     string
-	viewport int
 }
 
 type HA struct {
@@ -148,6 +149,7 @@ func (rt *Runtime) SetHA(words map[string]string) {
 			h.words[k] = v
 		}
 	})
+	rt.changed(Event{Area: AreaHA, Rows: true})
 }
 
 func (rt *Runtime) SetCachedHA(words map[string]string) {
@@ -156,6 +158,7 @@ func (rt *Runtime) SetCachedHA(words map[string]string) {
 			h.cached[k] = v
 		}
 	})
+	rt.changed(Event{Area: AreaHA, Rows: true})
 }
 
 func (rt *Runtime) SetHAProgress(total, done int, at time.Time) {
@@ -164,15 +167,9 @@ func (rt *Runtime) SetHAProgress(total, done int, at time.Time) {
 
 func (rt *Runtime) ResetHA() {
 	rt.mu.Lock()
-	rt.ha = haState{viewport: rt.ha.viewport}
+	rt.ha = haState{}
 	rt.mu.Unlock()
-	rt.changed(Event{Area: AreaHA})
-}
-
-func (rt *Runtime) SetViewport(rows int) {
-	rt.mu.Lock()
-	rt.ha.viewport = rows
-	rt.mu.Unlock()
+	rt.changed(Event{Area: AreaHA, Rows: true})
 }
 
 func (rt *Runtime) StartHA(tsg string, w HAWork) {
@@ -184,12 +181,6 @@ func (rt *Runtime) StartHA(tsg string, w HAWork) {
 
 func (rt *Runtime) MarkHAOut(tsg string) {
 	rt.editHA(func(h *haState) { h.inFlight[tsg] = true })
-}
-
-func (rt *Runtime) HAInFlight(tsg string) bool {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	return rt.ha.inFlight[tsg]
 }
 
 func (rt *Runtime) Queued(tsg string) []string {
@@ -232,6 +223,13 @@ func (rt *Runtime) ApplyHA(res HAResult) HANext {
 			delete(h.queue, res.TSG)
 		}
 	})
+	rt.changed(Event{Area: AreaHA, Rows: true, Keys: rt.haKeys(res)})
+	if h := rt.HA(); len(res.Rest) == 0 && h.Failed > 0 {
+		rt.note(fmt.Sprintf("HA state unread for %d cluster(s): %s", h.Failed, h.Err))
+	}
+	if res.Bulk != "" && res.Bulk != "used" {
+		rt.note("HA one cluster at a time (" + rt.SweepETA(res.TSG, rt.HA().Total) + "): the tenant-wide query was refused — " + res.Bulk)
+	}
 	switch {
 	case len(res.RestElements) > 0:
 		next.Tick = true
@@ -243,6 +241,29 @@ func (rt *Runtime) ApplyHA(res HAResult) HANext {
 		next.Save = res.States
 	}
 	return next
+}
+
+func (rt *Runtime) haKeys(res HAResult) []string {
+	keys := make([]string, 0, len(res.States))
+	for k := range res.States {
+		keys = append(keys, k)
+	}
+	if len(res.Answered) == 0 && len(res.Failed) == 0 {
+		return keys
+	}
+	clusters := make(map[string]bool, len(res.Answered)+len(res.Failed))
+	for _, cid := range res.Answered {
+		clusters[cid] = true
+	}
+	for cid := range res.Failed {
+		clusters[cid] = true
+	}
+	for _, el := range rt.Elements() {
+		if el.TSG == res.TSG && clusters[el.ClusterID()] {
+			keys = append(keys, el.Key())
+		}
+	}
+	return keys
 }
 
 func (rt *Runtime) SaveHA(tsg string, states map[string]string) {
@@ -290,7 +311,11 @@ func (rt *Runtime) FetchHABulk(ctx context.Context, tsg string, w HAWork, ids []
 	if len(ask) > api.ClusterQueryLimit {
 		ask, rest = ids[:api.ClusterQueryLimit], ids[api.ClusterQueryLimit:]
 	}
-	sts, err := c.SpokeClusterStatuses(ctx, ask)
+	path, err := rt.ListPath(column.HAQuery, nil)
+	var sts []api.ClusterMemberStatus
+	if err == nil {
+		sts, err = c.SpokeClusterStatuses(ctx, path, ask)
+	}
 	if err != nil {
 		logging.L().Warn("ha falling back to the per-cluster sweep", "tsg", tsg,
 			"asked", len(ask), "clusters", len(w.Pairs), "err", err)
@@ -318,6 +343,17 @@ func (rt *Runtime) FetchHABulk(ctx context.Context, tsg string, w HAWork, ids []
 	return HAResult{TSG: tsg, States: states, Answered: answered, Bulk: "used", RestElements: rest}
 }
 
+func (rt *Runtime) haWork(tsg string, ids []string) HAWork {
+	byID := rt.elementsByID(tsg, ids)
+	els := make([]api.Element, 0, len(ids))
+	for _, id := range ids {
+		if el, ok := byID[id]; ok {
+			els = append(els, el.Element)
+		}
+	}
+	return HAClusters(els)
+}
+
 func (rt *Runtime) FetchHAPairs(ctx context.Context, tsg string, pairs [][2]string) HAResult {
 	c := rt.Clients().Get(tsg)
 	var rest [][2]string
@@ -339,7 +375,11 @@ func (rt *Runtime) FetchHAPairs(ctx context.Context, tsg string, pairs [][2]stri
 		go func() {
 			defer wg.Done()
 			for p := range work {
-				st, err := c.SpokeClusterStatus(ctx, p[0], p[1])
+				path, err := rt.ListPath(column.HACluster, map[string]string{"site_id": p[0], "cluster_id": p[1]})
+				var st api.SpokeClusterStatus
+				if err == nil {
+					st, err = c.SpokeClusterStatus(ctx, path, p[1])
+				}
 				if err != nil {
 					mu.Lock()
 					res.Failed[p[1]] = rt.explain(err)
@@ -427,24 +467,6 @@ func (rt *Runtime) NearestElements(tsg string, ids []string) []string {
 	return out
 }
 
-func (rt *Runtime) HAWanted() map[string][]string {
-	rows, matched, cursor := rt.Elements(), rt.MatchIndices(), rt.Cursor()
-	rt.mu.RLock()
-	h := max(4, rt.ha.viewport)
-	words, clusters := rt.ha.words, rt.ha.clusters
-	out := map[string][]string{}
-	from, to := max(0, cursor-h), min(len(matched), cursor+h)
-	for _, i := range matched[from:to] {
-		el := rows[i]
-		if el.ClusterID() == "" || words[el.Key()] != "" || clusters[el.TSG+"/"+el.ClusterID()] != "" {
-			continue
-		}
-		out[el.TSG] = append(out[el.TSG], el.ID)
-	}
-	rt.mu.RUnlock()
-	return out
-}
-
 func haCommands() []Command {
 	return []Command{{
 		Name: "ha.sweep", Slow: true, Help: "read every clustered element's HA state, the tenant-wide query first",
@@ -469,23 +491,7 @@ func haCommands() []Command {
 				if w.Clusters() == 0 {
 					continue
 				}
-				rt.StartHA(tsg, w)
-				res := rt.FetchHABulk(c.Ctx, tsg, w, w.Elements)
-				for {
-					next := rt.ApplyHA(res)
-					if next.Save != nil {
-						rt.SaveHA(tsg, next.Save)
-					}
-					switch {
-					case next.Tick:
-						res = rt.FetchHABulk(c.Ctx, tsg, w, rt.Queued(tsg))
-						continue
-					case len(next.Pairs) > 0:
-						res = rt.FetchHAPairs(c.Ctx, tsg, next.Pairs)
-						continue
-					}
-					break
-				}
+				rt.SweepHA(c.Ctx, tsg, w, 0)
 			}
 			h := rt.HA()
 			c.Say("%d/%d clusters read, %d failed", h.Done, h.Total, h.Failed)
@@ -513,4 +519,5 @@ func (rt *Runtime) ResetHALive() {
 		h.queue, h.inFlight = map[string][]string{}, map[string]bool{}
 		h.failed, h.err, h.total, h.done, h.bulk = 0, "", 0, 0, ""
 	})
+	rt.changed(Event{Area: AreaHA, Rows: true})
 }

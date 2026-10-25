@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
-	"tyrtop.com/iontk/internal/tmpl"
+	"tyrtop.com/iontk/internal/endpoint"
 )
 
 //go:embed builtin.yaml
@@ -22,18 +22,20 @@ type Set struct {
 }
 
 type Spec struct {
-	Name   string  `yaml:"name"`
-	Title  string  `yaml:"title,omitempty"`
-	List   string  `yaml:"list"`
-	Item   string  `yaml:"item"`
-	Method string  `yaml:"method,omitempty"`
-	Label  string  `yaml:"label,omitempty"`
-	Match  string  `yaml:"match,omitempty"`
-	Fields []Field `yaml:"fields"`
+	Name      string              `yaml:"name"`
+	Title     string              `yaml:"title,omitempty"`
+	Endpoints []endpoint.Endpoint `yaml:"endpoints"`
+	List      string              `yaml:"list"`
+	Item      string              `yaml:"item"`
+	Label     string              `yaml:"label,omitempty"`
+	Match     string              `yaml:"match,omitempty"`
+	Fields    []Field             `yaml:"fields"`
 
 	Verified bool `yaml:"verified,omitempty"`
 
-	Source string `yaml:"-"`
+	Source string            `yaml:"-"`
+	list   endpoint.Endpoint `yaml:"-"`
+	item   endpoint.Endpoint `yaml:"-"`
 }
 
 type Field struct {
@@ -49,6 +51,14 @@ const (
 	TypeList   = "list"
 )
 
+func BuiltinYAML() string {
+	b, err := builtinFS.ReadFile("builtin.yaml")
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 func Builtin() (*Set, error) {
 	b, err := builtinFS.ReadFile("builtin.yaml")
 	if err != nil {
@@ -59,14 +69,6 @@ func Builtin() (*Set, error) {
 		return nil, fmt.Errorf("built-in writes: %w", err)
 	}
 	return s, nil
-}
-
-func BuiltinYAML() string {
-	b, err := builtinFS.ReadFile("builtin.yaml")
-	if err != nil {
-		return ""
-	}
-	return string(b)
 }
 
 func Load(path string) (*Set, error) {
@@ -155,19 +157,20 @@ func (s *Set) normalize() error {
 }
 
 func (w *Spec) normalize() error {
-	if err := tmpl.CheckPath(w.List); err != nil {
-		return fmt.Errorf("list %w", err)
+	calls, err := endpoint.Build(w.Name, "", nil, w.Endpoints)
+	if err != nil {
+		return err
 	}
-	if err := tmpl.CheckPath(w.Item); err != nil {
-		return fmt.Errorf("item %w", err)
+	if w.list, err = calls.SDWAN(w.List); err != nil {
+		return fmt.Errorf("list: %w", err)
 	}
-	w.Method = strings.ToUpper(w.Method)
-	switch w.Method {
-	case "":
-		w.Method = http.MethodPut
+	if w.item, err = calls.SDWAN(w.Item); err != nil {
+		return fmt.Errorf("item: %w", err)
+	}
+	switch w.item.Method {
 	case http.MethodPut, http.MethodPatch:
 	default:
-		return fmt.Errorf("method %s: an edit sends the record back with PUT or PATCH", w.Method)
+		return fmt.Errorf("item method %s: an edit sends the record back with PUT or PATCH", w.item.Method)
 	}
 	if w.Title == "" {
 		w.Title = w.Name

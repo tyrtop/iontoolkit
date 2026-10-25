@@ -23,7 +23,6 @@ func (m tuiModel) startScript(name string) (tea.Model, tea.Cmd) {
 	}
 	m.scriptOn = name
 	m.status = name + " running"
-	m.bindPortal(m.tenant().TSGID)
 
 	rt, ctx, screen := m.runtime(), m.ctx, m.screen()
 	logging.L().Info("lua action started", "action", name)
@@ -58,11 +57,7 @@ func (m tuiModel) onScriptDone(msg scriptDoneMsg) (tea.Model, tea.Cmd) {
 			next, cmd := place(m)
 			m, cmds = next, append(cmds, cmd)
 		case script.EffectSet:
-			next, cmd, err := m.setField(e.Field, e.Value)
-			if err != nil {
-				m.status = fmt.Sprintf("%s: %s", msg.name, err)
-				continue
-			}
+			next, cmd := m.syncField(e.Field)
 			m, cmds = next, append(cmds, cmd)
 		}
 	}

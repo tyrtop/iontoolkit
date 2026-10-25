@@ -3,21 +3,15 @@ package tui
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
-	"tyrtop.com/iontk/internal/runtime"
-	"tyrtop.com/iontk/internal/search"
 
 	tea "charm.land/bubbletea/v2"
-
 	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/ionterm"
-	"tyrtop.com/iontk/internal/logging"
-	"tyrtop.com/iontk/internal/sase"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -34,56 +28,33 @@ type clientPool = runtime.Clients
 
 func (m *tuiModel) pool() *runtime.Clients { return m.runtime().Clients() }
 
-type tenantElementsMsg struct {
-	tsg      string
-	tenant   string
-	elements []api.Element
-	sites    map[string]string
-	siteErr  error
-	err      error
-}
-
-func fetchTenant(ctx context.Context, rt *runtime.Runtime, t config.Tenant) tea.Cmd {
-	return func() tea.Msg {
-		l := rt.FetchTenant(ctx, t)
-		if l.Err != nil {
-			logging.L().Warn("element list failed", "tsg", t.TSGID, "tenant", t.Name, "err", l.Err)
-		} else {
-			logging.L().Info("elements loaded", "tsg", t.TSGID, "tenant", t.Name,
-				"elements", len(l.Elements), "sites", len(l.Sites), "site_err", l.SiteErr)
-		}
-		return tenantElementsMsg{tsg: l.TSG, tenant: l.Tenant, elements: l.Elements,
-			sites: l.Sites, siteErr: l.SiteErr, err: l.Err}
-	}
-}
-
-func (m *tuiModel) mergeTenantElements(tsg, tenant string, els []api.Element) {
-	m.runtime().MergeTenant(tsg, tenant, els)
-	m.setElements(m.rows())
-}
-
 func (m *tuiModel) loadFromCache() {
-	if n, _, _ := m.runtime().LoadCache(); n == 0 {
-		return
+	if n, _, _ := m.runtime().LoadCache(); n > 0 {
+		m.listChanged()
 	}
-	for _, t := range m.aggregateTenants() {
-		c, err := m.store().Cache(t.TSGID)
-		if err != nil || !c.Usable() {
-			continue
-		}
-		m.loadCachedCells(t.TSGID, c.Cells)
-		cached := make(map[string]string, len(c.HA))
-		for eid, w := range c.HA {
-			cached[t.TSGID+"/"+eid] = w
-		}
-		m.runtime().SetCachedHA(cached)
+}
+
+type fleetDoneMsg struct{ err error }
+
+func (m tuiModel) loadFleet() (tea.Model, tea.Cmd) {
+	if m.runtime().Fleet().Pending > 0 {
+		return m, m.spinner.Tick
 	}
-	m.setElements(m.rows())
+	m.loadFromCache()
+	return m, tea.Batch(m.spinner.Tick, fleetLoad(m.ctx, m.runtime()))
+}
+
+func fleetLoad(ctx context.Context, rt *runtime.Runtime) tea.Cmd {
+	return func() tea.Msg {
+		_, err := rt.LoadTenants(&runtime.Call{Ctx: ctx}, false, true)
+		return fleetDoneMsg{err: err}
+	}
 }
 
 func (m tuiModel) refreshActive() (tea.Model, tea.Cmd) {
 	m.status = ""
-	tenants, skipped, err := m.runtime().BeginRefresh()
+	rt, ctx := m.runtime(), m.ctx
+	tenants, skipped, err := rt.BeginRefresh()
 	if err != nil {
 		m.status = err.Error()
 		return m, nil
@@ -91,11 +62,29 @@ func (m tuiModel) refreshActive() (tea.Model, tea.Cmd) {
 	if len(skipped) > 0 {
 		m.status = "skipped " + strings.Join(skipped, ", ") + ": no usable credentials"
 	}
-	cmds := []tea.Cmd{m.spinner.Tick}
-	for _, t := range tenants {
-		cmds = append(cmds, fetchTenant(m.ctx, m.runtime(), t))
+	run := func() tea.Msg {
+		_, err := rt.RefreshTenants(&runtime.Call{Ctx: ctx}, tenants, true)
+		return fleetDoneMsg{err: err}
 	}
-	return m, tea.Batch(cmds...)
+	return m, tea.Batch(m.spinner.Tick, run)
+}
+
+func (m tuiModel) onFleetDone(msg fleetDoneMsg) (tea.Model, tea.Cmd) {
+	if dead := m.runtime().TokenDead(); dead != "" && m.authMode() == authBrowser {
+		if m.phase == phaseMenu {
+			m.status = "sign-in required — pick the browser sign-in below"
+			return m, nil
+		}
+		m.signInResume = true
+		return m.startSignInAuto()
+	}
+	if msg.err != nil && m.status == "" {
+		m.status = msg.err.Error()
+	}
+	if len(m.rows()) == 0 && m.phase == phaseLoading {
+		m.phase = phaseMenu
+	}
+	return m, nil
 }
 
 func (m tuiModel) credsFor(tsg string) ionterm.Credentials {
@@ -103,68 +92,19 @@ func (m tuiModel) credsFor(tsg string) ionterm.Credentials {
 	return ionterm.Credentials{User: user, Pass: pass}
 }
 
-func (m tuiModel) targetsFor(rows []elementRow) []sase.Target {
-	out := make([]sase.Target, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, m.runtime().TargetFor(r))
-	}
-	return out
-}
-
-func (m tuiModel) tenantClient(tsg string) *api.Client {
-	return m.pool().Get(tsg)
-}
-
-func httpClientFor(f app.Flags) *http.Client {
-	return &http.Client{Timeout: f.HTTPTimeout}
-}
-
-func (m *tuiModel) tenantErr(tsg, tenant string, err error) {
-	reason := shortTenantErr(err)
-	m.runtime().SetIssue(tsg, reason)
-
-	msg := tenant + ": " + reason
-	if m.status == "" {
-		m.status = msg
-	} else if !strings.Contains(m.status, tenant) {
-		m.status += "; " + msg
-	}
-	if app.IsAuthFailure(err.Error()) {
-		m.runtime().TokenDied("sign-in expired", false)
-	}
-}
-
 func shortTenantErr(err error) string {
 	return ui.Truncate(app.ShortAuthError(err), 90)
-}
-
-func (m tuiModel) tenantOf(tsg string) (config.Tenant, bool) {
-	for _, t := range m.cfg().Tenants {
-		if t.TSGID == tsg {
-			return t, true
-		}
-	}
-	return config.Tenant{}, false
 }
 
 func (m tuiModel) ionUserFor(t config.Tenant) string {
 	return m.runAsFor(t.TSGID)
 }
 
-func (m tuiModel) elementByKey(key string) (elementRow, bool) {
-	for _, r := range m.rows() {
-		if r.Key() == key {
-			return r, true
-		}
-	}
-	return elementRow{}, false
-}
+func (m tuiModel) elementByKey(key string) (elementRow, bool) { return m.runtime().RowByKey(key) }
 
 func (m tuiModel) tsgForElement(eid string) string {
-	for _, r := range m.rows() {
-		if r.ID == eid {
-			return r.TSG
-		}
+	if r, ok := m.runtime().Row(eid); ok {
+		return r.TSG
 	}
 	return m.tenant().TSGID
 }
@@ -178,38 +118,13 @@ func (m tuiModel) activeSessionCreds() ionterm.Credentials {
 }
 
 func (m tuiModel) scopeLabel() string {
-	if m.scope != "" {
-		return m.scope
+	if _, label := m.runtime().Scope(); label != "" {
+		return label
 	}
 	if m.hasTenant() {
 		return m.tenant().Name
 	}
 	return "no tenant"
-}
-
-func (m *tuiModel) computeScope() {
-	seen := map[string]string{}
-	for _, r := range m.rows() {
-		seen[r.TSG] = r.Tenant
-	}
-	m.tenantCount = len(seen)
-	switch len(seen) {
-	case 0:
-		m.scope = ""
-	case 1:
-		for _, name := range seen {
-			m.scope = name
-		}
-	default:
-		m.scope = fmt.Sprintf("%d tenants", len(seen))
-	}
-}
-
-func (m tuiModel) aggregateTenants() []config.Tenant {
-	if m.rt == nil {
-		return nil
-	}
-	return m.rt.FleetTenants()
 }
 
 func (m tuiModel) refreshNote() string {
@@ -279,18 +194,11 @@ func ago(d time.Duration) string {
 
 func (m tuiModel) runAsFor(tsg string) string { return m.runtime().RunAs(tsg) }
 
-func (m *tuiModel) setRunAs(tsg, user string) { m.runtime().SetRunAs(tsg, user) }
-
 func (m tuiModel) usersPanelTenant() config.Tenant {
-	if t, ok := m.tenantOf(m.usersTSG); ok {
-		return t
+	if m.usersTSG == "" {
+		return m.tenant()
 	}
-	for _, r := range m.rows() {
-		if r.TSG == m.usersTSG {
-			return config.Tenant{Name: r.Tenant, TSGID: r.TSG, Auth: config.AuthBrowser}
-		}
-	}
-	return m.tenant()
+	return m.runtime().TenantFor(m.usersTSG)
 }
 
 func (m tuiModel) usersPanelTenants() []config.Tenant {
@@ -303,12 +211,8 @@ func (m tuiModel) usersPanelTenants() []config.Tenant {
 		seen[t.TSGID] = true
 		out = append(out, t)
 	}
-	for _, r := range m.rows() {
-		if t, ok := m.tenantOf(r.TSG); ok {
-			add(t)
-			continue
-		}
-		add(config.Tenant{Name: r.Tenant, TSGID: r.TSG, Auth: config.AuthBrowser})
+	for _, t := range m.runtime().RowTenants() {
+		add(t)
 	}
 	if m.hasTenant() {
 		add(m.tenant())
@@ -345,67 +249,20 @@ func (m tuiModel) countLabel() string {
 	return fmt.Sprintf("%s / %d elements", sel, len(m.rows()))
 }
 
-type tenantConnectedMsg struct {
-	tsg    string
-	client *api.Client
-	fresh  bool
-	err    error
+func targetsOf(rows []runtime.Element) []sessionTarget {
+	out := make([]sessionTarget, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, sessionTarget{eid: r.ID, name: r.Label(), tsg: r.TSG})
+	}
+	return out
 }
 
-func connectTenant(ctx context.Context, st *config.Store, f app.Flags, tsg string) tea.Cmd {
-	return func() tea.Msg {
-		c, err := app.NewClient(ctx, st, f, io.Discard)
-		return tenantConnectedMsg{tsg: tsg, client: c, fresh: true, err: err}
+func rowsOf(targets []sessionTarget) []runtime.Element {
+	rows := make([]runtime.Element, 0, len(targets))
+	for _, t := range targets {
+		rows = append(rows, runtime.Element{Element: api.Element{ID: t.eid, Name: t.name}, TSG: t.tsg})
 	}
-}
-
-func recheckToken(ctx context.Context, c *api.Client, tsg string) tea.Cmd {
-	return func() tea.Msg {
-		if err := c.EnsureToken(ctx, preflightTTL); err != nil {
-			return tenantConnectedMsg{tsg: tsg, err: err}
-		}
-		return tenantConnectedMsg{tsg: tsg, client: c}
-	}
-}
-
-const preflightTTL = 90 * time.Second
-
-func (m tuiModel) ensureClients(tsgs []string) []tea.Cmd {
-	seen := map[string]bool{}
-	var cmds []tea.Cmd
-	for _, tsg := range tsgs {
-		if tsg == "" || seen[tsg] {
-			continue
-		}
-		if c := m.pool().Get(tsg); c != nil {
-			if c.TokenGood(preflightTTL) {
-				continue
-			}
-			seen[tsg] = true
-			cmds = append(cmds, recheckToken(m.ctx, c, tsg))
-			continue
-		}
-		if m.tenantIssues()[tsg] != "" {
-			continue
-		}
-		seen[tsg] = true
-		t, ok := m.tenantOf(tsg)
-		if !ok {
-			t = config.Tenant{Name: tsg, TSGID: tsg, Auth: config.AuthBrowser}
-			for _, r := range m.rows() {
-				if r.TSG == tsg {
-					t.Name = r.Tenant
-					break
-				}
-			}
-		}
-		f := app.TenantFlags(m.store(), t, m.runAsFor(tsg))
-		if err := f.ValidateCreds(); err != nil {
-			continue
-		}
-		cmds = append(cmds, connectTenant(m.ctx, m.store(), f, tsg))
-	}
-	return cmds
+	return rows
 }
 
 func tsgsOf(targets []sessionTarget) []string {
@@ -432,17 +289,7 @@ func tsgsOfRows(rows []elementRow) []string {
 	return out
 }
 
-func (m tuiModel) tenantName(tsg string) string {
-	if t, ok := m.tenantOf(tsg); ok {
-		return t.Name
-	}
-	for _, r := range m.rows() {
-		if r.TSG == tsg {
-			return r.Tenant
-		}
-	}
-	return tsg
-}
+func (m tuiModel) tenantName(tsg string) string { return m.runtime().TenantFor(tsg).Name }
 
 func (m tuiModel) toggleCurrent() tuiModel {
 	el, ok := m.current()
@@ -466,13 +313,6 @@ func (m tuiModel) rows() []elementRow {
 		return nil
 	}
 	return m.rt.Elements()
-}
-
-func (m tuiModel) siteMap() search.SiteMap {
-	if m.rt == nil {
-		return nil
-	}
-	return m.rt.Sites()
 }
 
 func (m *tuiModel) runtime() *runtime.Runtime {
@@ -509,13 +349,6 @@ func (m tuiModel) showingSelected() bool { return m.rt != nil && m.rt.ShowingSel
 
 func (m tuiModel) canUndoClear() bool { return m.rt != nil && m.rt.CanUndoClear() }
 
-func (m tuiModel) selection() map[string]bool {
-	if m.rt == nil {
-		return map[string]bool{}
-	}
-	return m.rt.Selection()
-}
-
 func (m tuiModel) matched() []int {
 	if m.rt == nil {
 		return nil
@@ -546,14 +379,6 @@ func (m tuiModel) ionUser() string {
 	return m.rt.IONUser()
 }
 
-func (m *tuiModel) useResolved(t config.Tenant, ok bool) {
-	if ok {
-		m.runtime().UseTenant(t)
-		return
-	}
-	m.runtime().ClearTenant()
-}
-
 func (m tuiModel) authMode() authMode {
 	if m.rt != nil && m.rt.AuthMode() == runtime.AuthTenant {
 		return authTenant
@@ -579,14 +404,6 @@ func (m tuiModel) cacheState() cacheState {
 		return cacheNone
 	}
 	return cacheStates[m.rt.Fleet().State]
-}
-
-func (m *tuiModel) setCacheState(c cacheState) {
-	for name, s := range cacheStates {
-		if s == c {
-			m.runtime().SetFleetState(name)
-		}
-	}
 }
 
 func (m tuiModel) cacheCount() int {

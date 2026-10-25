@@ -64,9 +64,8 @@ func fixtureTUIWith(t *testing.T, yaml string) (tuiModel, *fixture.Set) {
 		t.Fatal("the seeded fixture tenant did not resolve, so the list would never load")
 	}
 
-	msg := fetchTenant(t.Context(), m.runtime(), m.tenant())()
-	next, _ := m.Update(msg)
-	return next.(tuiModel), set
+	m.runtime().ApplyLoad(m.runtime().FetchTenant(t.Context(), m.tenant()))
+	return settle(t, m), set
 }
 
 func TestFixtureModeFillsTheElementList(t *testing.T) {
@@ -145,4 +144,32 @@ func waitForTUI(t *testing.T, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for the fixture device")
+}
+
+func afterStart(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
+	t.Helper()
+	if cmd == nil {
+		return m
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("starting a run returned no batch of commands")
+	}
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		done := make(chan tea.Msg, 1)
+		go func() { done <- c() }()
+		select {
+		case msg := <-done:
+			if started, ok := msg.(batchStartedMsg); ok {
+				next, _ := m.Update(started)
+				return next.(tuiModel)
+			}
+		case <-time.After(5 * time.Second):
+		}
+	}
+	t.Fatal("the run never said whether it started")
+	return m
 }

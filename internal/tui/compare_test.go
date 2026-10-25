@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,8 +36,11 @@ tenants:
 const compareViewYAML = `
 views:
   - name: Overview
+    endpoints:
+      - name: el
+        path: /sdwan/v3.2/api/elements/{element_id}
     fetch:
-      el: /sdwan/v3.2/api/elements/{{ .element_id }}
+      el: el
     sections:
       - title: Device
         rows:
@@ -44,7 +48,7 @@ views:
             value: "{{ .el.name }}"
     compare:
       fetch:
-        el: /sdwan/v3.2/api/elements/{{ .element_id }}
+        el: el
       commands:
         dev: dump device status
       rows:
@@ -74,11 +78,7 @@ func TestCompareAsksTheDeviceAndMarksEachRow(t *testing.T) {
 		t.Errorf("the page does not offer the comparison:\n%s", got)
 	}
 
-	next, cmd = m.onDataKey("c")
-	m = next.(tuiModel)
-	if !m.dataTabs()[0].Check.Loading {
-		t.Fatal("c did not start a comparison")
-	}
+	_, cmd = m.onDataKey("c")
 	m = runCompare(t, m, cmd)
 
 	if m.dataTabs()[0].Check.Err != "" {
@@ -117,15 +117,15 @@ func TestCompareWithoutADeviceLoginAsksForOne(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	next, cmd = m.onDataKey("c")
-	m = next.(tuiModel)
-	if cmd != nil {
+	_, cmd = m.onDataKey("c")
+	m = runCompare(t, m, cmd)
+	if m.dataTabs()[0].Check.Ran() {
 		t.Error("c dialled the element with no login saved")
 	}
 	if m.dataTabs()[0].Check.Loading {
 		t.Error("the tab is waiting for a comparison that was never started")
 	}
-	if !strings.Contains(m.status, "no ION login") {
+	if !strings.Contains(m.status, "no ION login") || !strings.Contains(m.status, "alt+u") {
 		t.Errorf("status = %q, want it to name what is missing", m.status)
 	}
 }
@@ -172,7 +172,9 @@ func TestAFailedComparisonLeavesThePageReadable(t *testing.T) {
 	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	next, _ = m.Update(compareDoneMsg{eid: el.ID, check: runtime.Check{At: time.Now(), Err: "dial: expected handshake response status 101 but got 404"}})
+	failed := runtime.Check{At: time.Now(), Err: "dial: expected handshake response status 101 but got 404"}
+	m.runtime().SetCheck(el.ID, failed)
+	next, _ = m.Update(compareDoneMsg{check: failed, err: errors.New(failed.Err)})
 	m = next.(tuiModel)
 
 	page := plain(m.dataPage(m.dataTabs()[0]).String())

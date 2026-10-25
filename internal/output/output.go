@@ -68,15 +68,6 @@ func NormalizeFormat(s string) (string, error) {
 	return "", fmt.Errorf("unknown output format %q: want one of %s", s, strings.Join(outputFormats, ", "))
 }
 
-func NextFormat(f string) string {
-	for i, name := range outputFormats {
-		if name == f {
-			return outputFormats[(i+1)%len(outputFormats)]
-		}
-	}
-	return FormatJSON
-}
-
 func Tabular(f string) bool { return f == FormatTable || f == FormatCSV }
 
 type Sink interface {

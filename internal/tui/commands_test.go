@@ -78,39 +78,6 @@ func TestEnterOnAnEmptyLineCountsNothing(t *testing.T) {
 	}
 }
 
-func TestABatchRunCountsOncePerModel(t *testing.T) {
-	m := historyModel(t)
-	rows := []elementRow{
-		{Element: api.Element{ID: "1", Model: "ion 1200"}},
-		{Element: api.Element{ID: "3", Model: "ion 1200"}},
-		{Element: api.Element{ID: "2", Model: "ion 3200"}},
-	}
-	cmd := m.recordRun([]string{"uptime", "dump device status"}, rows)
-	if cmd == nil {
-		t.Fatal("recordRun queued no save")
-	}
-
-	if len(m.runtime().History()) != 4 {
-		t.Fatalf("history = %+v, want two commands on each of two models", m.runtime().History())
-	}
-	for _, model := range []string{"ion 1200", "ion 3200"} {
-		for _, want := range []string{"uptime", "dump device status"} {
-			found := false
-			for _, u := range m.runtime().History() {
-				if u.Command == want && u.Model == model {
-					found = true
-					if u.Uses != 1 {
-						t.Errorf("%q on %s has %d uses, want 1 for the whole run", want, model, u.Uses)
-					}
-				}
-			}
-			if !found {
-				t.Errorf("%q on %s was not counted", want, model)
-			}
-		}
-	}
-}
-
 func TestFrequentCommandsAreRankedForThisModel(t *testing.T) {
 	m := historyModel(t)
 	m.phase = phaseSession
@@ -240,6 +207,9 @@ func TestOneLetterStillPicksAVerb(t *testing.T) {
 
 func runSave(t *testing.T, cmd tea.Cmd) {
 	t.Helper()
+	if cmd == nil {
+		return
+	}
 	msg := cmd()
 	if batch, ok := msg.(tea.BatchMsg); ok {
 		for _, c := range batch {

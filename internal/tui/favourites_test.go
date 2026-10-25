@@ -80,7 +80,7 @@ func TestAltFSavesThePromptLine(t *testing.T) {
 	if !m.favPick {
 		t.Fatal("alt+f did not open the picker")
 	}
-	if got := plain(m.viewSession()); !strings.Contains(got, "favourites") {
+	if got := plain(sessionText(m)); !strings.Contains(got, "favourites") {
 		t.Errorf("the picker is not on screen:\n%s", got)
 	}
 
@@ -118,7 +118,7 @@ func TestThePickerListsAndClearsSlots(t *testing.T) {
 	}
 
 	m, _ = pressSessionKey(t, m, altKey('f'))
-	got := plain(m.viewSession())
+	got := plain(sessionText(m))
 	for _, want := range []string{"favourites", "dump device status", "ion 3200", "empty"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the picker is missing %q:\n%s", want, got)

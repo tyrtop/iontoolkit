@@ -89,17 +89,13 @@ func CheckEnvelope(b []byte, want string) error {
 	return nil
 }
 
-func (f File) Is(kind string) bool { return f.Kind == kind }
-
-func Of(files []File, kind string) []File {
-	var out []File
-	for _, f := range files {
-		if f.Is(kind) {
-			out = append(out, f)
-		}
-	}
-	return out
+func KindOf(b []byte) (string, error) {
+	var env envelope
+	err := yaml.Unmarshal(b, &env)
+	return env.Kind, err
 }
+
+func (f File) Is(kind string) bool { return f.Kind == kind }
 
 func known(kind string) bool {
 	for _, k := range Kinds() {

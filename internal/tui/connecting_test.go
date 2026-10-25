@@ -13,34 +13,6 @@ import (
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
-func TestRowStatusMarksTabsAndDials(t *testing.T) {
-	m := pickModel(t)
-	setTestClient(&m, liveClient())
-	m.mergeTenantElements("1", "t", []api.Element{
-		{ID: "open", Name: "has-a-tab"},
-		{ID: "dialing", Name: "connecting"},
-		{ID: "idle", Name: "nothing-doing"},
-	})
-	if _, err := m.sessions().Open(t.Context(), stubDialer{}, "open", "has-a-tab", 200, 50, ionterm.Credentials{}); err != nil {
-		t.Fatal(err)
-	}
-	m.markDialing("dialing")
-
-	rows := map[string]string{}
-	for _, el := range m.rows() {
-		rows[el.ID] = plain(m.rowStatus(el))
-	}
-	if got := rows["open"]; !strings.Contains(got, "●") {
-		t.Errorf("rowStatus for an element with a tab = %q, want an open marker", got)
-	}
-	if got := strings.TrimSpace(rows["idle"]); got != "" {
-		t.Errorf("rowStatus for an untouched element = %q, want blank", got)
-	}
-	if got := strings.TrimSpace(rows["dialing"]); got == "" || got == "●" {
-		t.Errorf("rowStatus while dialling = %q, want a spinner frame", got)
-	}
-}
-
 func TestTheStatusColumnHasNoHeader(t *testing.T) {
 	m := pickModel(t)
 	m.rebuildRows()
@@ -65,7 +37,7 @@ func TestSpinnerTicksOnlyWhileSomethingIsDialling(t *testing.T) {
 		t.Error("connectingAny() = true with nothing in flight")
 	}
 
-	m.markDialing("e1")
+	m.runtime().MarkDialing("e1")
 	if !m.connectingAny() {
 		t.Error("connectingAny() = false while a dial is in flight")
 	}
@@ -84,7 +56,7 @@ func TestSpinnerTicksOnlyWhileSomethingIsDialling(t *testing.T) {
 func TestConnectBarReportsTheRetryAndWhetherTheIONIsOnline(t *testing.T) {
 	m := pickModel(t)
 	setTestClient(&m, liveClient())
-	m.mergeTenantElements("1", "t", []api.Element{{ID: "e1", Name: "rtr", Connected: true}})
+	mergeForTest(&m, "1", "t", []api.Element{{ID: "e1", Name: "rtr", Connected: true}})
 	if _, err := m.sessions().Open(t.Context(), stubDialer{}, "e1", "rtr", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +77,7 @@ func TestConnectBarReportsTheRetryAndWhetherTheIONIsOnline(t *testing.T) {
 func TestConnectBarSaysOfflineForAnUnreachableION(t *testing.T) {
 	m := pickModel(t)
 	setTestClient(&m, liveClient())
-	m.mergeTenantElements("1", "t", []api.Element{{ID: "e1", Name: "rtr", Connected: false}})
+	mergeForTest(&m, "1", "t", []api.Element{{ID: "e1", Name: "rtr", Connected: false}})
 	if _, err := m.sessions().Open(t.Context(), stubDialer{}, "e1", "rtr", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +105,7 @@ func TestTheConnectBarKeepsItsRow(t *testing.T) {
 func TestAFailedConnectionAsksWhetherToTryAgain(t *testing.T) {
 	m := pickModel(t)
 	setTestClient(&m, liveClient())
-	m.mergeTenantElements("1", "t", []api.Element{{ID: "e1", Name: "rtr", Connected: true}})
+	mergeForTest(&m, "1", "t", []api.Element{{ID: "e1", Name: "rtr", Connected: true}})
 
 	target := sessionTarget{eid: "e1", name: "rtr", tsg: "1"}
 	mm, _ := m.Update(sessionErrMsg{target: target, err: "dial: failed to WebSocket dial: connection refused"})
@@ -156,7 +128,7 @@ func TestAFailedConnectionAsksWhetherToTryAgain(t *testing.T) {
 func TestAnsweringYesDialsTheElementAgain(t *testing.T) {
 	m := pickModel(t)
 	setTestClient(&m, liveClient())
-	m.mergeTenantElements("1", "t", []api.Element{{ID: "e1", Name: "rtr"}})
+	mergeForTest(&m, "1", "t", []api.Element{{ID: "e1", Name: "rtr"}})
 	m.askRetry = sessionTarget{eid: "e1", name: "rtr", tsg: "1"}
 	m.dialFailed("e1", "connection refused")
 
@@ -305,7 +277,7 @@ func TestEnterTakesTheHighlightedAnswer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := pickModel(t)
 			setTestClient(&m, liveClient())
-			m.mergeTenantElements("1", "t", []api.Element{{ID: "e1", Name: "rtr"}})
+			mergeForTest(&m, "1", "t", []api.Element{{ID: "e1", Name: "rtr"}})
 			m.askRetry = sessionTarget{eid: "e1", name: "rtr", tsg: "1"}
 			m.askRetryNo = tt.chooseNo
 
@@ -340,7 +312,7 @@ func TestYAndNWorkWhicheverIsHighlighted(t *testing.T) {
 		t.Run(tt.key, func(t *testing.T) {
 			m := pickModel(t)
 			setTestClient(&m, liveClient())
-			m.mergeTenantElements("1", "t", []api.Element{{ID: "e1", Name: "rtr"}})
+			mergeForTest(&m, "1", "t", []api.Element{{ID: "e1", Name: "rtr"}})
 			m.askRetry = sessionTarget{eid: "e1", name: "rtr", tsg: "1"}
 			m.askRetryNo = tt.chooseNo
 
@@ -358,7 +330,7 @@ func TestYAndNWorkWhicheverIsHighlighted(t *testing.T) {
 
 func TestThePromptSaysWhatThePortalThinks(t *testing.T) {
 	m := pickModel(t)
-	m.mergeTenantElements("1", "t", []api.Element{{ID: "e1", Name: "rtr", Connected: false}})
+	mergeForTest(&m, "1", "t", []api.Element{{ID: "e1", Name: "rtr", Connected: false}})
 	m.askRetry = sessionTarget{eid: "e1", name: "rtr", tsg: "1"}
 
 	if got := plain(m.retryPrompt()); !strings.Contains(got, "offline in the portal") {

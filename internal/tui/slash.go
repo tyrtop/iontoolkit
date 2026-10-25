@@ -7,7 +7,6 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/ioncmd"
 	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/ioncli"
@@ -55,7 +54,7 @@ func (m tuiModel) closeSlash() tuiModel {
 
 func (m tuiModel) catalog() []string {
 	all := ioncmd.Embedded()
-	if app.Defaults.AllowWrites || m.cfg().AllowWrites {
+	if m.runtime().WritesAllowed() {
 		return all
 	}
 	return ioncmd.ReadOnly(all, ioncli.IsReadOnly)

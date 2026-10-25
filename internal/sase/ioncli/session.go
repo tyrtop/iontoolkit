@@ -29,13 +29,7 @@ func lastLineAt(s string) (string, int) {
 	return strings.TrimSpace(s[i:]), i
 }
 
-// the earliest match in the line, not the first pattern in the list: ION 6.3.4
-// prints "--More--(4%)[Press space to continue, 'q' to quit.]", which matches
-// two of them, and cutting the later one left "--More--(4%)[" in the output.
-//
-// What follows the prompt is the device's own progress, so it goes too.
-// Backspaces are the exception: the prompt was erased in place and what comes
-// after them is the next page.
+// earliest match: the ION 6.3.4 pager line matches two patterns
 func stripPager(line string, pagers []string) (string, bool) {
 	low := strings.ToLower(line)
 	if len(low) != len(line) {
@@ -136,8 +130,7 @@ func readUntilPrompt(ctx context.Context, conn Conn, prompt string, pagers []str
 
 		last, at := lastLineAt(seen)
 		if at > answeredAt && isPager(last, pagers) {
-			// A plain space, no carriage return. The device wants a keypress,
-			// and a return would run as an empty command.
+			// the device wants a keypress; a return runs an empty command
 			if err := conn.Write(ctx, websocket.MessageText, []byte(" ")); err != nil {
 				return buf.String(), fmt.Errorf("answering %q: %w", last, err)
 			}

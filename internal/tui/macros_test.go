@@ -108,12 +108,9 @@ func TestAMacroIsGatedAsAUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	next, cmd := m.runMacro(mac, m.rows())
-	got := next.(tuiModel)
+	got := afterStart(t, next.(tuiModel), cmd)
 	if got.phase == phaseRunning {
 		t.Fatal("a macro with a write in it started running")
-	}
-	if cmd != nil {
-		t.Error("the refused macro queued work")
 	}
 	for _, want := range []string{"risky", "not read-only", "config banner hello"} {
 		if !strings.Contains(got.status, want) {
@@ -125,8 +122,8 @@ func TestAMacroIsGatedAsAUnit(t *testing.T) {
 	}
 
 	m.cfg().AllowWrites = true
-	next, _ = m.runMacro(mac, m.rows())
-	if status := next.(tuiModel).status; strings.Contains(status, "not read-only") {
+	next, cmd = m.runMacro(mac, m.rows())
+	if status := afterStart(t, next.(tuiModel), cmd).status; strings.Contains(status, "not read-only") {
 		t.Errorf("AllowWrites did not lift the guard: %q", status)
 	}
 }
@@ -136,8 +133,8 @@ func TestAMacroNeedsSomethingToRunOn(t *testing.T) {
 	mac, _ := m.runtime().Macro("ha check")
 
 	next, cmd := m.runMacro(mac, nil)
-	got := next.(tuiModel)
-	if cmd != nil || got.phase == phaseRunning {
+	got := afterStart(t, next.(tuiModel), cmd)
+	if got.phase == phaseRunning || got.events != nil {
 		t.Error("the macro ran with nothing selected")
 	}
 	if !strings.Contains(got.status, "nothing selected") {
@@ -151,11 +148,11 @@ func TestACrossModelMacroAsksOnceAndThenNeverAgain(t *testing.T) {
 	on := rowsOfModel(m, "ion 3200")
 
 	next, cmd := m.runMacro(mac, on)
-	m = next.(tuiModel)
+	m = afterStart(t, next.(tuiModel), cmd)
 	if m.askMacro != "ha check" {
 		t.Fatalf("askMacro = %q, want the macro held on the question", m.askMacro)
 	}
-	if cmd != nil {
+	if m.phase == phaseRunning || m.events != nil {
 		t.Error("the macro ran before the question was answered")
 	}
 	prompt := plain(m.macroWarnPrompt())
@@ -172,17 +169,13 @@ func TestACrossModelMacroAsksOnceAndThenNeverAgain(t *testing.T) {
 			declined.askMacro, declined.runtime().Acked(runtime.WarnMacroModel))
 	}
 
-	next, _ = declined.runMacro(mac, on)
-	m = next.(tuiModel)
+	next, cmd = declined.runMacro(mac, on)
+	m = afterStart(t, next.(tuiModel), cmd)
 	next, cmd = m.onMacroWarnKey("y")
-	m = next.(tuiModel)
+	m = afterStart(t, next.(tuiModel), cmd)
 	if !m.runtime().Acked(runtime.WarnMacroModel) {
 		t.Error("yes did not acknowledge the warning")
 	}
-	if cmd == nil {
-		t.Fatal("the acknowledgement queued no write")
-	}
-	runSave(t, cmd)
 	saved, err := m.store().Commands()
 	if err != nil {
 		t.Fatal(err)
@@ -191,8 +184,8 @@ func TestACrossModelMacroAsksOnceAndThenNeverAgain(t *testing.T) {
 		t.Error("the acknowledgement was not written through, so it would ask again next run")
 	}
 
-	next, _ = m.runMacro(mac, on)
-	again := next.(tuiModel)
+	next, cmd = m.runMacro(mac, on)
+	again := afterStart(t, next.(tuiModel), cmd)
 	if again.askMacro != "" {
 		t.Error("the warning was asked a second time after being acknowledged")
 	}
@@ -260,8 +253,8 @@ func TestEnterInMacroModeRunsTheArmedMacro(t *testing.T) {
 	m.phase = phasePicking
 	m.rebuildRows()
 
-	next, _ := m.onPickEnter()
-	got := next.(tuiModel)
+	next, cmd := m.onPickEnter()
+	got := afterStart(t, next.(tuiModel), cmd)
 	if got.phase == phaseRunning {
 		t.Fatal("a macro with a write in it ran from the element list")
 	}
@@ -428,8 +421,8 @@ func TestAMixedSelectionRecordsNoModel(t *testing.T) {
 	for _, r := range m.rows() {
 		m.runtime().Select(r.Key())
 	}
-	if got := m.selectionModel(); got != "" {
-		t.Errorf("selectionModel() = %q, want empty for a mixed selection", got)
+	if got := m.runtime().SelectionModel(); got != "" {
+		t.Errorf("SelectionModel() = %q, want empty for a mixed selection", got)
 	}
 }
 

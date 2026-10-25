@@ -107,7 +107,10 @@ func ResolveCredentials(st *config.Store, name string) (Credentials, error) {
 	if err != nil {
 		return Credentials{}, err
 	}
+	return resolveCredentials(st, cfg, name, env)
+}
 
+func resolveCredentials(st *config.Store, cfg *config.Config, name string, env Flags) (Credentials, error) {
 	if name != "" {
 		t, ok := cfg.Tenant(name)
 		if !ok {
@@ -161,16 +164,6 @@ var (
 	LogFile  string
 	LogLevel string
 )
-
-func LogsPath(st *config.Store) string {
-	if LogFile != "" {
-		return LogFile
-	}
-	if st == nil {
-		return ""
-	}
-	return st.LogsDir()
-}
 
 func LogLevelAsked() string {
 	if LogLevel != "" {

@@ -56,7 +56,7 @@ func TestHistoryRanksTheModelInUseFirstAndNarrowsFuzzily(t *testing.T) {
 
 func TestAMacroRemovedComesBackWithUndo(t *testing.T) {
 	rt, _ := withConfig(t)
-	if _, err := say(t, rt, "macro.set", map[string]string{"name": "wan check", "commands": "dump device status; dump interface status 1"}); err != nil {
+	if _, err := say(t, rt, "macro.set", map[string]string{"name": "wan check", "commands": "dump device status, dump interface status 1"}); err != nil {
 		t.Fatal(err)
 	}
 	if m, ok := rt.Macro("WAN CHECK"); !ok || len(m.Commands) != 2 {
@@ -139,4 +139,46 @@ func TestAFavouriteGoesOnTheSessionLineUnsent(t *testing.T) {
 
 func configMacro(name string, cmds ...string) config.Macro {
 	return config.Macro{Name: name, Commands: cmds}
+}
+
+func TestAMacroSavedWithNoModelTakesTheSelectionsAndARenameKeepsOne(t *testing.T) {
+	rt := deviceRuntime(t)
+	rows := rt.Elements()
+	for i := range rows {
+		rows[i].Model = "ion 1200"
+	}
+	rt.SetElements(rows)
+	run(t, rt, "list.select-matches")
+	if _, err := say(t, rt, "macro.set", map[string]string{"name": "status", "commands": "dump device status"}); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := rt.Macro("status"); m.Model != "ion 1200" {
+		t.Errorf("model = %q, want the selection's", m.Model)
+	}
+	if _, err := say(t, rt, "macro.set", map[string]string{"name": "status v2", "commands": "dump device status", "was": "status"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := rt.Macro("status"); ok {
+		t.Error("the old name survived the rename")
+	}
+	if _, ok := rt.Macro("status v2"); !ok {
+		t.Error("the renamed macro is missing")
+	}
+	if _, err := say(t, rt, "macro.set", map[string]string{"name": "", "commands": "x", "was": "status v2"}); err == nil {
+		t.Error("a rename to no name was taken")
+	}
+	if _, ok := rt.Macro("status v2"); !ok {
+		t.Error("a refused rename lost the macro")
+	}
+}
+
+func TestAMacroCommandGivenOnItsOwnKeepsItsComma(t *testing.T) {
+	rt, _ := withConfig(t)
+	c := &Call{Args: map[string]string{"name": "pair"}, Rest: []string{"dump interface status 1,2", "dump device status"}}
+	if err := rt.Exec(c, "macro.set"); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := rt.Macro("pair"); len(m.Commands) != 2 || m.Commands[0] != "dump interface status 1,2" {
+		t.Errorf("commands = %q, want two, the first with its comma", m.Commands)
+	}
 }

@@ -52,7 +52,7 @@ func TestMenuEntries(t *testing.T) {
 
 func TestMenuLabelDoesNotCarryTheMode(t *testing.T) {
 	root := t.TempDir()
-	for _, mode := range []pickMode{modeShell, modeBatch} {
+	for _, mode := range []string{modeShell, modeBatch} {
 		m := withStore(tuiModel{}, config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json")), &config.Config{})
 		m.setMode(mode)
 		if got := m.menuEntries()[0].label; got != "Elements" {
@@ -178,16 +178,16 @@ func TestSiteNameFallsBackToID(t *testing.T) {
 	row := func(tsg, site string) elementRow {
 		return elementRow{Element: api.Element{SiteID: site}, TSG: tsg}
 	}
-	if got := m.siteName(row("1", "s1")); got != "Nashville Hub" {
+	if got := m.runtime().SiteName(row("1", "s1")); got != "Nashville Hub" {
 		t.Errorf("siteName = %q, want the resolved name", got)
 	}
-	if got := m.siteName(row("2", "s1")); got != "Dallas Hub" {
+	if got := m.runtime().SiteName(row("2", "s1")); got != "Dallas Hub" {
 		t.Errorf("siteName = %q, want the other tenant's site of the same id", got)
 	}
-	if got := m.siteName(row("1", "unknown")); got != "unknown" {
+	if got := m.runtime().SiteName(row("1", "unknown")); got != "unknown" {
 		t.Errorf("siteName = %q, want the raw id", got)
 	}
-	if got := m.siteName(row("1", "")); got != "-" {
+	if got := m.runtime().SiteName(row("1", "")); got != "-" {
 		t.Errorf("siteName = %q, want -", got)
 	}
 }
@@ -460,7 +460,7 @@ func TestFilteringAndSelectingAreSeparateModes(t *testing.T) {
 		t.Errorf("filter = %q, want the space typed into it", got)
 	}
 	if m.selectedCount() != 0 {
-		t.Errorf("selected = %v, want no selection while filtering", m.selection())
+		t.Errorf("selected = %v, want no selection while filtering", m.runtime().Selection())
 	}
 
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
@@ -478,7 +478,7 @@ func TestFilteringAndSelectingAreSeparateModes(t *testing.T) {
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
 	m = mm.(tuiModel)
 	if m.selectedCount() != 1 {
-		t.Errorf("selected = %v, want space to select once the filter is applied", m.selection())
+		t.Errorf("selected = %v, want space to select once the filter is applied", m.runtime().Selection())
 	}
 	if got := m.filter.Value(); got != "s0100 " {
 		t.Errorf("filter = %q, want selecting to leave the query alone", got)
@@ -526,7 +526,7 @@ func TestSpaceStillSelectsWithTheFilterClosed(t *testing.T) {
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
 	got := mm.(tuiModel)
 	if got.selectedCount() != 1 {
-		t.Errorf("selected = %v, want space to select when not filtering", got.selection())
+		t.Errorf("selected = %v, want space to select when not filtering", got.runtime().Selection())
 	}
 }
 
@@ -607,8 +607,8 @@ func TestTUIBlocksWriteCommands(t *testing.T) {
 	m.runtime().SetIONUser("u")
 	selectOnly(&m, "1")
 
-	mm, _ := m.startRun([]string{"config banner hello"})
-	blocked := mm.(tuiModel)
+	mm, cmd := m.startRun([]string{"config banner hello"})
+	blocked := afterStart(t, mm.(tuiModel), cmd)
 	if blocked.phase == phaseRunning {
 		t.Error("write command was allowed to run")
 	}
@@ -617,8 +617,8 @@ func TestTUIBlocksWriteCommands(t *testing.T) {
 	}
 
 	m.cfg().AllowWrites = true
-	mm, _ = m.startRun([]string{"config banner hello"})
-	if got := mm.(tuiModel).status; strings.Contains(got, "not read-only") {
+	mm, cmd = m.startRun([]string{"config banner hello"})
+	if got := afterStart(t, mm.(tuiModel), cmd).status; strings.Contains(got, "not read-only") {
 		t.Errorf("AllowWrites did not lift the guard: %q", got)
 	}
 }

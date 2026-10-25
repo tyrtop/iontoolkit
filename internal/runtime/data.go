@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
 	"tyrtop.com/iontk/internal/dataview"
+	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/search"
 )
 
@@ -73,6 +75,7 @@ type dataState struct {
 	viewsErr string
 	tabs     []DataTab
 	active   int
+	filter   string
 }
 
 func (rt *Runtime) SetViews(set *dataview.Set, problem string) {
@@ -244,14 +247,10 @@ func (rt *Runtime) SetCheck(eid string, c Check) {
 	})
 }
 
-func (rt *Runtime) LoadTab(ctx context.Context, tab DataTab) error {
+func (rt *Runtime) loadTab(ctx context.Context, c *api.Client, tab DataTab) error {
 	set := rt.Views()
 	if set == nil {
 		return fmt.Errorf("no data views are loaded")
-	}
-	c := rt.Clients().Get(tab.TSG)
-	if c == nil {
-		return fmt.Errorf("could not reach %s", tab.Name)
 	}
 	done := make(chan struct{}, len(set.Views))
 	for _, v := range set.Views {
@@ -353,24 +352,102 @@ func CheckSummary(byView map[string]dataview.Comparison) string {
 	}
 }
 
-func DataText(t DataTab) []string {
-	out := []string{fmt.Sprintf("%s · %s", t.Name, t.Site)}
-	for _, p := range t.Panes {
-		out = append(out, "", "── "+p.View)
-		if p.Err != "" {
-			out = append(out, "  ! "+p.Err)
+type Page struct {
+	Lines []string
+	Heads []int
+	Hdrs  []int
+}
+
+func (p *Page) head(line string) {
+	p.Heads = append(p.Heads, len(p.Lines))
+	p.Lines = append(p.Lines, line)
+}
+
+func DataPage(t DataTab) Page {
+	p := Page{Lines: []string{fmt.Sprintf("%s · %s", t.Name, t.Site)}}
+	for _, pane := range t.Panes {
+		p.Lines = append(p.Lines, "")
+		p.head("── " + pane.View)
+		if pane.Err != "" {
+			p.Lines = append(p.Lines, "  ! "+pane.Err)
 		}
-		for _, sec := range p.Rendered.Sections {
-			out = append(out, "  "+sec.Title)
+		for _, sec := range pane.Rendered.Sections {
+			p.head("  " + sec.Title)
 			for _, r := range sec.Rows {
-				out = append(out, fmt.Sprintf("    %-16s %s", r.Label, r.Value))
+				p.Lines = append(p.Lines, fmt.Sprintf("    %-16s %s", r.Label, r.Value))
 			}
 			if len(sec.Headers) > 0 {
-				out = append(out, tableText(sec)...)
+				p.Hdrs = append(p.Hdrs, len(p.Lines))
+				p.Lines = append(p.Lines, tableText(sec)...)
 			}
 		}
 	}
-	return out
+	if t.Check.Ran() {
+		p.Lines = append(p.Lines, "")
+		p.head("── CLI check")
+		p.Lines = append(p.Lines, CheckText(t.Check)...)
+	}
+	return p
+}
+
+func DataText(t DataTab) []string { return DataPage(t).Lines }
+
+func FilterPage(plain []string, heads, hdrs []int, q string) (keep, kept []int) {
+	q = strings.ToLower(strings.TrimSpace(q))
+	if q == "" {
+		keep = make([]int, len(plain))
+		for i := range plain {
+			keep[i] = i
+		}
+		return keep, heads
+	}
+	head, hdr := make([]int, len(plain)), make([]int, len(plain))
+	at, under, headAt, hdrAt := -1, -1, 0, 0
+	for i := range plain {
+		for headAt < len(heads) && heads[headAt] <= i {
+			at = heads[headAt]
+			headAt++
+		}
+		for hdrAt < len(hdrs) && hdrs[hdrAt] <= i {
+			under = hdrs[hdrAt]
+			hdrAt++
+		}
+		head[i], hdr[i] = at, under
+	}
+	seen := map[int]bool{}
+	add := func(i int) {
+		if i >= 0 && !seen[i] {
+			seen[i] = true
+			keep = append(keep, i)
+		}
+	}
+	for i, line := range plain {
+		if !strings.Contains(strings.ToLower(line), q) {
+			continue
+		}
+		if h := head[i]; h >= 0 && !seen[h] {
+			kept = append(kept, len(keep))
+			add(h)
+		}
+		if d := hdr[i]; d >= 0 && d != i && d > head[i] {
+			add(d)
+		}
+		add(i)
+	}
+	return keep, kept
+}
+
+func (rt *Runtime) SetDataFilter(q string) {
+	rt.mu.Lock()
+	rt.data.filter = q
+	rt.mu.Unlock()
+	rt.changed(Event{Area: AreaData})
+}
+
+func (rt *Runtime) DataFilter() string {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	return rt.data.filter
 }
 
 func (rt *Runtime) indexOfData(key string) int {
@@ -387,8 +464,15 @@ func (rt *Runtime) checkInFront(c *Call) error {
 	if err != nil {
 		return err
 	}
-	done := rt.RunCheck(c.Ctx, tab)
+	ctx := c.Ctx
+	if d := rt.elementTimeout(); d > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, d)
+		defer cancel()
+	}
+	done := rt.RunCheck(ctx, tab)
 	rt.SetCheck(tab.EID, done)
+	c.Result = done
 	if done.Err != "" {
 		return fmt.Errorf("%s: %s", tab.Name, done.Err)
 	}
@@ -397,6 +481,21 @@ func (rt *Runtime) checkInFront(c *Call) error {
 		c.Say("%s", l)
 	}
 	return nil
+}
+
+func (rt *Runtime) elementTimeout() time.Duration {
+	rt.mu.RLock()
+	opts, st := rt.dev.Options, rt.store
+	rt.mu.RUnlock()
+	if opts == nil {
+		return 0
+	}
+	t, _ := rt.Tenant()
+	o, err := opts(st, t, rt.IONUser(), nil)
+	if err != nil {
+		return 0
+	}
+	return o.ElementTimeout
 }
 
 func CheckText(c Check) []string {
@@ -461,30 +560,97 @@ func tableText(sec dataview.RenderedSection) []string {
 	return out
 }
 
-func (rt *Runtime) openData(c *Call) ([]DataTab, error) {
-	rows := rt.Targets()
-	if ids := c.Arg("elements"); ids != "" {
-		rows = rt.knownRows(c, strings.Split(ids, ","))
+func (rt *Runtime) Reach(rows []Element) ([]Element, string) {
+	for _, r := range rows {
+		rt.ClearIssue(r.TSG)
 	}
+	var reach []Element
+	var unreachable []string
+	for _, r := range rows {
+		if rt.Reachable(r.TSG) {
+			reach = append(reach, r)
+			continue
+		}
+		unreachable = append(unreachable, r.Label())
+	}
+	switch {
+	case len(reach) == 0 && len(unreachable) > 0:
+		return nil, "could not reach " + strings.Join(unreachable, ", ")
+	case len(unreachable) > 0:
+		return reach, "skipped " + strings.Join(unreachable, ", ") + ": tenant unreachable"
+	}
+	return reach, ""
+}
+
+func (rt *Runtime) NeedsSignIn(tsgs []string) bool {
+	if rt.TokenDead() == "" {
+		return false
+	}
+	if len(tsgs) == 0 {
+		t, _ := rt.Tenant()
+		return t.UsesBrowser()
+	}
+	for _, tsg := range tsgs {
+		if t, ok := rt.TenantOf(tsg); !ok || t.UsesBrowser() {
+			return true
+		}
+	}
+	return false
+}
+
+func (rt *Runtime) openData(c *Call) ([]DataTab, error) {
+	rows := rt.ElementsArg(c, "elements")
 	if len(rows) == 0 {
 		return nil, fmt.Errorf("no elements")
 	}
+	rows, note := rt.Reach(rows)
+	if len(rows) == 0 {
+		return nil, errors.New(note)
+	}
+	if note != "" {
+		c.Say("%s", note)
+	}
+	tabs := rt.OpenDataTabs(rows)
+	err := rt.LoadTabs(c.Ctx, tabs)
 	var out []DataTab
-	for _, r := range rows {
-		if t, ok := rt.TenantOf(r.TSG); ok {
-			if _, err := rt.Connect(c.Ctx, t); err != nil {
-				return out, fmt.Errorf("%s: %s", t.Name, rt.explain(err))
-			}
-		}
-		tab := rt.OpenData(r.ID, r.Label(), r.TSG)
-		if err := rt.LoadTab(c.Ctx, tab); err != nil {
-			return out, err
-		}
-		if t, ok := rt.ActiveData(); ok {
-			out = append(out, t)
+	for _, t := range tabs {
+		if i := rt.indexOfData(t.Key()); i >= 0 {
+			out = append(out, rt.DataTabs()[i])
 		}
 	}
-	return out, nil
+	return out, err
+}
+
+func (rt *Runtime) OpenDataTabs(rows []Element) []DataTab {
+	tabs := make([]DataTab, 0, len(rows))
+	for _, r := range rows {
+		tabs = append(tabs, rt.OpenData(r.ID, r.Label(), r.TSG))
+	}
+	return tabs
+}
+
+func (rt *Runtime) LoadTabs(ctx context.Context, tabs []DataTab) error {
+	errs := make([]error, len(tabs))
+	var wg sync.WaitGroup
+	for i, tab := range tabs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			t := rt.TenantFor(tab.TSG)
+			c, err := rt.Connect(ctx, t)
+			if err != nil {
+				errs[i] = fmt.Errorf("%s: %s", t.Name, rt.explain(err))
+				return
+			}
+			errs[i] = rt.loadTab(ctx, c, tab)
+		}()
+	}
+	wg.Wait()
+	return errors.Join(errs...)
+}
+
+func (rt *Runtime) Reachable(tsg string) bool {
+	return rt.Clients().Get(tsg) != nil || rt.NeedsConnect(tsg)
 }
 
 func dataCommands() []Command {
@@ -509,7 +675,7 @@ func dataCommands() []Command {
 				if !ok {
 					return fmt.Errorf("data.refresh: no tab open")
 				}
-				return rt.LoadTab(c.Ctx, tab)
+				return rt.LoadTabs(c.Ctx, []DataTab{tab})
 			},
 		},
 		{
@@ -534,6 +700,27 @@ func dataCommands() []Command {
 					return fmt.Errorf("%s", strings.Join(failed, "; "))
 				}
 				return nil
+			},
+		},
+		{
+			Name: "data.export", Help: "write the tab in front to a file under exports/, as far as the data filter lets it through",
+			Run: func(rt *Runtime, c *Call) error {
+				tab, ok := rt.ActiveData()
+				if !ok {
+					return fmt.Errorf("no data tab open")
+				}
+				page := DataPage(tab)
+				keep, _ := FilterPage(page.Lines, page.Heads, page.Hdrs, rt.DataFilter())
+				lines := make([]string, 0, len(keep))
+				for _, i := range keep {
+					lines = append(lines, page.Lines[i])
+				}
+				where, err := rt.Export(tab.Name, "txt", strings.Join(lines, "\n"))
+				if err == nil {
+					c.Say("exported %s to %s", tab.Name, where)
+					c.Result = where
+				}
+				return err
 			},
 		},
 		{

@@ -1,11 +1,15 @@
-# utc and ago read the API's timestamp integers; never divide one by hand, the
-# unit varies by field.
+# the API's timestamp unit varies by field
 
 views:
   - name: Overview
+    endpoints:
+      - name: el
+        path: /sdwan/v3.2/api/elements/{element_id}
+      - name: st
+        path: /sdwan/v2.6/api/elements/{element_id}/status
     fetch:
-      el: /sdwan/v3.2/api/elements/{{ .element_id }}
-      st: /sdwan/v2.6/api/elements/{{ .element_id }}/status
+      el: el
+      st: st
     sections:
       - title: Device
         rows:
@@ -38,8 +42,8 @@ views:
             value: "{{ if .st.flows_live_connected }}up{{ else }}down{{ end }} · {{ dash .st.flows_live_from }}"
           - label: Logs
             value: "{{ if .st.logs_live_connected }}up{{ else }}down{{ end }} · {{ dash .st.logs_live_from }}"
+          # the backlog channels connect, drain and drop, so they read disconnected
 
-      # the backlog channels connect, drain and drop, so they read disconnected
       - title: HA
         when: "{{ .el.spoke_ha_config.cluster_id }}"
         rows:
@@ -53,7 +57,7 @@ views:
     # the CLI key names are guesses: `dump device status` has never been captured
     compare:
       fetch:
-        el: /sdwan/v3.2/api/elements/{{ .element_id }}
+        el: el
       commands:
         dev: dump device status
       rows:
@@ -68,18 +72,29 @@ views:
           device: "{{ kv .cli.dev \"Version\" }}"
 
   - name: Interfaces
+    endpoints:
+      - name: ifs
+        path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces
+      - name: wans
+        path: /sdwan/v2.10/api/sites/{site_id}/waninterfaces
+      - name: zones
+        path: /sdwan/v2.2/api/securityzones
+      - name: elzones
+        path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/securityzones
+      - name: st
+        path: /sdwan/v3.9/api/sites/{site_id}/elements/{element_id}/interfaces/{item.id}/status
     fetch:
-      ifs: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces
-      wans: /sdwan/v2.10/api/sites/{{ .site_id }}/waninterfaces
+      ifs: ifs
+      wans: wans
       # zone field names are read off the resource map, never seen on hardware
-      zones: /sdwan/v2.2/api/securityzones
-      elzones: /sdwan/v2.1/api/sites/{{ .site_id }}/elements/{{ .element_id }}/securityzones
+      zones: zones
+      elzones: elzones
     sections:
       - title: Interfaces
         for_each: ifs.items
         empty: this element has no interfaces
         fetch:
-          st: /sdwan/v3.9/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces/{{ .item.id }}/status
+          st: st
         columns:
           - header: PORT
             value: "{{ .item.name }}"
@@ -112,24 +127,35 @@ views:
             width: 20
           - header: ZONE
             value: "{{ with lookup $.elzones.items \"interface_ids\" .item.id }}{{ with lookup $.zones.items \"id\" .zone_id }}{{ .name }}{{ end }}{{ end }}"
-            # zone names are sentences: "TSC Store - Network Management" is 30
             width: 32
 
-  # Circuits are the site's, not the element's, so a hub pair shares them.
   - name: Circuits
+    endpoints:
+      - name: wans
+        path: /sdwan/v2.10/api/sites/{site_id}/waninterfaces
+      - name: ifs
+        path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces
+      - name: labels
+        path: /sdwan/v2.6/api/waninterfacelabels
+      - name: networks
+        path: /sdwan/v2.1/api/wannetworks
+      - name: st
+        path: /sdwan/v2.1/api/sites/{site_id}/waninterfaces/{item.id}/status
+      - name: state
+        path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/waninterfaces/{item.id}/state
     fetch:
-      wans: /sdwan/v2.10/api/sites/{{ .site_id }}/waninterfaces
-      ifs: /sdwan/v4.21/api/sites/{{ .site_id }}/elements/{{ .element_id }}/interfaces
-      labels: /sdwan/v2.6/api/waninterfacelabels
-      networks: /sdwan/v2.1/api/wannetworks
+      wans: wans
+      ifs: ifs
+      labels: labels
+      networks: networks
     sections:
       - title: Circuits
         for_each: wans.items
         empty: this site has no circuits
         fetch:
           # a circuit can be up at the site while this element cannot use it
-          st: /sdwan/v2.1/api/sites/{{ .site_id }}/waninterfaces/{{ .item.id }}/status
-          state: /sdwan/v2.1/api/sites/{{ .site_id }}/elements/{{ .element_id }}/waninterfaces/{{ .item.id }}/state
+          st: st
+          state: state
         columns:
           - header: CIRCUIT
             value: "{{ dash .item.name }}"
@@ -140,7 +166,6 @@ views:
           - header: NETWORK
             value: "{{ with lookup $.networks.items \"id\" .item.network_id }}{{ .name }}{{ end }}"
             width: 20
-          # ctrl is the circuit carrying the controller session
           - header: TYPE
             value: "{{ dash .item.type }}{{ if .item.use_for_controller_connections }} ctrl{{ end }}"
             width: 15
@@ -154,9 +179,14 @@ views:
             value: "{{ with .st }}{{ dash .operational_state }}{{ end }}{{ with .state }} · {{ if .operational }}operational{{ else }}not operational{{ end }}{{ if .disabled }} · disabled{{ end }}{{ end }}"
 
   - name: HA
+    endpoints:
+      - name: el
+        path: /sdwan/v3.2/api/elements/{element_id}
+      - name: cl
+        path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters/{cluster_id}/status
     fetch:
-      el: /sdwan/v3.2/api/elements/{{ .element_id }}
-      cl: /sdwan/v2.0/api/sites/{{ .site_id }}/spokeclusters/{{ .cluster_id }}/status
+      el: el
+      cl: cl
     sections:
       - title: Cluster
         when: "{{ .cluster_id }}"
@@ -179,8 +209,7 @@ views:
           - header: STATUS
             value: "{{ .item.status }}"
 
-      # newest first, as the API sends them; adjustments says why the
-      # effective priority is not the configured one
+      # API sends newest first; adjustments explain effective vs configured priority
       - title: Switchovers
         when: "{{ .cluster_id }}"
         for_each: cl.switch_over_events
@@ -209,7 +238,7 @@ views:
     compare:
       when: "{{ .cluster_id }}"
       fetch:
-        cl: /sdwan/v2.0/api/sites/{{ .site_id }}/spokeclusters/{{ .cluster_id }}/status
+        cl: cl
       commands:
         ha: dump spoke-ha status
       rows:
