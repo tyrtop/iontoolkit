@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"tyrtop.com/iontk/internal/column"
+	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/sase/api"
 )
@@ -500,7 +501,97 @@ func haCommands() []Command {
 			}
 			return nil
 		},
+	}, {
+		Name: "ha.list", Slow: true,
+		Help: "each clustered element's HA state in one tenant, by element id: what has been read already, else the tenant-wide query",
+		Args: []Arg{{Name: "tenant", Help: "by name or tsg; the current tenant when empty"},
+			{Name: "refresh", Bool: true, Help: "ask the portal again, even for what has been read"}},
+		Run: func(rt *Runtime, c *Call) error {
+			t, ok := rt.Tenant()
+			if v := c.Arg("tenant"); v != "" {
+				found, err := rt.FindTenant(v)
+				if err != nil {
+					return err
+				}
+				t, ok = found, true
+			}
+			if !ok {
+				return fmt.Errorf("no tenant: say which with tenant=")
+			}
+			states, asked, err := rt.HAStates(c.Ctx, t, c.Arg("refresh") == "yes")
+			if err != nil {
+				return err
+			}
+			n := map[string]int{}
+			out := make(map[string]any, len(states))
+			for id, w := range states {
+				n[w]++
+				out[id] = w
+			}
+			how := "read already"
+			if asked > 0 {
+				how = fmt.Sprintf("%d asked of the portal", asked)
+			}
+			c.Say("%s: %d clustered elements, %d active, %d standby, %d unknown (%s)",
+				t.Name, len(states), n[HAActive], n[HAStandby], len(states)-n[HAActive]-n[HAStandby], how)
+			c.Result = out
+			return nil
+		},
 	}}
+}
+
+func (rt *Runtime) HAStates(ctx context.Context, t config.Tenant, refresh bool) (map[string]string, int, error) {
+	els := rt.tenantElements(t.TSGID)
+	if len(els) == 0 {
+		l := rt.LoadTenant(ctx, t, false)
+		if l.Err != nil {
+			return nil, 0, fmt.Errorf("%s: %s", t.Name, rt.explain(l.Err))
+		}
+		rt.MergeSites(l.Sites)
+		rt.MergeTenant(l.TSG, l.Tenant, l.Elements)
+		els = rt.tenantElements(t.TSGID)
+	}
+	var ask []api.Element
+	rt.mu.RLock()
+	for _, el := range els {
+		if el.ClusterID() != "" && (refresh || rt.ha.words[el.Key()] == "") {
+			ask = append(ask, el.Element)
+		}
+	}
+	rt.mu.RUnlock()
+	if w := HAClusters(ask); w.Clusters() > 0 {
+		if _, err := rt.Connect(ctx, t); err != nil {
+			return nil, 0, fmt.Errorf("%s: %s", t.Name, rt.explain(err))
+		}
+		rt.SweepHA(ctx, t.TSGID, w, 0)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	out := map[string]string{}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	for _, el := range els {
+		if el.ClusterID() == "" {
+			continue
+		}
+		w := rt.ha.words[el.Key()]
+		if w == "" {
+			w = HAUnknown
+		}
+		out[el.ID] = w
+	}
+	return out, len(ask), nil
+}
+
+func (rt *Runtime) tenantElements(tsg string) []Element {
+	var out []Element
+	for _, el := range rt.Elements() {
+		if el.TSG == tsg {
+			out = append(out, el)
+		}
+	}
+	return out
 }
 
 var errNoElements = errString("no elements: no tenant to load them from")

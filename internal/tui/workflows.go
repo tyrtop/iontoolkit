@@ -94,6 +94,13 @@ func (m tuiModel) openWorkflowForm() tuiModel {
 }
 
 func (m tuiModel) openFormFor(cmd runtime.Command) tuiModel {
+	var args []runtime.Arg
+	for _, a := range cmd.Args {
+		if a.Name != cmd.Each {
+			args = append(args, a)
+		}
+	}
+	cmd.Args = args
 	m.wf.cmd, m.wf.err, m.wf.focus = cmd, "", 0
 	m.wf.inputs = make([]textinput.Model, len(cmd.Args))
 	for i, a := range cmd.Args {
@@ -263,7 +270,7 @@ func (m tuiModel) viewCommandList() string {
 	width := max(20, m.width-2)
 	line := func(here bool, plain, styled string) string {
 		if here {
-			return ui.StyleRow.Render(fmt.Sprintf("%-*s", width, ui.Truncate(plain, width))) + "\n"
+			return ui.StyleCmd.Render("> ") + ui.StyleRow.Render(ui.Truncate(plain, width)) + "\n"
 		}
 		return "  " + styled + "\n"
 	}
@@ -277,7 +284,11 @@ func (m tuiModel) viewCommandList() string {
 	}
 	for i, c := range list {
 		name := fmt.Sprintf("%-22s", ui.Truncate(strings.TrimPrefix(c.Name, m.wf.prefix), 22))
-		inputs := fmt.Sprintf("%-14s", fmt.Sprintf("%d input(s)", len(c.Args)))
+		n := len(c.Args)
+		if c.Each != "" {
+			n--
+		}
+		inputs := fmt.Sprintf("%-14s", fmt.Sprintf("%d input(s)", n))
 		tag, plainTag := "", ""
 		if c.Writes {
 			plainTag = "writes  "
@@ -312,20 +323,23 @@ func (m tuiModel) viewWorkflows() string {
 		if d := m.wf.cmd.Long; d != "" {
 			b.WriteString(ui.StyleDim.Render(ui.Truncate(d, width)) + "\n\n")
 		}
+		pad := ui.LabelWidth
+		for _, a := range m.wf.cmd.Args {
+			pad = max(pad, ui.Width(a.Name)+2)
+		}
 		for i, a := range m.wf.cmd.Args {
 			mark := "  "
 			if i == m.wf.focus {
 				mark = ui.StyleCmd.Render("> ")
 			}
-			req := ""
+			note := a.Help
 			if a.Required {
-				req = ui.StyleDim.Render("  required")
+				note = strings.TrimSuffix("required · "+note, " · ")
 			}
-			label := a.Help
-			if label == "" {
-				label = a.Name
+			if note != "" {
+				note = "  " + ui.Truncate(note, max(10, width-pad-44))
 			}
-			b.WriteString(mark + ui.Label(label) + m.wf.inputs[i].View() + req + "\n")
+			b.WriteString(mark + ui.StyleDim.Render(fmt.Sprintf("%-*s", pad, a.Name)) + m.wf.inputs[i].View() + ui.StyleDim.Render(note) + "\n")
 		}
 		if len(m.wf.cmd.Args) == 0 {
 			b.WriteString(ui.StyleDim.Render("this asks for nothing") + "\n")

@@ -74,6 +74,26 @@ func (rt *Runtime) SearchScope(name, tsg string) ([]config.Tenant, error) {
 	return kept, nil
 }
 
+func (rt *Runtime) FindTenant(v string) (config.Tenant, error) {
+	v = strings.TrimSpace(v)
+	var all, known []config.Tenant
+	if cfg := rt.Config(); cfg != nil {
+		all = append(all, cfg.Tenants...)
+	}
+	seen := map[string]bool{}
+	for _, t := range append(all, rt.FleetTenants()...) {
+		if seen[t.TSGID] {
+			continue
+		}
+		seen[t.TSGID] = true
+		known = append(known, t)
+		if strings.EqualFold(t.Name, v) || t.TSGID == v {
+			return t, nil
+		}
+	}
+	return config.Tenant{}, fmt.Errorf("no tenant is called %q; there is %s", v, TenantNames(known))
+}
+
 func TenantNames(ts []config.Tenant) string {
 	names := make([]string, 0, len(ts))
 	for _, t := range ts {

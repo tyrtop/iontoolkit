@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
+	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/write"
@@ -74,13 +76,17 @@ func guardFor(rt *runtime.Runtime, t runtime.Tenant) write.Guard {
 const EachInput = "inputs"
 
 func workflowCommand(w workflow.Workflow) runtime.Command {
-	args := make([]runtime.Arg, 0, len(w.Inputs)+1)
+	args := make([]runtime.Arg, 0, len(w.Inputs)+2)
 	each := EachInput
 	for _, in := range w.Inputs {
 		args = append(args, runtime.Arg{Name: in.Name, Help: in.Prompt, Required: in.Required, Default: in.Default})
 		if in.Name == EachInput {
 			each = ""
 		}
+	}
+	if !w.Declares(workflow.TenantInput) {
+		args = append(args, runtime.Arg{Name: workflow.TenantInput,
+			Help: "the tenant the run's calls go to, by name or tsg; needed when more than one is loaded"})
 	}
 	if each != "" {
 		args = append(args, runtime.Arg{Name: each,
@@ -99,26 +105,88 @@ func workflowCommand(w workflow.Workflow) runtime.Command {
 	}
 }
 
-func runWorkflow(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, input map[string]string) error {
+type placed struct {
+	input   map[string]string
+	tenants map[string]config.Tenant
+}
+
+func place(rt *runtime.Runtime, w workflow.Workflow, given map[string]string) (placed, error) {
+	p := placed{input: map[string]string{}, tenants: map[string]config.Tenant{}}
+	for k, v := range given {
+		if k != workflow.TenantInput || w.Declares(k) {
+			p.input[k] = v
+		}
+	}
+	names := []string{workflow.TenantInput}
+	for _, e := range w.Endpoints {
+		if e.In != "" && !slices.Contains(names, e.In) {
+			names = append(names, e.In)
+		}
+	}
+	for _, n := range names {
+		v := strings.TrimSpace(given[n])
+		switch {
+		case v != "":
+			t, err := rt.FindTenant(v)
+			if err != nil {
+				return p, fmt.Errorf("%s: %w", n, err)
+			}
+			p.tenants[n] = t
+		case n != workflow.TenantInput:
+			return p, fmt.Errorf("%s says which tenant some of the calls go to, and is empty", n)
+		default:
+			if fleet := rt.FleetTenants(); len(fleet) > 1 {
+				return p, fmt.Errorf("%d tenants are loaded (%s): say which with tenant", len(fleet), runtime.TenantNames(fleet))
+			}
+		}
+	}
+	return p, nil
+}
+
+func runWorkflow(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, given map[string]string) error {
+	p, err := place(rt, w, given)
+	if err != nil {
+		return err
+	}
+	return runPlaced(rt, c, w, p)
+}
+
+func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p placed) error {
+	run, ok := p.tenants[workflow.TenantInput]
+	if !ok {
+		run, _ = rt.Tenant()
+	}
+	if run.Name != "" {
+		c.Say("tenant %s", run.Name)
+	}
 	exec := scriptExec(rt, c, true)
 	host := workflow.Host{
 		Exec: func(sc script.Call) ([]string, any, error) {
-			e, ok := w.Endpoint(strings.TrimPrefix(sc.Name, EndpointPrefix))
+			name := strings.TrimPrefix(sc.Name, EndpointPrefix)
+			e, ok := w.Endpoint(name)
 			if sc.Line != "" || !strings.HasPrefix(sc.Name, EndpointPrefix) || !ok {
 				return exec(sc)
+			}
+			tsg, where := run.TSGID, ""
+			if in := w.In(name); in != "" {
+				t := p.tenants[in]
+				tsg = t.TSGID
+				if t.TSGID != run.TSGID {
+					where = " in " + t.Name
+				}
 			}
 			var said []string
 			call := &runtime.Call{Ctx: c.Ctx, Args: sc.Args, DoIt: c.DoIt, Out: func(l string) {
 				said = append(said, l)
 				c.Say("%s", l)
 			}}
-			err := callEndpoint(rt, call, WorkflowPrefix+w.Name, e)
+			err := callEndpoint(rt, call, WorkflowPrefix+w.Name, e, tsg, where)
 			return said, call.Result, err
 		},
 		Export:   func(text, slug, ext string) (string, error) { return rt.Export(slug, ext, text) },
 		OnStatus: func(line string) { c.Say("%s", line) },
 	}
-	res, err := w.Run(c.Ctx, input, host, c.DoIt)
+	res, err := w.Run(c.Ctx, p.input, host, c.DoIt)
 	c.Result = res
 	return err
 }
@@ -160,7 +228,7 @@ func runEach(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each str
 		defer mu.Unlock()
 		c.Say("%s | %s", tag, line)
 	}
-	inputs := make([]map[string]string, len(runs))
+	inputs := make([]placed, len(runs))
 	seen := map[string]int{}
 	for i, run := range runs {
 		input := map[string]string{}
@@ -174,11 +242,15 @@ func runEach(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each str
 				input[k] = v
 			}
 		}
-		in, err := w.CheckInputs(input)
+		p, err := place(rt, w, input)
 		if err != nil {
 			return fmt.Errorf("run %d: %w; no run was started", i+1, err)
 		}
-		inputs[i] = in
+		in, err := w.CheckInputs(p.input)
+		if err != nil {
+			return fmt.Errorf("run %d: %w; no run was started", i+1, err)
+		}
+		inputs[i] = p
 		if len(w.Inputs) == 0 || !c.DoIt {
 			continue
 		}
@@ -208,7 +280,7 @@ func runEach(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each str
 			defer func() { <-slots }()
 			say(tags[i], workflow.Describe(run))
 			one := &runtime.Call{Ctx: c.Ctx, DoIt: c.DoIt, Out: func(l string) { say(tags[i], l) }}
-			if errs[i] = runWorkflow(rt, one, w, input); errs[i] != nil {
+			if errs[i] = runPlaced(rt, one, w, input); errs[i] != nil {
 				say(tags[i], "failed: "+errs[i].Error())
 			}
 		}()

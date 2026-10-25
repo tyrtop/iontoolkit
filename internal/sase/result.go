@@ -30,19 +30,19 @@ func runElement(ctx context.Context, client Client, o Options, target Target) (R
 
 	prompt := el.Name + "#"
 
-	outs, err := attemptSession(ctx, client, o, target, eid, prompt)
-	if err != nil {
-		return Result{}, fmt.Errorf("element %s: run: %w", eid, err)
-	}
-	return Result{
+	res := Result{
 		ElementID: eid,
 		Name:      el.Name,
 		HWID:      el.HWID,
 		Model:     el.Model,
 		Software:  el.Software,
 		Connected: el.Connected,
-		Commands:  outs,
-	}, nil
+	}
+	res.Commands, err = attemptSession(ctx, client, o, target, eid, prompt)
+	if err != nil {
+		return res, fmt.Errorf("element %s: run: %w", eid, err)
+	}
+	return res, nil
 }
 
 func attemptSession(ctx context.Context, client Client, o Options, target Target, eid, prompt string) ([]ioncli.CommandOutput, error) {

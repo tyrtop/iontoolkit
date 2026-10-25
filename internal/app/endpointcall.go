@@ -21,14 +21,14 @@ func (r EndpointCall) PlannedWrites() []script.Write { return r.Writes }
 
 func (r EndpointCall) MarshalJSON() ([]byte, error) { return json.Marshal(r.Answer) }
 
-func callEndpoint(rt *runtime.Runtime, c *runtime.Call, what string, e endpoint.Endpoint) error {
+func callEndpoint(rt *runtime.Runtime, c *runtime.Call, what string, e endpoint.Endpoint, tsg, where string) error {
 	res := EndpointCall{}
 	defer func() { c.Result = res }()
 	path, err := e.Fill(c.Args)
 	if err != nil {
 		return err
 	}
-	p, tenant, err := rt.Portal(c.Ctx)
+	p, tenant, err := rt.PortalFor(c.Ctx, tsg)
 	if err != nil {
 		return err
 	}
@@ -44,11 +44,11 @@ func callEndpoint(rt *runtime.Runtime, c *runtime.Call, what string, e endpoint.
 	}
 	res.Writes = []script.Write{{Method: e.Method, Path: path, Body: body}}
 	if !c.DoIt {
-		c.Say("plan %s %s", e.Method, path)
+		c.Say("plan %s %s%s", e.Method, path, where)
 		res.Answer = body
 		return nil
 	}
-	c.Say("send %s %s", e.Method, path)
+	c.Say("send %s %s%s", e.Method, path, where)
 	var raw []byte
 	if body != nil {
 		if raw, err = json.Marshal(body); err != nil {

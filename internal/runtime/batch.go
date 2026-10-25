@@ -455,19 +455,18 @@ func (rt *Runtime) sayBatch(c *Call, events <-chan sase.Event) error {
 		if !ev.Done {
 			continue
 		}
-		if ev.Result.Error != "" {
-			c.Say("%s: %s", ev.Element, ev.Result.Error)
-			continue
-		}
 		for _, out := range ev.Result.Commands {
 			c.Say("== %s · %s", ev.Element, out.Command)
 			c.Say("%s", strings.TrimRight(out.Output, "\n"))
+		}
+		if ev.Result.Error != "" {
+			c.Say("%s: %s", ev.Element, ev.Result.Error)
 		}
 	}
 	b := rt.Batch()
 	c.Result = b
 	c.Say("%d of %d elements done, %d failed", b.Finished, b.Total(), b.Failed)
-	if b.Failed > 0 {
+	if b.Failed > 0 && b.Failed == b.Total() {
 		return fmt.Errorf("%d of %d elements failed", b.Failed, b.Total())
 	}
 	return nil

@@ -1224,8 +1224,8 @@ func TestAddingAUserToATenantWithNoRecordYet(t *testing.T) {
 		t.Errorf("formTenantTSG = %q, want the tenant id carried into the form", form.formTenantTSG)
 	}
 
-	form.form[0].input.SetValue("syn-ops")
-	form.form[1].input.SetValue("syn-pass")
+	form.form[1].input.SetValue("syn-ops")
+	form.form[2].input.SetValue("syn-pass")
 	mm, _ = form.submitForm()
 	got := mm.(tuiModel)
 

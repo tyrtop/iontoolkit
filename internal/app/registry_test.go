@@ -107,7 +107,8 @@ func TestAWorkflowIsACommandWithItsInputsAsArguments(t *testing.T) {
 		"broken":   {workflow.ManifestName: "title: Broken\n"},
 	})
 	cmd, ok := rt.Command("workflow.new-site")
-	if !ok || cmd.Help != "New site" || len(cmd.Args) != 2 || !cmd.Args[0].Required || cmd.Args[1].Name != EachInput || !cmd.Writes {
+	if !ok || cmd.Help != "New site" || len(cmd.Args) != 3 || !cmd.Args[0].Required ||
+		cmd.Args[1].Name != workflow.TenantInput || cmd.Args[2].Name != EachInput || !cmd.Writes {
 		t.Fatalf("command = %+v", cmd)
 	}
 	if w := strings.Join(rt.Warnings(), ";"); !strings.Contains(w, "broken: no main.lua") {
@@ -372,12 +373,16 @@ func TestConfigSaveWritesTheTutorialTheFlagNames(t *testing.T) {
 type tenantWire struct {
 	mu   sync.Mutex
 	sent []string
+	read []string
 }
 
 func (w *tenantWire) RoundTrip(req *http.Request) (*http.Response, error) {
 	body := `{}`
 	if req.Method == http.MethodGet {
 		body = `{"items":[{"id":"i1","name":"1","description":"old"}]}`
+		w.mu.Lock()
+		w.read = append(w.read, req.URL.Path)
+		w.mu.Unlock()
 	} else {
 		w.mu.Lock()
 		w.sent = append(w.sent, req.Method+" "+req.URL.Path)
@@ -417,5 +422,122 @@ func TestAWriteAcrossTenantsGoesThroughEachTenantsPortal(t *testing.T) {
 	log, _ := os.ReadFile(filepath.Join(root, write.LogName))
 	if !strings.Contains(string(log), "Tractor Supply") || !strings.Contains(string(log), "Other Co") {
 		t.Errorf("writes.log names one tenant: %s", log)
+	}
+}
+
+const copySite = `
+title: Copy a site
+inputs:
+  - name: site
+  - name: into
+endpoints:
+  - name: sites
+    path: /sdwan/v4.9/api/sites
+  - name: site_post
+    method: POST
+    path: /sdwan/v4.9/api/sites
+    in: into
+`
+
+const copySiteMain = `
+return function(ctx)
+  ctx.run("endpoint.sites", {})
+  ctx.run("endpoint.site_post", { body = { name = ctx.input.site .. "-COPY" } })
+end
+`
+
+func twoTenantRuntime(t *testing.T) (*runtime.Runtime, map[string]*tenantWire) {
+	t.Helper()
+	root := t.TempDir()
+	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
+	cfg := &config.Config{Tenants: []config.Tenant{
+		{Name: "Acme Co", TSGID: "t1", Auth: config.AuthBrowser, Added: true},
+		{Name: "Globex", TSGID: "t2", Auth: config.AuthBrowser, Added: true},
+	}}
+	wfRoot := filepath.Join(root, "wf")
+	os.MkdirAll(filepath.Join(wfRoot, "copy"), 0o700)
+	os.WriteFile(filepath.Join(wfRoot, "copy", "workflow.yaml"), []byte(copySite), 0o600)
+	os.WriteFile(filepath.Join(wfRoot, "copy", "main.lua"), []byte(copySiteMain), 0o600)
+	WorkflowsFolder = wfRoot
+	t.Cleanup(func() { WorkflowsFolder = "" })
+	rt := NewRuntime(st, cfg)
+	if w := rt.Warnings(); len(w) > 0 {
+		t.Fatalf("the workflow did not load: %v", w)
+	}
+	wires := map[string]*tenantWire{"t1": {}, "t2": {}}
+	for tsg, w := range wires {
+		c := &http.Client{Transport: w}
+		rt.Clients().Set(tsg, api.NewClient(c, c, "fixture", false, 100, 100))
+	}
+	return rt, wires
+}
+
+func (w *tenantWire) asked() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.sent...)
+}
+
+func TestAWorkflowRunGoesWhereItsTenantInputsSay(t *testing.T) {
+	rt, wires := twoTenantRuntime(t)
+	lines, _, err := exec(rt, WorkflowPrefix+"copy", map[string]string{"site": "S0100", "tenant": "Acme Co", "into": "t2"}, nil, true)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
+	}
+	if got := wires["t1"].asked(); len(got) != 0 {
+		t.Errorf("Acme Co was written to: %v", got)
+	}
+	wires["t1"].mu.Lock()
+	read := wires["t1"].read
+	wires["t1"].mu.Unlock()
+	if len(read) != 1 || read[0] != "/sdwan/v4.9/api/sites" {
+		t.Errorf("Acme Co was read %v, want the run's sites read there", read)
+	}
+	if got := wires["t2"].asked(); len(got) != 1 || got[0] != "POST /sdwan/v4.9/api/sites" {
+		t.Errorf("Globex was sent %v, want the POST that goes in: into", got)
+	}
+	text := strings.Join(lines, "\n")
+	if !strings.Contains(text, "tenant Acme Co") || !strings.Contains(text, "send POST /sdwan/v4.9/api/sites in Globex") {
+		t.Errorf("the run did not say where it went:\n%s", text)
+	}
+
+	_, _, err = exec(rt, WorkflowPrefix+"copy", map[string]string{"site": "S0100", "into": "Globex"}, nil, false)
+	if err == nil || !strings.Contains(err.Error(), "say which with tenant") {
+		t.Errorf("no tenant with two loaded = %v, want it refused", err)
+	}
+	_, _, err = exec(rt, WorkflowPrefix+"copy", map[string]string{"site": "S0100", "tenant": "Initech", "into": "Globex"}, nil, false)
+	if err == nil || !strings.Contains(err.Error(), `no tenant is called "Initech"`) {
+		t.Errorf("an unknown tenant = %v", err)
+	}
+	_, _, err = exec(rt, WorkflowPrefix+"copy", map[string]string{"site": "S0100", "tenant": "t1"}, nil, false)
+	if err == nil || !strings.Contains(err.Error(), "into says which tenant") {
+		t.Errorf("an empty in: input = %v", err)
+	}
+}
+
+func TestEachRowOfAnInputsFileRunsInItsOwnTenant(t *testing.T) {
+	rt, wires := twoTenantRuntime(t)
+	runs := filepath.Join(t.TempDir(), "runs.csv")
+	os.WriteFile(runs, []byte("site,tenant,into\nS0100,Acme Co,Acme Co\nS0200,Globex,Globex\nS0300,Initech,Globex\n"), 0o600)
+	_, _, err := exec(rt, WorkflowPrefix+"copy", map[string]string{EachInput: runs}, nil, true)
+	if err == nil || !strings.Contains(err.Error(), "run 3") || !strings.Contains(err.Error(), "no run was started") {
+		t.Fatalf("a row with an unknown tenant = %v, want every run held back", err)
+	}
+	if n := len(wires["t1"].asked()) + len(wires["t2"].asked()); n != 0 {
+		t.Fatalf("%d writes went out though one row could not be placed", n)
+	}
+	os.WriteFile(runs, []byte("site,tenant,into\nS0100,Acme Co,Acme Co\nS0200,Globex,Globex\n"), 0o600)
+	if lines, _, err := exec(rt, WorkflowPrefix+"copy", map[string]string{EachInput: runs}, nil, true); err != nil {
+		t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
+	}
+	if a, g := wires["t1"].asked(), wires["t2"].asked(); len(a) != 1 || len(g) != 1 {
+		t.Errorf("Acme Co was sent %v and Globex %v, want one each", a, g)
+	}
+}
+
+func TestAnEndpointCannotGoInAnInputThereIsNot(t *testing.T) {
+	_, err := workflow.Parse(filepath.Join(t.TempDir(), "copy"), []byte(strings.Replace(copySite, "in: into", "in: target", 1)))
+	if err == nil || !strings.Contains(err.Error(), "in: target, which is not an input") {
+		t.Errorf("err = %v", err)
 	}
 }

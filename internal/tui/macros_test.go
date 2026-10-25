@@ -447,7 +447,7 @@ func TestTheMenuDoesNotOpenTheListInMacroMode(t *testing.T) {
 	}
 }
 
-func TestTheMacroCursorHighlightsTheWholeLine(t *testing.T) {
+func TestTheMacroCursorIsACaretLikeTheOtherMenus(t *testing.T) {
 	m := macroModel(t)
 	m.width = 120
 
@@ -457,32 +457,30 @@ func TestTheMacroCursorHighlightsTheWholeLine(t *testing.T) {
 	if len(rows) < 2 {
 		t.Fatalf("%d macros, want at least two to tell the lines apart", len(rows))
 	}
-
-	var want string
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(plain(line), rows[0].Name) {
-			want = line
-			break
+	lineOf := func(out, text string) string {
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(plain(line), text) {
+				return line
+			}
 		}
+		t.Fatalf("no line for %s:\n%s", text, out)
+		return ""
 	}
-	if want == "" {
-		t.Fatalf("no line for %s:\n%s", rows[0].Name, out)
+
+	here, other := lineOf(out, rows[0].Name), lineOf(out, rows[1].Name)
+	if !strings.HasPrefix(plain(here), "> "+rows[0].Name) || !strings.HasPrefix(plain(other), "  "+rows[1].Name) {
+		t.Errorf("the cursor row moved instead of taking a caret:\n%q\n%q", plain(here), plain(other))
 	}
-	if !strings.Contains(want, "\x1b[1;35m") {
-		t.Errorf("the cursor line is not highlighted:\n%q", want)
+	if !strings.Contains(here, "\x1b[1;35m") {
+		t.Errorf("the cursor row did not change colour:\n%q", here)
 	}
-	if n := strings.Count(want, "\x1b[0m") + strings.Count(want, "\x1b[m"); n > 1 {
-		t.Errorf("the highlight is broken into %d runs:\n%q", n, want)
+	if p := plain(here); p != strings.TrimRight(p, " ") {
+		t.Errorf("the cursor row is padded out into a bar:\n%q", p)
 	}
 
 	m.macroCursor = 0
-	out = m.viewMacros()
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(plain(line), "+ New Macro") {
-			if !strings.Contains(line, "\x1b[1;35m") {
-				t.Errorf("the new-macro row is not highlighted:\n%q", line)
-			}
-		}
+	if line := lineOf(m.viewMacros(), "+ New Macro"); !strings.HasPrefix(plain(line), "> + New Macro") || !strings.Contains(line, "\x1b[1;35m") {
+		t.Errorf("the new-macro row does not take the caret:\n%q", line)
 	}
 }
 

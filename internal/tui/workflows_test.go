@@ -174,3 +174,40 @@ func TestTheWorkflowListFiltersLikeTheMacroList(t *testing.T) {
 		t.Errorf("e would edit %+v, want the workflow's own workflow.yaml", target)
 	}
 }
+
+func TestTheWorkflowFormLinesUpItsFieldsAndLeavesOutTheRunsFile(t *testing.T) {
+	m, eid, site := workflowTUI(t)
+	m.width, m.height = 100, 30
+	m = openDescribe(t, m, eid, site)
+	for _, a := range m.wf.cmd.Args {
+		if a.Name == app.EachInput {
+			t.Fatalf("the form asks for %s, a runs file, though it runs once", a.Name)
+		}
+	}
+	for i := range m.wf.inputs {
+		m.wf.inputs[i].SetValue("v")
+	}
+	out := plain(m.viewWorkflows())
+	if strings.Contains(out, "file of runs") {
+		t.Errorf("the runs file is on the form:\n%s", out)
+	}
+	col := -1
+	for _, a := range m.wf.cmd.Args {
+		for _, line := range strings.Split(out, "\n") {
+			if !strings.HasPrefix(strings.TrimPrefix(strings.TrimPrefix(line, "> "), "  "), a.Name+" ") {
+				continue
+			}
+			i := len(line) - len(strings.TrimLeft(line[2+len(a.Name):], " "))
+			if col >= 0 && i != col {
+				t.Errorf("%s's box starts at column %d, the others at %d:\n%s", a.Name, i, col, out)
+			}
+			col = i
+			if a.Required && !strings.Contains(line, "required") {
+				t.Errorf("%s is required and the form does not say so:\n%s", a.Name, line)
+			}
+		}
+	}
+	if col < 0 {
+		t.Fatalf("no field lines:\n%s", out)
+	}
+}

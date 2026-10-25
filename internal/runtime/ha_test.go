@@ -365,3 +365,94 @@ func TestARefreshStoppedPartWayAddsNoRows(t *testing.T) {
 		t.Errorf("after the stop: %d rows, issue %q, want the refresh dropped", n, rt.Fleet().Issues["111"])
 	}
 }
+
+type countedQueries struct {
+	next    http.RoundTripper
+	mu      sync.Mutex
+	queries int
+}
+
+func (r *countedQueries) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/spokeclusters/status/query") {
+		r.mu.Lock()
+		r.queries++
+		r.mu.Unlock()
+	}
+	return r.next.RoundTrip(req)
+}
+
+func (r *countedQueries) asked() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.queries
+}
+
+func haList(t *testing.T, rt *Runtime, args map[string]string) (map[string]any, string) {
+	t.Helper()
+	var said []string
+	c := &Call{Args: args, Out: func(s string) { said = append(said, s) }}
+	if err := rt.Exec(c, "ha.list"); err != nil {
+		t.Fatalf("%v: %v", args, err)
+	}
+	states, _ := c.Result.(map[string]any)
+	return states, strings.Join(said, "\n")
+}
+
+func TestHAListNamesOneActiveAndOneStandbyPerPair(t *testing.T) {
+	q := &countedQueries{}
+	rt := haRuntimeWith(t, pairedFleet(3), func(next http.RoundTripper) http.RoundTripper { q.next = next; return q })
+	fresh := New()
+	fresh.UseConfig(rt.Store(), rt.Config())
+	fresh.UseConnector(rt.conn)
+	fresh.SetListCalls(rt.listCalls)
+
+	states, said := haList(t, fresh, map[string]string{"tenant": "acme co"})
+	if len(fresh.Elements()) != 6 || len(states) != 6 || q.asked() == 0 {
+		t.Fatalf("rows %d, states %v, queries %d\n%s", len(fresh.Elements()), states, q.asked(), said)
+	}
+	bySite := map[string][]string{}
+	for _, el := range fresh.Elements() {
+		w, _ := states[el.ID].(string)
+		bySite[el.SiteID] = append(bySite[el.SiteID], w)
+	}
+	for site, ws := range bySite {
+		if len(ws) != 2 || !(ws[0] == HAActive && ws[1] == HAStandby || ws[0] == HAStandby && ws[1] == HAActive) {
+			t.Errorf("site %s = %v, want one active and one standby", site, ws)
+		}
+	}
+	if !strings.Contains(said, "Acme Co: 6 clustered elements, 3 active, 3 standby, 0 unknown (6 asked of the portal)") {
+		t.Errorf("said:\n%s", said)
+	}
+
+	n := q.asked()
+	if again, said := haList(t, fresh, map[string]string{"tenant": "111"}); len(again) != 6 || q.asked() != n ||
+		!strings.Contains(said, "(read already)") {
+		t.Errorf("a second ask went to the portal: %d -> %d\n%s", n, q.asked(), said)
+	}
+	if _, said := haList(t, fresh, map[string]string{"tenant": "111", "refresh": "yes"}); q.asked() == n {
+		t.Errorf("refresh=yes did not ask the portal\n%s", said)
+	}
+
+	saved := New()
+	saved.UseConfig(rt.Store(), rt.Config())
+	saved.UseConnector(rt.conn)
+	saved.SetListCalls(rt.listCalls)
+	if rows, _, _ := saved.LoadCache(); rows != 6 {
+		t.Fatalf("cache rows %d", rows)
+	}
+	n = q.asked()
+	if _, said := haList(t, saved, map[string]string{"tenant": "111"}); q.asked() == n {
+		t.Errorf("a saved HA word was trusted without asking the portal\n%s", said)
+	}
+}
+
+func TestHAListRefusesATenantItCannotName(t *testing.T) {
+	rt := haRuntime(t)
+	if err := rt.Exec(&Call{Args: map[string]string{"tenant": "Nobody"}}, "ha.list"); err == nil ||
+		!strings.Contains(err.Error(), `no tenant is called "Nobody"`) {
+		t.Errorf("an unknown tenant = %v", err)
+	}
+	if err := New().Exec(&Call{}, "ha.list"); err == nil || !strings.Contains(err.Error(), "no tenant") {
+		t.Errorf("no tenant at all = %v", err)
+	}
+}

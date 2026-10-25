@@ -70,7 +70,7 @@ func RunStream(ctx context.Context, o Options, targets []Target) <-chan Event {
 					res, err = runElement(ctx, t.Client, o, t)
 				}
 				if err != nil {
-					res = Result{ElementID: t.ElementID, Error: err.Error()}
+					res.ElementID, res.Error = t.ElementID, err.Error()
 				}
 				out <- Event{
 					Index:   i,

@@ -23,6 +23,8 @@ const (
 	defaultEntry = "main"
 
 	DefaultBudget = 30 * time.Minute
+
+	TenantInput = "tenant"
 )
 
 type Workflow struct {
@@ -33,12 +35,17 @@ type Workflow struct {
 	Entry       string  `yaml:"entry,omitempty"`
 	Budget      string  `yaml:"budget,omitempty"`
 
-	Endpoints []endpoint.Endpoint `yaml:"endpoints,omitempty"`
+	Endpoints []Call `yaml:"endpoints,omitempty"`
 
 	Dir    string        `yaml:"-"`
 	budget time.Duration `yaml:"-"`
 	set    *script.Set   `yaml:"-"`
 	calls  *endpoint.Set `yaml:"-"`
+}
+
+type Call struct {
+	endpoint.Endpoint `yaml:",inline"`
+	In                string `yaml:"in,omitempty"`
 }
 
 type Input struct {
@@ -106,11 +113,18 @@ func Parse(dir string, b []byte) (Workflow, error) {
 	if err := w.normalize(); err != nil {
 		return Workflow{}, fmt.Errorf("%s: %w", name, err)
 	}
-	if w.calls, err = endpoint.Build(name, "", nil, w.Endpoints); err != nil {
+	eps := make([]endpoint.Endpoint, len(w.Endpoints))
+	for i, e := range w.Endpoints {
+		eps[i] = e.Endpoint
+	}
+	if w.calls, err = endpoint.Build(name, "", nil, eps); err != nil {
 		return Workflow{}, fmt.Errorf("%s/%s: %w", name, ManifestName, err)
 	}
 	for _, e := range w.Endpoints {
 		err := e.SDWAN()
+		if err == nil && e.In != "" && !w.hasInput(e.In) {
+			err = fmt.Errorf("%s goes in: %s, which is not an input", e.Name, e.In)
+		}
 		if err == nil && strings.EqualFold(e.Method, "WS") {
 			err = fmt.Errorf("%s opens a session; a workflow calls, it does not dial", e.Name)
 		}
@@ -135,6 +149,28 @@ func (w Workflow) Endpoint(name string) (endpoint.Endpoint, bool) {
 	}
 	e, err := w.calls.Get(name)
 	return e, err == nil
+}
+
+func (w Workflow) In(name string) string {
+	for _, e := range w.Endpoints {
+		if e.Name == name {
+			return e.In
+		}
+	}
+	return ""
+}
+
+func (w Workflow) Declares(name string) bool {
+	for _, in := range w.Inputs {
+		if in.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (w Workflow) hasInput(name string) bool {
+	return name == TenantInput || w.Declares(name)
 }
 
 func (w *Workflow) normalize() error {

@@ -115,8 +115,10 @@ type signedInMsg struct {
 }
 
 type formField struct {
-	label string
-	input textinput.Model
+	label   string
+	input   textinput.Model
+	choices []string
+	pick    int
 }
 
 type tuiModel struct {
@@ -144,6 +146,7 @@ type tuiModel struct {
 	formReturn     tuiPhase
 	formTenantName string
 	formTenantTSG  string
+	formTenants    []config.Tenant
 	formUserName   string
 	formAuth       string
 	formOldTSG     string

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -219,13 +220,50 @@ func (m tuiModel) openTenantForm(auth string) (tea.Model, tea.Cmd) {
 	return m.openForm(formTenant, "Add service account", phaseAddTenant, fields)
 }
 
+func newChoice(label string, choices []string, pick int) formField {
+	f := newField(label, "", false)
+	f.choices, f.pick = choices, pick
+	return f
+}
+
 func (m tuiModel) openUserFormFor(t config.Tenant) (tea.Model, tea.Cmd) {
+	m.formTenants = m.userFormTenants(t)
+	names := make([]string, len(m.formTenants))
+	pick := 0
+	for i, c := range m.formTenants {
+		names[i] = c.Name
+		if c.TSGID == t.TSGID {
+			pick = i
+		}
+	}
 	m.formTenantName = t.Name
 	m.formTenantTSG = t.TSGID
-	return m.openForm(formUser, "Add ION user to "+t.Name, phaseAddUser, []formField{
+	return m.openForm(formUser, "Add ION user", phaseAddUser, []formField{
+		newChoice("tenant", names, pick),
 		newField("ion user", "", false),
 		newField("ion password", "", true),
 	})
+}
+
+func (m tuiModel) userFormTenants(t config.Tenant) []config.Tenant {
+	out := m.usersPanelTenants()
+	seen := map[string]bool{}
+	for _, c := range out {
+		seen[c.TSGID] = true
+	}
+	if cfg := m.cfg(); cfg != nil {
+		for _, c := range cfg.Tenants {
+			if c.TSGID != "" && !seen[c.TSGID] {
+				seen[c.TSGID] = true
+				out = append(out, c)
+			}
+		}
+	}
+	if !seen[t.TSGID] {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
+	return out
 }
 
 func (m tuiModel) openEditPasswordForm(user string) (tea.Model, tea.Cmd) {
@@ -272,6 +310,26 @@ func (m tuiModel) onFormKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 		}
 	}
 
+	if f := m.form[m.formCursor]; len(f.choices) > 0 {
+		switch key {
+		case "left", "right":
+			step := 1
+			if key == "left" {
+				step = -1
+			}
+			n := len(f.choices)
+			m.form[m.formCursor].pick = (f.pick + step + n) % n
+			if m.formKind == formUser {
+				t := m.formTenants[m.form[m.formCursor].pick]
+				m.formTenantName, m.formTenantTSG = t.Name, t.TSGID
+			}
+			return m, nil
+		case "esc", "tab", "down", "shift+tab", "up", "enter":
+		default:
+			return m, nil
+		}
+	}
+
 	switch key {
 	case "esc":
 		m.form = nil
@@ -313,6 +371,9 @@ func (m tuiModel) formValue(i int) string {
 	if i >= len(m.form) {
 		return ""
 	}
+	if f := m.form[i]; len(f.choices) > 0 {
+		return f.choices[f.pick]
+	}
 	return strings.TrimSpace(m.form[i].input.Value())
 }
 
@@ -341,7 +402,7 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case formUser:
-		if _, err := m.runtime().AddUser(m.formTenantName, m.formTenantTSG, m.formValue(0), m.formValue(1)); err != nil {
+		if _, err := m.runtime().AddUser(m.formTenantName, m.formTenantTSG, m.formValue(1), m.formValue(2)); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
@@ -546,7 +607,14 @@ func (m tuiModel) viewForm() string {
 		} else {
 			label = ui.StyleDim.Render(label)
 		}
-		b.WriteString("  " + label + f.input.View() + "\n")
+		value := f.input.View()
+		switch {
+		case len(f.choices) > 0 && i == m.formCursor:
+			value = ui.StyleDim.Render("← ") + ui.StyleElement.Render(f.choices[f.pick]) + ui.StyleDim.Render(" →")
+		case len(f.choices) > 0:
+			value = f.choices[f.pick]
+		}
+		b.WriteString("  " + label + value + "\n")
 	}
 
 	if m.formKind == formMacro {
@@ -560,6 +628,9 @@ func (m tuiModel) viewForm() string {
 
 	b.WriteString("\n")
 	hint := "tab next · enter save · esc cancel"
+	if m.formKind == formUser {
+		hint = "←→ tenant · tab next · enter save · esc cancel"
+	}
 	if m.formKind == formMacro {
 		hint = "tab next/add · backspace on an empty line removes it · enter save · esc cancel"
 	}

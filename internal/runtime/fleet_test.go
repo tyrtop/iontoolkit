@@ -15,6 +15,7 @@ import (
 	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/sase/api"
+	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
 const twoTenants = `
@@ -369,4 +370,53 @@ func TestALineTypedIntoASessionIsRanked(t *testing.T) {
 		}
 	}
 	t.Errorf("ranked = %v, want the typed line in the history", rt.Ranked("", "overlay"))
+}
+
+type droppedSession struct {
+	sase.Client
+	drop map[string]bool
+}
+
+func (d droppedSession) ToolkitSession(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
+	if d.drop[eid] {
+		return nil, errors.New("waiting for shell: i/o timeout")
+	}
+	return d.Client.ToolkitSession(ctx, eid, prompt, user, pass, cmds)
+}
+
+func TestABatchKeepsWhatAnsweredWhenSomeElementsFail(t *testing.T) {
+	rt := deviceRuntime(t)
+	els := rt.Elements()
+	ids := els[0].ID + "," + els[1].ID
+	drop := map[string]bool{els[1].ID: true}
+	d := rt.dev
+	session := d.Session
+	d.Session = func(c *api.Client) sase.Client { return droppedSession{session(c), drop} }
+	rt.UseDevice(d)
+
+	var said []string
+	c := &Call{Ctx: context.Background(), Args: map[string]string{"cmd": "dump device status", "elements": ids},
+		Out: func(s string) { said = append(said, s) }}
+	if err := rt.Exec(c, "batch.run"); err != nil {
+		t.Fatalf("one element failing failed the run: %v\n%s", err, strings.Join(said, "\n"))
+	}
+	b, _ := c.Result.(Batch)
+	var failed sase.Result
+	for _, r := range b.Results {
+		if r.ElementID == els[1].ID {
+			failed = r
+		}
+	}
+	if b.Finished != 2 || b.Failed != 1 || failed.Error == "" || failed.Name != els[1].Name || !failed.Connected {
+		t.Errorf("batch = %+v, want the answer kept and the failed ION's status with its error", b)
+	}
+	if out := strings.Join(said, "\n"); !strings.Contains(out, "Serial : FAKE") || !strings.Contains(out, "2 of 2 elements done, 1 failed") {
+		t.Errorf("said:\n%s", out)
+	}
+
+	drop[els[0].ID] = true
+	if err := rt.Exec(&Call{Ctx: context.Background(), Args: map[string]string{"cmd": "dump device status", "elements": ids}}, "batch.run"); err == nil ||
+		!strings.Contains(err.Error(), "2 of 2 elements failed") {
+		t.Errorf("every element failing = %v, want an error", err)
+	}
 }

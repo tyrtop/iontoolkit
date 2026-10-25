@@ -220,7 +220,8 @@ func TestAddUserFromElementsReturnsToElements(t *testing.T) {
 		t.Errorf("formReturn = %v, want phasePicking", f.formReturn)
 	}
 
-	f = typeString(t, f, "netadmin")
+	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	f = typeString(t, mm.(tuiModel), "netadmin")
 	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	done := mm.(tuiModel)
 
@@ -244,7 +245,8 @@ func TestAddUserFromSettingsReturnsToSettings(t *testing.T) {
 		t.Errorf("formReturn = %v, want phaseSettings", f.formReturn)
 	}
 
-	f = typeString(t, f, "ops2")
+	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	f = typeString(t, mm.(tuiModel), "ops2")
 	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if got := mm.(tuiModel).phase; got != phaseSettings {
 		t.Errorf("phase = %v, want phaseSettings", got)
@@ -786,5 +788,46 @@ func TestTheDebugPageKeepsTheFrameHeight(t *testing.T) {
 	if want := len(strings.Split(general.viewSettings(), "\n")); got != want {
 		t.Errorf("the Debug page is %d lines where General is %d on a %d-row terminal; the tail must be clipped, not grow the frame",
 			got, want, m.height)
+	}
+}
+
+func TestAddUserPicksItsTenantWithTheArrows(t *testing.T) {
+	m := settingsModel(t)
+	m.setSection = secUsers
+	m.setFocus = focusContent
+	m.setCursor = 0
+
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	f := mm.(tuiModel)
+	if f.formKind != formUser || f.form[0].label != "tenant" || f.formValue(0) != "Acme Co" {
+		t.Fatalf("form %d opens on %q = %q, want the tenant field on Acme Co", f.formKind, f.form[0].label, f.formValue(0))
+	}
+	if got := plain(f.viewForm()); !strings.Contains(got, "← Acme Co →") || !strings.Contains(got, "←→ tenant") {
+		t.Errorf("the tenant field does not show it can be changed:\n%s", got)
+	}
+
+	f = typeString(t, f, "Lab")
+	if f.formValue(0) != "Acme Co" {
+		t.Errorf("typing on the tenant field changed it to %q", f.formValue(0))
+	}
+	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	f = mm.(tuiModel)
+	if f.formValue(0) != "Lab" || f.formTenantTSG != "2" {
+		t.Fatalf("→ picked %q (%s), want Lab", f.formValue(0), f.formTenantTSG)
+	}
+
+	for _, s := range []string{"labops", "pw"} {
+		mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+		f = typeString(t, mm.(tuiModel), s)
+	}
+	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	done := mm.(tuiModel)
+	lab, _ := done.cfg().Tenant("Lab")
+	acme, _ := done.cfg().Tenant("Acme Co")
+	if !lab.HasUser("labops") || acme.HasUser("labops") {
+		t.Errorf("labops on Lab %v, on Acme Co %v; want it on the tenant picked", lab.HasUser("labops"), acme.HasUser("labops"))
+	}
+	if got, _ := done.store().Secrets.Get(config.IONPassKey("2", "labops")); got != "pw" {
+		t.Errorf("password = %q, want it saved under Lab", got)
 	}
 }

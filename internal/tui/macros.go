@@ -319,7 +319,7 @@ func (m tuiModel) viewMacros() string {
 	width := max(20, m.width-2)
 	line := func(here bool, plain, styled string) string {
 		if here {
-			return ui.StyleRow.Render(fmt.Sprintf("%-*s", width, ui.Truncate(plain, width))) + "\n"
+			return ui.StyleCmd.Render("> ") + ui.StyleRow.Render(ui.Truncate(plain, width)) + "\n"
 		}
 		return "  " + styled + "\n"
 	}

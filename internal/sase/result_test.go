@@ -98,3 +98,23 @@ func TestRunElementReportsAFailedSession(t *testing.T) {
 		t.Errorf("err = %q, want the element id in the message", err)
 	}
 }
+
+func TestAFailedSessionKeepsTheIONsStatusAndWhatRan(t *testing.T) {
+	f := &fakeClient{
+		lookup: func(context.Context, string) (api.Element, error) {
+			return api.Element{Name: "ion1", Model: "ion 1200-s", Software: "6.4.1", Connected: true}, nil
+		},
+		session: func(context.Context, string, string, string, string, []string) ([]ioncli.CommandOutput, error) {
+			return []ioncli.CommandOutput{{Command: "uptime", Output: "up 3 days"}}, errors.New(`read after "dump device status": EOF`)
+		},
+	}
+	var got Result
+	for ev := range RunStream(context.Background(), testOpts(), []Target{{ElementID: "123", Client: f, User: "u", Pass: "p"}}) {
+		if ev.Done {
+			got = ev.Result
+		}
+	}
+	if got.Error == "" || got.ElementID != "123" || got.Name != "ion1" || got.Model != "ion 1200-s" || !got.Connected || len(got.Commands) != 1 {
+		t.Errorf("result = %+v, want the error with the ION's status and what ran before it", got)
+	}
+}
