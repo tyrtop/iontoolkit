@@ -175,6 +175,41 @@ func (m *Manager) CloseActive() {
 	m.notify(s.ElementID)
 }
 
+func (m *Manager) Close(eid string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	at := -1
+	for i, s := range m.sessions {
+		if s.ElementID == eid {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		m.mu.Unlock()
+		return false
+	}
+	s := m.sessions[at]
+	m.lastEID, m.lastName, m.hasLast = s.ElementID, s.Name, true
+	m.sessions = append(m.sessions[:at], m.sessions[at+1:]...)
+	switch {
+	case at < m.active:
+		m.active--
+	case m.active >= len(m.sessions):
+		m.active = len(m.sessions) - 1
+	}
+	if m.active < 0 {
+		m.active = 0
+	}
+	m.mu.Unlock()
+
+	s.Close()
+	m.notify(s.ElementID)
+	return true
+}
+
 func (m *Manager) CloseDeadOn(eid string) int {
 	if m == nil {
 		return 0

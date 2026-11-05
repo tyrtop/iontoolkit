@@ -174,6 +174,7 @@ type Run struct {
 	Input    map[string]string
 	DoIt     bool
 	OnStatus func(string)
+	OnReturn func(any)
 }
 
 type Call struct {
@@ -383,11 +384,14 @@ func (s *Set) Run(ctx context.Context, r Run) ([]Effect, error) {
 
 	L.Push(body)
 	L.Push(api)
-	if err := L.PCall(1, 0, nil); err != nil {
+	if err := L.PCall(1, 1, nil); err != nil {
 		if failed != nil {
 			return effects, failed
 		}
 		return effects, stop(err)
+	}
+	if v := L.Get(-1); v != lua.LNil && r.OnReturn != nil {
+		r.OnReturn(fromLua(v))
 	}
 	return effects, nil
 }

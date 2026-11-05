@@ -458,6 +458,8 @@ func (rt *Runtime) RunBatch(ctx context.Context, opts sase.Options, targets []sa
 }
 
 func (rt *Runtime) runBatch(c *Call, cmds []string, rows []Element) error {
+	done := rt.beginWait(Wait{What: fmt.Sprintf("%s on %d element(s)", strings.Join(cmds, ", "), len(rows)), Since: time.Now()})
+	defer done()
 	events, err := rt.StartBatch(c.Ctx, cmds, rows)
 	if err != nil {
 		return err

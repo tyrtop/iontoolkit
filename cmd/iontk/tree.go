@@ -116,7 +116,7 @@ func fromRuntime(c *cobra.Command, rc runtime.Command, in io.Reader) {
 	}
 	var doit *bool
 	if rc.Writes {
-		doit = f.Bool("doit", false, "send the writes; without it the run is a dry run that only lists them")
+		doit = f.Bool("doit", false, "Send the writes instead of only listing them")
 	}
 
 	name, declared := rc.Name, rc.Args

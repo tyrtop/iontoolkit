@@ -253,8 +253,10 @@ type Host struct {
 
 type Result struct {
 	DoIt   bool
+	Inputs map[string]string
 	Status []string
 	Writes []script.Write
+	Data   any
 }
 
 func (w Workflow) Run(ctx context.Context, input map[string]string, host Host, doit bool) (Result, error) {
@@ -263,7 +265,7 @@ func (w Workflow) Run(ctx context.Context, input map[string]string, host Host, d
 		return Result{}, err
 	}
 
-	res := Result{DoIt: doit}
+	res := Result{DoIt: doit, Inputs: in}
 	run := script.Run{
 		Name:   w.Entry,
 		Input:  in,
@@ -276,6 +278,7 @@ func (w Workflow) Run(ctx context.Context, input map[string]string, host Host, d
 				host.OnStatus(line)
 			}
 		},
+		OnReturn: func(v any) { res.Data = v },
 	}
 	if host.Exec != nil {
 		run.Exec = func(c script.Call) ([]string, any, error) {

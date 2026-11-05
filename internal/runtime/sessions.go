@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"tyrtop.com/iontk/internal/ionterm"
@@ -185,14 +186,65 @@ func (rt *Runtime) InsertLine(text string) error {
 }
 
 func (rt *Runtime) waitLoggedIn(ctx context.Context) {
-	s := rt.Sessions().Active()
+	waitReady(ctx, rt.Sessions().Active())
+}
+
+func waitReady(ctx context.Context, s *ionterm.Session) {
 	if s == nil {
 		return
 	}
 	ready := time.Now().Add(10 * time.Second)
-	for !s.LoggedIn() && time.Now().Before(ready) && ctx.Err() == nil {
+	for !(s.LoggedIn() && promptSeen(s)) && time.Now().Before(ready) && ctx.Err() == nil {
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+func promptSeen(s *ionterm.Session) bool {
+	return s.Name == "" || strings.Contains(s.Buffer(), s.Name+"#")
+}
+
+func (rt *Runtime) sessionFor(c *Call, cmd string) (*ionterm.Session, error) {
+	if eid := c.Arg("element"); eid != "" {
+		if s := rt.Sessions().Find(eid); s != nil {
+			return s, nil
+		}
+		return nil, fmt.Errorf("%s: no session is open on element %s", cmd, eid)
+	}
+	if s := rt.Sessions().Active(); s != nil {
+		return s, nil
+	}
+	return nil, fmt.Errorf("%s: no session open", cmd)
+}
+
+func awaitText(ctx context.Context, s *ionterm.Session, before, expect string, wait time.Duration) (string, bool) {
+	deadline := time.Now().Add(wait)
+	for {
+		out, found := newOutput(s.Buffer(), before, expect)
+		if found || !time.Now().Before(deadline) || ctx.Err() != nil {
+			return out, found
+		}
+		select {
+		case <-time.After(250 * time.Millisecond):
+		case <-ctx.Done():
+		}
+	}
+}
+
+func newOutput(now, before, expect string) (string, bool) {
+	after := now
+	lines := strings.Split(before, "\n")
+	anchor := strings.Join(lines[max(0, len(lines)-3):], "\n")
+	if i := strings.LastIndex(now[:min(len(now), len(before))], anchor); anchor != "" && i >= 0 {
+		after = now[i+len(anchor):]
+	}
+	_, rest, ok := strings.Cut(after, "\n")
+	if !ok {
+		return "", false
+	}
+	if i := strings.Index(rest, expect); i >= 0 {
+		return strings.TrimRight(rest[:i], "\n"), true
+	}
+	return rest, false
 }
 
 func sessionCommands() []Command {
@@ -225,11 +277,12 @@ func sessionCommands() []Command {
 			},
 		},
 		{
-			Name: "session.export", Help: "write the active session's scrollback to a file under exports/",
+			Name: "session.export", Help: "save a session's scrollback to a file under exports/",
+			Args: []Arg{{Name: "element", Help: "Element `ID` of the session to save (default: the active session)"}},
 			Run: func(rt *Runtime, c *Call) error {
-				s := rt.Sessions().Active()
-				if s == nil {
-					return fmt.Errorf("no session open")
+				s, err := rt.sessionFor(c, "session.export")
+				if err != nil {
+					return err
 				}
 				where, err := rt.Export(s.Name, "txt", s.Buffer())
 				if err == nil {
@@ -262,8 +315,19 @@ func sessionCommands() []Command {
 			Run: func(rt *Runtime, _ *Call) error { rt.Sessions().Prev(); return nil },
 		},
 		{
-			Name: "session.close", Help: "close the active session",
-			Run: func(rt *Runtime, _ *Call) error { rt.Sessions().CloseActive(); return nil },
+			Name: "session.close", Help: "close a session",
+			Args: []Arg{{Name: "element", Help: "Element `ID` of the session to close (default: the active session)"}},
+			Run: func(rt *Runtime, c *Call) error {
+				eid := c.Arg("element")
+				if eid == "" {
+					rt.Sessions().CloseActive()
+					return nil
+				}
+				if !rt.Sessions().Close(eid) {
+					return fmt.Errorf("session.close: no session is open on element %s", eid)
+				}
+				return nil
+			},
 		},
 		{
 			Name: "session.detach", Help: "put the active session aside, still connected",
@@ -306,28 +370,54 @@ func sessionCommands() []Command {
 			},
 		},
 		{
-			Name: "session.send", Slow: true, Help: "type a line into the active session and wait for it to settle",
-			Args: []Arg{{Name: "text", Required: true}, {Name: "wait", Default: "2s"}},
+			Name: "session.send", Slow: true,
+			Help: "type a line into a session and wait for the answer",
+			Args: []Arg{{Name: "text", Required: true, Help: "The `line` to type"},
+				{Name: "wait", Default: "2s", Help: "Time to wait, as a `duration` (with --expect, the most to wait)"},
+				{Name: "expect", Help: "Stop waiting once `text` comes back after the line, such as the prompt"},
+				{Name: "element", Help: "Element `ID` of the session to type into (default: the active session)"}},
 			Run: func(rt *Runtime, c *Call) error {
-				s := rt.Sessions().Active()
-				if s == nil {
-					return fmt.Errorf("session.send: no session open")
+				s, err := rt.sessionFor(c, "session.send")
+				if err != nil {
+					return err
 				}
 				wait, err := time.ParseDuration(c.Arg("wait"))
 				if err != nil {
 					return fmt.Errorf("session.send: wait %q is not a duration", c.Arg("wait"))
 				}
-				rt.waitLoggedIn(c.Ctx)
-				s.SendText(c.Arg("text") + "\r")
-				select {
-				case <-time.After(wait):
-				case <-c.Ctx.Done():
+				waitReady(c.Ctx, s)
+				text, expect := c.Arg("text"), c.Arg("expect")
+				now := time.Now()
+				done := rt.beginWait(Wait{What: s.Name + ": " + strings.TrimSpace(text), Since: now, Until: now.Add(wait)})
+				defer done()
+				before := s.Buffer()
+				s.SendText(text + "\r")
+				if expect == "" {
+					select {
+					case <-time.After(wait):
+					case <-c.Ctx.Done():
+					}
+					c.Say("%s", screenText(s.Render()))
+					return nil
 				}
-				c.Say("%s", s.Render())
+				out, found := awaitText(c.Ctx, s, before, expect, wait)
+				c.Say("%s", screenText(s.Render()))
+				c.Result = map[string]any{"found": found, "output": out}
 				return nil
 			},
 		},
 	}
+}
+
+func screenText(screen string) string {
+	lines := strings.Split(screen, "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(l, " ")
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (rt *Runtime) ResetSessions() {

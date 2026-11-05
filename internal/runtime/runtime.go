@@ -105,6 +105,8 @@ type Runtime struct {
 	ha     haState
 	cells  cellsState
 	batch  batchState
+	runs   runsState
+	waits  waitsState
 	sess   sessionsState
 	data   dataState
 	hist   history
@@ -127,7 +129,7 @@ type Runtime struct {
 func New() *Runtime {
 	rt := &Runtime{cmds: map[string]Command{}, opts: map[string]Option{}, subs: map[int]chan Event{}, changes: make(chan Event, 1024)}
 	rt.subs[-1] = rt.changes
-	for _, c := range concat(listCommands(), optionCommands(), fleetCommands(), haCommands(), batchCommands(), sessionCommands(), dataCommands(), historyCommands(), tenantCommands(), inspectCommands(), tabCommands(), resultCommands()) {
+	for _, c := range concat(listCommands(), optionCommands(), fleetCommands(), haCommands(), batchCommands(), runsCommands(), sessionCommands(), dataCommands(), historyCommands(), tenantCommands(), inspectCommands(), tabCommands(), resultCommands()) {
 		rt.Register(c)
 	}
 	for _, o := range builtinOptions() {

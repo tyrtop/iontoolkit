@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/runtime"
@@ -86,11 +87,11 @@ func workflowCommand(w workflow.Workflow) runtime.Command {
 	}
 	if !w.Declares(workflow.TenantInput) {
 		args = append(args, runtime.Arg{Name: workflow.TenantInput,
-			Help: "the tenant the run's calls go to, by name or tsg; needed when more than one is loaded"})
+			Help: "Tenant to run against, by name or TSG ID (needed when more than one is loaded)"})
 	}
 	if each != "" {
 		args = append(args, runtime.Arg{Name: each,
-			Help: "file of runs, one per entry: YAML or JSON, a list of maps of the inputs, or CSV, a header row naming them; the inputs given here fill what an entry leaves out; runs go at once, up to --concurrency"})
+			Help: "Run once for each row of a CSV, YAML or JSON `file` (flags fill in what a row leaves out)"})
 	}
 	return runtime.Command{
 		Name: WorkflowPrefix + w.Name, Help: w.Title, Long: w.Description, Slow: true,
@@ -144,14 +145,16 @@ func place(rt *runtime.Runtime, w workflow.Workflow, given map[string]string) (p
 }
 
 func runWorkflow(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, given map[string]string) error {
+	rt.BeginRuns(1)
 	p, err := place(rt, w, given)
 	if err != nil {
 		return err
 	}
-	return runPlaced(rt, c, w, p)
+	return runPlaced(rt, c, w, p, 0)
 }
 
-func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p placed) error {
+func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p placed, at int) error {
+	started := time.Now()
 	run, ok := p.tenants[workflow.TenantInput]
 	if !ok {
 		run, _ = rt.Tenant()
@@ -188,6 +191,15 @@ func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p plac
 	}
 	res, err := w.Run(c.Ctx, p.input, host, c.DoIt)
 	c.Result = res
+	record := runtime.Run{Workflow: w.Name, Tenant: run.Name, TSG: run.TSGID, Inputs: res.Inputs, DoIt: c.DoIt,
+		Started: started, Finished: time.Now(), Status: append([]string{}, res.Status...), Writes: res.Writes, Data: res.Data}
+	if record.Inputs == nil {
+		record.Inputs = p.input
+	}
+	if err != nil {
+		record.Error = err.Error()
+	}
+	rt.EndRun(at, record)
 	return err
 }
 
@@ -263,6 +275,7 @@ func runEach(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each str
 	}
 	at := max(1, Defaults.Concurrency)
 	c.Say("%d run(s), up to %d at a time", len(runs), at)
+	rt.BeginRuns(len(runs))
 	slots := make(chan struct{}, at)
 	errs := make([]error, len(runs))
 	var wg sync.WaitGroup
@@ -280,7 +293,7 @@ func runEach(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each str
 			defer func() { <-slots }()
 			say(tags[i], workflow.Describe(run))
 			one := &runtime.Call{Ctx: c.Ctx, DoIt: c.DoIt, Out: func(l string) { say(tags[i], l) }}
-			if errs[i] = runPlaced(rt, one, w, input); errs[i] != nil {
+			if errs[i] = runPlaced(rt, one, w, input, i); errs[i] != nil {
 				say(tags[i], "failed: "+errs[i].Error())
 			}
 		}()

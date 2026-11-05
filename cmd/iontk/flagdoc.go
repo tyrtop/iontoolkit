@@ -59,7 +59,7 @@ var flagGroups = []struct {
 	{"Throughput", "Rate limits are the API's, not the device's.", []string{
 		"concurrency", "rps", "burst",
 	}},
-	{"Output", "`--orientation` is read by `table` and `csv` only; the other formats have no rows to sort.", []string{
+	{"Output", "`--orientation` is read by `table` and `csv` only; the other formats have no rows to sort. A workflow prints its lines as text. Give it `--format json` or `jsonl`, or an `--out` file, and you get the run as JSON instead, on standard output or in the file, with the lines on standard error.", []string{
 		"format", "orientation", "out", "no-progress", "verbose",
 	}},
 	{"Testing", "Running without touching saved state. `--debug` redirects the config root and keeps secrets in memory; `--fixtures` does the same and seeds fake tenants, elements and CLI sessions from a YAML file. `--demo` is `--fixtures` with the fleet iontk ships: two tenants, a hundred and six elements, HA pairs, a shell that answers everything, and the fleet already loaded when the menu comes up. `Settings → Debug` swaps the same fleet in mid-run, and `alt+e` there edits it.", []string{

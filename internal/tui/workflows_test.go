@@ -213,7 +213,7 @@ func TestTheWorkflowFormLinesUpItsFieldsAndLeavesOutTheRunsFile(t *testing.T) {
 		m.wf.inputs[i].SetValue("v")
 	}
 	out := plain(m.viewWorkflows())
-	if strings.Contains(out, "file of runs") {
+	if strings.Contains(out, "Run once for each row") {
 		t.Errorf("the runs file is on the form:\n%s", out)
 	}
 	col := -1

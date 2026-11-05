@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -238,6 +239,10 @@ func (m tuiModel) onWorkflowKey(msg tea.KeyPressMsg, key string) (tea.Model, tea
 				return m, nil
 			}
 			return m.startWorkflow(true)
+		case exportKey:
+			if m.ranWorkflow() {
+				return m.exportCommand("runs.save", nil)
+			}
 		case "down", "j":
 			m.wf.scroll = min(m.wf.scroll+1, max(0, len(m.wf.lines)-1))
 		case "up", "k":
@@ -367,22 +372,35 @@ func (m tuiModel) viewWorkflows() string {
 			b.WriteString(ui.StyleDim.Render(fmt.Sprintf("  … %d more, ↓", more)) + "\n")
 		}
 		if m.wf.step == wfRunning {
-			b.WriteString("  " + ui.StyleDim.Render(m.spinner.View()+" running") + "\n")
+			running := " running"
+			if waits := m.runtime().Waits(); len(waits) > 0 {
+				running += " · " + waits[0].Line(time.Now())
+			}
+			b.WriteString("  " + ui.StyleDim.Render(ui.Truncate(m.spinner.View()+running, width-2)) + "\n")
 			hint = "esc stop"
 			break
 		}
+		back := "esc back"
+		if m.ranWorkflow() {
+			back = exportKeyHint + " run as json · " + back
+		}
 		switch {
 		case m.wf.err != "":
+			hint = back
 		case m.wf.doit || !m.wf.cmd.Writes:
-			hint = "r run again · esc back"
+			hint = "r run again · " + back
 		default:
-			hint = "d do it · r run again · esc back"
+			hint = "d do it · r run again · " + back
 		}
 	}
 	if m.wf.err != "" {
 		b.WriteString("\n" + ui.StyleErr.Render(ui.Truncate(m.wf.err, width)) + "\n")
 	}
 	return b.String() + "\n" + ui.Footer(ui.Truncate(m.status, width), ui.Truncate(hint, width))
+}
+
+func (m tuiModel) ranWorkflow() bool {
+	return strings.HasPrefix(m.wf.cmd.Name, app.WorkflowPrefix)
 }
 
 func inputLine(values map[string]string) string {
