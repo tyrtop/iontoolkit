@@ -46,7 +46,7 @@ func actionCommand(set *script.Set, name string) runtime.Command {
 				State:    rt.ActionState(c.Arg("screen")),
 				Export:   func(text, slug, ext string) (string, error) { return rt.Export(slug, ext, text) },
 				OnStatus: func(line string) { c.Say("%s", line) },
-				Exec:     scriptExec(rt, c, false),
+				Exec:     scriptExec(rt, c, false, c.Tenant),
 			}
 			effects, err := set.Run(c.Ctx, run)
 			c.Result = effects

@@ -762,6 +762,17 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.edit.area, cmd = m.edit.area.Update(msg)
 		return m, cmd
+
+	case phaseWorkflows:
+		var cmd tea.Cmd
+		switch {
+		case m.wf.step == wfForm && len(m.wf.inputs) > 0:
+			m.wf.inputs[m.wf.focus], cmd = m.wf.inputs[m.wf.focus].Update(msg)
+		case m.wf.step == wfList && m.wf.filterOn:
+			m.wf.filter, cmd = m.wf.filter.Update(msg)
+			m.wf.cursor = 0
+		}
+		return m, cmd
 	}
 	return m, nil
 }
@@ -1305,7 +1316,7 @@ func (m tuiModel) total() int { return m.batch().Total() }
 
 func (m tuiModel) listHeight() int {
 	h := m.height - 13 - m.statsRows()
-	if m.sessions().Count() > 0 {
+	if m.hasTabs() {
 		h--
 	}
 	return max(3, h)
@@ -1393,7 +1404,7 @@ func (m tuiModel) View() tea.View {
 func (m tuiModel) viewPicking() string {
 	var b strings.Builder
 
-	if m.sessions().Count() > 0 {
+	if m.hasTabs() {
 		b.WriteString(m.tabBar() + "\n")
 	}
 	b.WriteString(ui.StyleCmd.Render("iontk") + "  " + m.modeLabel() +

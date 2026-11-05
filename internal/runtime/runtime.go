@@ -35,11 +35,12 @@ type Arg struct {
 }
 
 type Call struct {
-	Ctx  context.Context
-	Args map[string]string
-	Rest []string
-	DoIt bool
-	Out  func(line string)
+	Ctx    context.Context
+	Args   map[string]string
+	Rest   []string
+	DoIt   bool
+	Out    func(line string)
+	Tenant config.Tenant
 
 	Result any
 }

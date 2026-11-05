@@ -21,6 +21,7 @@ type Source struct {
 	save func(refreshToken string) error
 
 	mu       sync.Mutex
+	load     func() (string, error)
 	refresh  string
 	identity Identity
 	lastTTL  time.Duration
@@ -29,6 +30,12 @@ type Source struct {
 func NewSource(tsg, refreshToken string, opt Options, save func(string) error) *Source {
 	logging.Mask(refreshToken)
 	return &Source{tsg: tsg, opt: opt, save: save, refresh: refreshToken}
+}
+
+func (s *Source) UseStored(load func() (string, error)) {
+	s.mu.Lock()
+	s.load = load
+	s.mu.Unlock()
 }
 
 func (s *Source) RefreshToken() string {
@@ -74,22 +81,59 @@ func (s *Source) accept(tok *Token, log *slog.Logger) (string, time.Duration, er
 	return tok.AccessToken, tok.ExpiresIn, nil
 }
 
+func (s *Source) refreshWith(ctx context.Context, rt string, log *slog.Logger) (*Token, error) {
+	log.Info("trying the stored refresh token", "refresh_token", rt)
+	tok, err := Refresh(ctx, s.opt.httpClient(), s.opt.token(), rt, s.tsg)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Warn("stored refresh token rejected", "err", err)
+		}
+		return nil, err
+	}
+	log.Info("stored refresh token accepted", "rotated", tok.RefreshToken != rt)
+	return tok, nil
+}
+
+func (s *Source) storedOtherThan(tried string) string {
+	s.mu.Lock()
+	load := s.load
+	s.mu.Unlock()
+	if load == nil {
+		return ""
+	}
+	rt, err := load()
+	if err != nil || rt == "" || rt == tried {
+		return ""
+	}
+	logging.Mask(rt)
+	return rt
+}
+
 func (s *Source) Token(ctx context.Context) (string, time.Duration, error) {
 	log := s.log()
 	var stored, account error
 
 	if rt := s.RefreshToken(); rt != "" {
-		log.Info("trying the stored refresh token", "refresh_token", rt)
-		tok, err := Refresh(ctx, s.opt.httpClient(), s.opt.token(), rt, s.tsg)
+		tok, err := s.refreshWith(ctx, rt, log)
 		if err == nil {
-			log.Info("stored refresh token accepted", "rotated", tok.RefreshToken != rt)
 			return s.accept(tok, log)
 		}
 		if ctx.Err() != nil {
 			return "", 0, err
 		}
-		log.Warn("stored refresh token rejected", "err", err)
 		stored = fmt.Errorf("stored refresh token rejected: %w", err)
+		// the auth server refuses a refresh token another run has rotated
+		if again := s.storedOtherThan(rt); again != "" {
+			log.Info("the stored refresh token changed since this run read it; trying that one")
+			tok, err := s.refreshWith(ctx, again, log)
+			if err == nil {
+				return s.accept(tok, log)
+			}
+			if ctx.Err() != nil {
+				return "", 0, err
+			}
+			stored = fmt.Errorf("stored refresh token rejected: %w", err)
+		}
 	} else {
 		log.Info("no stored refresh token for this tenant")
 	}

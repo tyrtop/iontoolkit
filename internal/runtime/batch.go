@@ -265,10 +265,14 @@ func (rt *Runtime) ElementsArg(c *Call, arg string) []Element {
 	if len(ids) == 0 {
 		return rt.Targets()
 	}
-	return rt.KnownRows(c.Ctx, ids, c.Out)
+	return rt.knownRowsIn(c.Ctx, ids, c.Out, c.Tenant)
 }
 
 func (rt *Runtime) KnownRows(ctx context.Context, ids []string, out func(string)) []Element {
+	return rt.knownRowsIn(ctx, ids, out, config.Tenant{})
+}
+
+func (rt *Runtime) knownRowsIn(ctx context.Context, ids []string, out func(string), in config.Tenant) []Element {
 	known := func() bool {
 		have := map[string]bool{}
 		for _, r := range rt.Elements() {
@@ -285,9 +289,17 @@ func (rt *Runtime) KnownRows(ctx context.Context, ids []string, out func(string)
 		rt.LoadCache()
 	}
 	if !known() {
-		rt.Exec(&Call{Ctx: ctx, Out: out}, "fleet.refresh")
+		refresh := &Call{Ctx: ctx, Out: out}
+		if in.TSGID == "" {
+			rt.Exec(refresh, "fleet.refresh")
+		} else {
+			if refresh.Ctx == nil {
+				refresh.Ctx = context.Background()
+			}
+			rt.RefreshTenants(refresh, []config.Tenant{in}, false)
+		}
 	}
-	return rt.rowsFor(ids)
+	return rt.rowsFor(ids, in)
 }
 
 func (rt *Runtime) fleetLoaded(c *Call) error {
@@ -303,7 +315,7 @@ func (rt *Runtime) fleetLoaded(c *Call) error {
 	return nil
 }
 
-func (rt *Runtime) rowsFor(ids []string) []Element {
+func (rt *Runtime) rowsFor(ids []string, in config.Tenant) []Element {
 	if len(rt.Elements()) == 0 {
 		rt.LoadCache()
 	}
@@ -311,7 +323,10 @@ func (rt *Runtime) rowsFor(ids []string) []Element {
 	for _, r := range rt.Elements() {
 		byID[r.ID] = r
 	}
-	t, _ := rt.Tenant()
+	t := in
+	if t.TSGID == "" {
+		t, _ = rt.Tenant()
+	}
 	out := make([]Element, 0, len(ids))
 	for _, id := range ids {
 		if r, ok := byID[id]; ok {

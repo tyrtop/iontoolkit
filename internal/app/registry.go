@@ -159,7 +159,7 @@ func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p plac
 	if run.Name != "" {
 		c.Say("tenant %s", run.Name)
 	}
-	exec := scriptExec(rt, c, true)
+	exec := scriptExec(rt, c, true, run)
 	host := workflow.Host{
 		Exec: func(sc script.Call) ([]string, any, error) {
 			name := strings.TrimPrefix(sc.Name, EndpointPrefix)
@@ -191,7 +191,7 @@ func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p plac
 	return err
 }
 
-func scriptExec(rt *runtime.Runtime, c *runtime.Call, echo bool) func(script.Call) ([]string, any, error) {
+func scriptExec(rt *runtime.Runtime, c *runtime.Call, echo bool, in config.Tenant) func(script.Call) ([]string, any, error) {
 	return func(sc script.Call) ([]string, any, error) {
 		name, args, rest := sc.Name, sc.Args, []string(nil)
 		if sc.Line != "" {
@@ -205,7 +205,7 @@ func scriptExec(rt *runtime.Runtime, c *runtime.Call, echo bool) func(script.Cal
 			return nil, nil, fmt.Errorf("%s is not open to scripts", name)
 		}
 		var said []string
-		call := &runtime.Call{Ctx: c.Ctx, Args: args, Rest: rest, DoIt: c.DoIt, Out: func(l string) {
+		call := &runtime.Call{Ctx: c.Ctx, Args: args, Rest: rest, DoIt: c.DoIt, Tenant: in, Out: func(l string) {
 			said = append(said, l)
 			if echo {
 				c.Say("%s", l)

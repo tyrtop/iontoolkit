@@ -307,6 +307,9 @@ func TestDataTabsJoinTheTabRing(t *testing.T) {
 	if got := next.(tuiModel).phase; got != phasePicking {
 		t.Errorf("phase after alt+left = %v, want the list", got)
 	}
+	if list := plain(next.(tuiModel).viewPicking()); !strings.Contains(list, "S0100-RTR-01 · data") {
+		t.Errorf("the element list dropped the data tab from its tab bar:\n%s", list)
+	}
 
 	bar := plain(m.tabBar())
 	for _, want := range []string{"elements", "S0100-RTR-01 · data"} {

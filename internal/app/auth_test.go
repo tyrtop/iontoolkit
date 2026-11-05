@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"tyrtop.com/iontk/internal/config"
@@ -48,6 +50,63 @@ func testStore(t *testing.T) *config.Store {
 	t.Helper()
 	root := t.TempDir()
 	return config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
+}
+
+type toServer string
+
+func (s toServer) RoundTrip(r *http.Request) (*http.Response, error) {
+	u, err := url.Parse(string(s))
+	if err != nil {
+		return nil, err
+	}
+	r = r.Clone(r.Context())
+	r.URL.Scheme, r.URL.Host, r.Host = u.Scheme, u.Host, u.Host
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestTwoRunsOnOneTenantKeepEachOtherSignedIn(t *testing.T) {
+	var mu sync.Mutex
+	live, n := map[string]bool{"rt1": true}, 1
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		mu.Lock()
+		defer mu.Unlock()
+		rt := r.PostFormValue("refresh_token")
+		if !live[rt] {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error_description":"grant is invalid","error":"invalid_grant"}`))
+			return
+		}
+		delete(live, rt)
+		n++
+		live[fmt.Sprintf("rt%d", n)] = true
+		fmt.Fprintf(w, `{"access_token":"at%d","refresh_token":"rt%d","expires_in":899}`, n, n)
+	}))
+	defer srv.Close()
+
+	const tsg = "1984021017"
+	st := testStore(t)
+	if err := st.Secrets.Set(config.RefreshTokenKey(tsg), "rt1"); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: toServer(srv.URL)}
+	ctx := context.Background()
+	first := BrowserSource(Flags{TSGID: tsg}, client, st)
+	if _, _, err := first.Token(ctx); err != nil {
+		t.Fatalf("the first run could not sign in: %v", err)
+	}
+	second := BrowserSource(Flags{TSGID: tsg}, client, st)
+	if _, _, err := second.Token(ctx); err != nil {
+		t.Fatalf("the second run could not sign in: %v", err)
+	}
+	for _, run := range []struct {
+		name string
+		src  *saseauth.Source
+	}{{"the first run", first}, {"the second run", second}} {
+		if _, _, err := run.src.Token(ctx); err != nil {
+			t.Errorf("%s lost its sign-in once the other rotated the token: %v", run.name, err)
+		}
+	}
 }
 
 func TestBrowserSourceReusesStoredRefreshToken(t *testing.T) {

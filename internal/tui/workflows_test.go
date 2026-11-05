@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/app"
 
 	"tyrtop.com/iontk/internal/sase/write"
@@ -172,6 +174,29 @@ func TestTheWorkflowListFiltersLikeTheMacroList(t *testing.T) {
 	}
 	if target, ok := m.editTarget(); !ok || !strings.HasSuffix(target.path, "workflow.yaml") {
 		t.Errorf("e would edit %+v, want the workflow's own workflow.yaml", target)
+	}
+}
+
+func TestAPasteLandsInTheFocusedWorkflowInputAndTheFilter(t *testing.T) {
+	m, eid, site := workflowTUI(t)
+	m = openDescribe(t, m, "", "")
+	next, _ := m.Update(tea.PasteMsg{Content: eid})
+	m = next.(tuiModel)
+	m, _ = typeKey(m, "tab")
+	next, _ = m.Update(tea.PasteMsg{Content: site})
+	m = next.(tuiModel)
+	if got := m.formValues(); got["element"] != eid || got["site"] != site {
+		t.Errorf("pasted values = %v, want element %s site %s", got, eid, site)
+	}
+
+	m.phase = phaseMenu
+	next, _ = m.openWorkflows()
+	m = next.(tuiModel)
+	m, _ = typeKey(m, "/")
+	next, _ = m.Update(tea.PasteMsg{Content: "nope"})
+	m = next.(tuiModel)
+	if got := plain(m.viewWorkflows()); !strings.Contains(got, "nothing matches the filter") {
+		t.Errorf("a pasted filter did not filter:\n%s", got)
 	}
 }
 

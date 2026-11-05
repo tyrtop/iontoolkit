@@ -105,6 +105,11 @@ func (m tuiModel) currentTab() int {
 	return cur
 }
 
+func (m tuiModel) hasTabs() bool {
+	n, _ := m.runtime().Tabs(m.front())
+	return n > 1
+}
+
 func (m tuiModel) stepTab(cmd string) tuiModel {
 	c := &runtime.Call{Args: map[string]string{"from": m.front()}}
 	if err := m.runtime().Exec(c, cmd); err != nil {

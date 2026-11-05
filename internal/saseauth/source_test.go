@@ -123,6 +123,64 @@ func TestSourceSatisfiesTokenSource(t *testing.T) {
 	} = (*Source)(nil)
 }
 
+func TestARefusedTokenIsTriedAgainOnlyWhenTheStoreHoldsAnother(t *testing.T) {
+	tests := []struct {
+		name string
+		load func() (string, error)
+		ok   bool
+		sent string
+	}{
+		{"another run saved a newer token", func() (string, error) { return "rt-new", nil }, true, "rt-old rt-new"},
+		{"the store holds the token just refused", func() (string, error) { return "rt-old", nil }, false, "rt-old"},
+		{"the store is empty", func() (string, error) { return "", nil }, false, "rt-old"},
+		{"the store cannot be read", func() (string, error) { return "", errors.New("keyring is locked") }, false, "rt-old"},
+		{"nothing reads the store", nil, false, "rt-old"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var sent []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.ParseForm()
+				rt := r.PostForm.Get("refresh_token")
+				mu.Lock()
+				sent = append(sent, rt)
+				mu.Unlock()
+				if rt != "rt-new" {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(`{"error":"invalid_grant","error_description":"grant is invalid"}`))
+					return
+				}
+				w.Write([]byte(`{"access_token":"at","refresh_token":"rt-newer","expires_in":899}`))
+			}))
+			defer srv.Close()
+
+			var saved atomic.Value
+			src := NewSource("123", "rt-old", Options{Host: srv.URL, Client: srv.Client()},
+				func(rt string) error { saved.Store(rt); return nil })
+			if tt.load != nil {
+				src.UseStored(tt.load)
+			}
+			_, _, err := src.Token(context.Background())
+			switch {
+			case tt.ok && err != nil:
+				t.Fatalf("Token() error = %v, want the token another run saved to be used", err)
+			case !tt.ok && !errors.Is(err, ErrInteractiveRequired):
+				t.Fatalf("Token() error = %v, want ErrInteractiveRequired", err)
+			}
+			mu.Lock()
+			got := strings.Join(sent, " ")
+			mu.Unlock()
+			if got != tt.sent {
+				t.Errorf("refresh tokens sent = %q, want %q", got, tt.sent)
+			}
+			if got, _ := saved.Load().(string); tt.ok && got != "rt-newer" {
+				t.Errorf("saved refresh token = %q, want the rotated %q", got, "rt-newer")
+			}
+		})
+	}
+}
+
 func TestSourceFallsBackToTheSharedSeed(t *testing.T) {
 	var form url.Values
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

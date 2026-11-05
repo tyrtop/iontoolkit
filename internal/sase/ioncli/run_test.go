@@ -189,6 +189,71 @@ func TestATimedOutReadKeepsThePasswordOutOfTheError(t *testing.T) {
 	}
 }
 
+func TestACommandStillRunningAtTheTimeoutIsStoppedSoTheSessionCanClose(t *testing.T) {
+	tests := []struct {
+		name       string
+		cmd        string
+		chunks     []string
+		wantCtrlC  bool
+		wantOutput string
+		breaks     string
+	}{
+		{
+			name: "a ping nobody answers",
+			cmd:  "ping 1 198.18.0.113",
+			chunks: []string{
+				"login: ", "Password: ", "ion#",
+				"ion# ping 1 198.18.0.113\r\nPING 198.18.0.113 (198.18.0.113): 56 data bytes\r\n",
+				"^C\r\n--- 198.18.0.113 ping statistics ---\r\n3 packets transmitted, 0 packets received, 100% packet loss\r\nion#",
+			},
+			wantCtrlC:  true,
+			wantOutput: "100% packet loss",
+			breaks:     "the ping is left running and the ION answers no toolkit login for about 16 minutes",
+		},
+		{
+			name:       "a command that finishes in time",
+			cmd:        "uptime",
+			chunks:     []string{"login: ", "Password: ", "ion#", "ion# uptime\r\nup 1 day\r\nion#"},
+			wantOutput: "up 1 day",
+			breaks:     "a command that finished is interrupted anyway",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, conn := dialTestConn(t, tt.chunks)
+			defer srv.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			outs, err := Run(ctx, conn, RunOptions{
+				Prompt: "ion#", User: "u", Pass: "p", Commands: []string{tt.cmd},
+			})
+
+			if sent := strings.Contains(srv.sent(), "\x03"); sent != tt.wantCtrlC {
+				t.Errorf("ctrl+c sent = %v, want %v, or %s", sent, tt.wantCtrlC, tt.breaks)
+			}
+			if len(outs) != 1 || !strings.Contains(outs[0].Output, tt.wantOutput) {
+				t.Errorf("outputs = %+v, want the %q output kept", outs, tt.wantOutput)
+			}
+			if !tt.wantCtrlC {
+				if err != nil {
+					t.Errorf("Run() error = %v, want none", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "ctrl+c") || !strings.Contains(err.Error(), tt.cmd) {
+				t.Errorf("Run() error = %v, want it to name %q and the ctrl+c", err, tt.cmd)
+			}
+			if ctx.Err() != nil {
+				t.Errorf("Run() came back at the deadline, want it back at the prompt before it, or %s", tt.breaks)
+			}
+			if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
+				t.Errorf("Close() = %v, want the session open to close normally, or %s", err, tt.breaks)
+			}
+		})
+	}
+}
+
 func TestTailOfAReadIsBoundedAndReadable(t *testing.T) {
 	tests := []struct {
 		name   string

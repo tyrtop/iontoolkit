@@ -97,6 +97,49 @@ func TestRefreshLoadsEveryUsableTenantAndSkipsTheRest(t *testing.T) {
 	}
 }
 
+func TestABatchOnAnElementTheListHasNotGotGoesToTheCallsTenant(t *testing.T) {
+	lab := config.Tenant{Name: "Lab", TSGID: "222", ClientID: "b", Added: true}
+	acme := config.Tenant{Name: "Acme Co", TSGID: "111", ClientID: "a", Added: true}
+	tests := []struct {
+		name    string
+		id      string
+		in      config.Tenant
+		current config.Tenant
+		want    string
+	}{
+		{"an element the call's tenant has", "", lab, config.Tenant{}, "222 lab-rtr-01"},
+		{"an element nobody has", "no-such-element", lab, config.Tenant{}, "222 "},
+		{"no tenant on the call takes the current one", "no-such-element", config.Tenant{}, acme, "111 "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, _ := fleetRuntime(t)
+			rt.SetAuthMode(AuthTenant)
+			rt.ClearTenant()
+			if tt.current.TSGID != "" {
+				rt.UseTenant(tt.current)
+			}
+			id := tt.id
+			if id == "" {
+				l := rt.FetchTenant(context.Background(), lab)
+				if l.Err != nil || len(l.Elements) != 1 {
+					t.Fatalf("Lab = %+v", l)
+				}
+				id = l.Elements[0].ID
+			}
+			rt.SetElements([]Element{{Element: api.Element{ID: "acme-only", Name: "acme-rtr-09"}, TSG: "111", Tenant: "Acme Co"}})
+			rows := rt.ElementsArg(&Call{Ctx: context.Background(), Args: map[string]string{"elements": id}, Tenant: tt.in}, "elements")
+			var got []string
+			for _, r := range rows {
+				got = append(got, r.TSG+" "+r.Name)
+			}
+			if len(got) != 1 || got[0] != tt.want {
+				t.Errorf("rows = %q, want one row %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAFailedTenantIsItsIssueAndTheOthersStillLoad(t *testing.T) {
 	rt, _ := fleetRuntime(t, "222")
 	err := rt.Exec(&Call{}, "fleet.refresh")

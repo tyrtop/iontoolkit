@@ -515,6 +515,41 @@ func TestAWorkflowRunGoesWhereItsTenantInputsSay(t *testing.T) {
 	}
 }
 
+func TestAWorkflowsRuntimeCommandsRunInItsTenant(t *testing.T) {
+	root := t.TempDir()
+	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
+	cfg := &config.Config{Tenants: []config.Tenant{
+		{Name: "Acme Co", TSGID: "t1", Auth: config.AuthBrowser, Added: true},
+		{Name: "Globex", TSGID: "t2", Auth: config.AuthBrowser, Added: true},
+	}}
+	dir := filepath.Join(root, "wf", "probe")
+	os.MkdirAll(dir, 0o700)
+	os.WriteFile(filepath.Join(dir, "workflow.yaml"), []byte("title: Probe\n"), 0o600)
+	os.WriteFile(filepath.Join(dir, "main.lua"), []byte(`return function(ctx) ctx.run("probe.tenant", {}) end`), 0o600)
+	WorkflowsFolder = filepath.Join(root, "wf")
+	t.Cleanup(func() { WorkflowsFolder = "" })
+	rt := NewRuntime(st, cfg)
+	if w := rt.Warnings(); len(w) > 0 {
+		t.Fatalf("the workflow did not load: %v", w)
+	}
+	var ran string
+	rt.Register(runtime.Command{Name: "probe.tenant", Run: func(_ *runtime.Runtime, c *runtime.Call) error {
+		ran = c.Tenant.Name
+		return nil
+	}})
+
+	for _, tt := range []struct{ given, want string }{{"Acme Co", "Acme Co"}, {"t2", "Globex"}} {
+		ran = ""
+		lines, _, err := exec(rt, WorkflowPrefix+"probe", map[string]string{"tenant": tt.given}, nil, false)
+		if err != nil {
+			t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
+		}
+		if ran != tt.want {
+			t.Errorf("tenant %q: the workflow's runtime command ran in %q, want %q", tt.given, ran, tt.want)
+		}
+	}
+}
+
 func TestEachRowOfAnInputsFileRunsInItsOwnTenant(t *testing.T) {
 	rt, wires := twoTenantRuntime(t)
 	runs := filepath.Join(t.TempDir(), "runs.csv")

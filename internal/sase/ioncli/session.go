@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -154,6 +155,32 @@ func tail(raw, redact string) string {
 	return fmt.Sprintf("%q", s)
 }
 
+const interruptGrace = 3 * time.Second
+
+// coder/websocket drops the socket unclosed when a read's context ends
+func interruptNearDeadline(ctx context.Context, conn Conn) (stop func() bool) {
+	dl, ok := ctx.Deadline()
+	if !ok {
+		return func() bool { return false }
+	}
+	wait := time.Until(dl) - interruptGrace
+	if wait <= 0 {
+		wait = time.Until(dl) / 2
+	}
+	done := make(chan struct{})
+	t := time.AfterFunc(wait, func() {
+		defer close(done)
+		_ = conn.Write(ctx, websocket.MessageText, []byte("\x03"))
+	})
+	return func() bool {
+		if t.Stop() {
+			return false
+		}
+		<-done
+		return true
+	}
+}
+
 type RunOptions struct {
 	Prompt   string
 	User     string
@@ -205,7 +232,9 @@ func Run(ctx context.Context, conn Conn, o RunOptions) ([]CommandOutput, error) 
 		if err := conn.Write(ctx, websocket.MessageText, []byte(cmd+"\r")); err != nil {
 			return outs, fmt.Errorf("write %q: %w", cmd, err)
 		}
+		stop := interruptNearDeadline(ctx, conn)
 		raw, err := readUntilPrompt(ctx, conn, prompt, o.pagers())
+		interrupted := stop()
 		if err != nil {
 			return outs, fmt.Errorf("read after %q: %w; last saw %s", cmd, err, tail(raw, o.Pass))
 		}
@@ -213,6 +242,9 @@ func Run(ctx context.Context, conn Conn, o RunOptions) ([]CommandOutput, error) 
 			Command: cmd,
 			Output:  clean(raw, prompt, cmd, o.pagers()),
 		})
+		if interrupted {
+			return outs, fmt.Errorf("%q was still running at the session timeout; stopped it with ctrl+c", cmd)
+		}
 	}
 	return outs, nil
 }

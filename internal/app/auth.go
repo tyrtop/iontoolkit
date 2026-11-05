@@ -38,7 +38,9 @@ func BrowserSource(f Flags, httpClient *http.Client, st *config.Store) *saseauth
 	save := func(rt string) error {
 		return st.Secrets.Set(config.RefreshTokenKey(f.TSGID), rt)
 	}
-	return saseauth.NewSource(f.TSGID, stored, opt, save)
+	src := saseauth.NewSource(f.TSGID, stored, opt, save)
+	src.UseStored(func() (string, error) { return st.Secrets.Get(config.RefreshTokenKey(f.TSGID)) })
+	return src
 }
 
 var seeds sync.Map
