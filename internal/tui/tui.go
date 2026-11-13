@@ -166,6 +166,7 @@ type tuiModel struct {
 	tabRow        int
 	pick          colorPick
 	spinTick      int
+	spinIdle      bool
 	formThemeRole string
 	typedZone     string
 	resetArmed    bool
@@ -182,6 +183,7 @@ type tuiModel struct {
 	listWidths []int
 	listCells  []rowCells
 	listCache  map[string]rowCells
+	listH      int
 
 	cmdInput textinput.Model
 	cmdPick  suggest
@@ -202,7 +204,7 @@ type tuiModel struct {
 	resLine     int
 
 	sesScroll  int
-	connecting string
+	frontDial  string
 	redialing  string
 	askRetry   sessionTarget
 	askRetryNo bool
@@ -246,7 +248,7 @@ type tuiModel struct {
 	askMacroOn    []elementRow
 	askMacroWhy   string
 
-	mouseOff        bool
+	sel             selection
 	tut             tutorialRun
 	flows           []tutorialFlow
 	flowsErr        string
@@ -393,7 +395,8 @@ func (m *tuiModel) syncCursor() {
 	fresh.SetColumns(m.table.Columns())
 	fresh.SetRows(rows)
 	fresh.SetWidth(m.table.Width())
-	fresh.SetHeight(m.listHeight())
+	m.listH = m.listHeight()
+	fresh.SetHeight(m.listH)
 	fresh.MoveDown(n)
 	m.table = fresh
 	m.repaintCursorRows(prev)
@@ -470,15 +473,19 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 
 	mm, ok := next.(tuiModel)
-	if ok && mm.rt != m.rt {
-		watchRuntime(mm.rt)
-	}
-	if !ok || !mm.tut.on || !mm.tut.passing {
+	if !ok {
 		return next, cmd
 	}
-	mm.tut.passing = false
-	mm, passed := mm.passStep()
-	return mm, tea.Batch(cmd, passed)
+	if mm.rt != m.rt {
+		watchRuntime(mm.rt)
+	}
+	if mm.tut.on && mm.tut.passing {
+		mm.tut.passing = false
+		var passed tea.Cmd
+		mm, passed = mm.passStep()
+		cmd = tea.Batch(cmd, passed)
+	}
+	return mm, cmd
 }
 
 func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -502,18 +509,13 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		termColor.probed = true
 		return m, nil
 
-	case tea.MouseWheelMsg:
-		switch msg.Button {
-		case tea.MouseWheelUp:
-			return m.onWheel(true)
-		case tea.MouseWheelDown:
-			return m.onWheel(false)
-		}
-		return m, nil
+	case tea.MouseMsg:
+		return m.onMouse(msg)
 
 	case tea.WindowSizeMsg:
 		m.width, m.termHeight = msg.Width, msg.Height
 		m.height = m.usableHeight()
+		m.runtime().SetTerminal(m.paneSize())
 		m.resFilter.SetWidth(min(26, max(10, m.width-30)))
 		m.rebuildResultRows()
 		m.filter.SetWidth(min(26, max(10, m.width-30)))
@@ -585,8 +587,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinner.TickMsg:
 		if !m.wantsSpinner() {
+			m.spinIdle = true
 			return m, nil
 		}
+		m.spinIdle = false
 		m.spinTick++
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -598,7 +602,6 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case dialProgressMsg:
-		m.noteDial(msg)
 		m.rebuildRows()
 		return m, tea.Batch(waitForDial(m.runtime().DialReports()), m.spinner.Tick)
 
@@ -607,7 +610,9 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForSession(m.sessions().Dirty())
 
 	case sessionErrMsg:
-		m.connecting = ""
+		if m.frontDial == msg.target.eid {
+			m.frontDial = ""
+		}
 		if m.runtime().NeedsSignIn([]string{msg.target.tsg}) {
 			m.dialDone(msg.target.eid)
 			return m.signInThenSessions(m.lastTargets)
@@ -626,8 +631,13 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sessionDirtyMsg:
 		if n := m.sessions().Reap(); n > 0 && m.phase == phaseSession && m.sessions().Count() == 0 {
-			m.status = ""
-			m.phase = phasePicking
+			if _, dialing := m.dialingFront(); !dialing {
+				m.status = ""
+				m.phase = phasePicking
+			}
+		}
+		if m.listH != m.listHeight() {
+			m.rebuildRows()
 		}
 		return m, waitForSession(m.sessions().Dirty())
 
@@ -686,6 +696,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onScriptDone(msg)
 
 	case tea.KeyPressMsg:
+		m.sel = selection{}
 		return m.onKey(msg)
 
 	default:
@@ -752,7 +763,7 @@ func (m tuiModel) forwardToInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case phaseSession:
 		if p, ok := msg.(tea.PasteMsg); ok {
-			if sess := m.sessions().Active(); sess != nil && sess.Err() == nil {
+			if sess := m.frontSession(); sess != nil && sess.Err() == nil {
 				sess.SendText(p.Content)
 			}
 		}
@@ -782,9 +793,9 @@ func (m tuiModel) wantsSpinner() bool {
 	case phaseLoading, phaseRunning, phaseSettings, phaseSignIn, phaseDiscover, phaseWarming:
 		return true
 	case phasePicking:
-		return m.cacheState() == cacheUpdating || m.fetchWorking()
+		return m.cacheState() == cacheUpdating || m.fetchWorking() || m.haWorking()
 	case phaseSession:
-		return m.connectingAny() || m.awaitingDevice()
+		return m.connectingAny()
 	case phaseEdit:
 		return false
 	case phaseWorkflows:
@@ -862,7 +873,8 @@ func (m *tuiModel) rebuildRows() {
 		m.table.SetCursor(m.cursor())
 	}
 	m.table.SetWidth(min(m.width, total))
-	m.table.SetHeight(m.listHeight())
+	m.listH = m.listHeight()
+	m.table.SetHeight(m.listH)
 }
 
 func (m *tuiModel) listRow(n int) table.Row {

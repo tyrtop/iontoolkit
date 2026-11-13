@@ -255,8 +255,8 @@ func TestOneMatchInShellModeGoesStraightIn(t *testing.T) {
 	if got.phase != phaseSession {
 		t.Fatalf("phase = %v, want the session opened", got.phase)
 	}
-	if got.connecting != "s5024-rtr-02" {
-		t.Errorf("connecting = %q, want the single match", got.connecting)
+	if dialingName(got) != "s5024-rtr-02" {
+		t.Errorf("connecting = %q, want the single match", dialingName(got))
 	}
 	if cmd == nil {
 		t.Error("no command returned, want the dial started")
@@ -282,7 +282,7 @@ func TestOneMatchInBatchModeSelectsAndStays(t *testing.T) {
 	if got.selectedCount() != 1 || !got.isSelected("111/e2") {
 		t.Errorf("selected = %v, want the single match selected", got.runtime().Selection())
 	}
-	if got.connecting != "" {
+	if dialingName(got) != "" {
 		t.Error("batch mode started a session")
 	}
 }
@@ -372,8 +372,8 @@ func TestASingleMatchBeatsAnEarlierSelection(t *testing.T) {
 
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), "enter")
 	got := mm.(tuiModel)
-	if got.connecting != "s5024-rtr-02" {
-		t.Errorf("connecting = %q, want the searched-for ION, not the earlier selection", got.connecting)
+	if dialingName(got) != "s5024-rtr-02" {
+		t.Errorf("connecting = %q, want the searched-for ION, not the earlier selection", dialingName(got))
 	}
 }
 

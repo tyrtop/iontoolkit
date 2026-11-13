@@ -76,9 +76,18 @@ func tenantCountOf(m tuiModel) int {
 	return n
 }
 
-func tabCountOf(m tuiModel) int {
-	n, _ := m.runtime().Tabs(m.front())
-	return n
+func tabCountOf(m tuiModel) int { return len(m.tabs()) }
+
+func selectTabOf(m tuiModel, i int) tuiModel {
+	tabs := m.tabs()
+	return m.showTab(tabs[((i%len(tabs))+len(tabs))%len(tabs)])
 }
 
-func selectTabOf(m tuiModel, i int) tuiModel { return m.showFront(m.runtime().SelectTab(i)) }
+func (m tuiModel) currentTab() int { return m.frontTab(m.tabs()) }
+
+func dialingName(m tuiModel) string {
+	if t, ok := m.dialingFront(); ok {
+		return t.name
+	}
+	return ""
+}

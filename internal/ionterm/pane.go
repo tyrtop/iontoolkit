@@ -13,6 +13,17 @@ type View struct {
 
 	Offset int
 	Total  int
+	Top    int
+	Left   int
+}
+
+type Spot struct {
+	Line int
+	Col  int
+}
+
+func (a Spot) Before(b Spot) bool {
+	return a.Line < b.Line || a.Line == b.Line && a.Col < b.Col
 }
 
 func blank(line string) bool {
@@ -71,6 +82,8 @@ func Render(screen string, cursorX, cursorY, width, height int) View {
 		Content: fitLines(lines, left, width, height),
 		CursorX: min(max(0, cursorX-left), width-1),
 		CursorY: min(max(0, cursorY-top), height-1),
+		Top:     top,
+		Left:    left,
 	}
 }
 
@@ -101,6 +114,7 @@ func (s *Session) ScrolledView(width, height, off int) View {
 	if off == 0 {
 		v := Render(screen, pos.X, pos.Y, width, height)
 		v.Total = total
+		v.Top += sb.Len()
 		return v
 	}
 
@@ -118,6 +132,7 @@ func (s *Session) ScrolledView(width, height, off int) View {
 		Content: fitLines(window, 0, width, height),
 		Offset:  off,
 		Total:   total,
+		Top:     start,
 	}
 }
 
@@ -151,5 +166,42 @@ func (s *Session) Buffer() string {
 	for len(out) > 0 && out[len(out)-1] == "" {
 		out = out[:len(out)-1]
 	}
+	return strings.Join(out, "\n")
+}
+
+func (s *Session) Copy(from, to Spot) string {
+	if to.Before(from) {
+		from, to = to, from
+	}
+
+	s.emuMu.Lock()
+	sb := s.emu.Scrollback()
+	lines := screenLines(s.emu.Render(), s.emu.CursorPosition().Y)
+	line := func(i int) string {
+		if i < sb.Len() {
+			return sb.Line(i).Render()
+		}
+		if i -= sb.Len(); i < len(lines) {
+			return lines[i]
+		}
+		return ""
+	}
+	out := make([]string, 0, to.Line-from.Line+1)
+	for i := max(0, from.Line); i <= to.Line; i++ {
+		ln := ansi.Strip(line(i))
+		left, right := 0, ansi.StringWidth(ln)
+		if i == from.Line {
+			left = from.Col
+		}
+		if i == to.Line {
+			right = min(right, to.Col+1)
+		}
+		if left >= right {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, strings.TrimRight(ansi.Cut(ln, left, right), " \t"))
+	}
+	s.emuMu.Unlock()
 	return strings.Join(out, "\n")
 }

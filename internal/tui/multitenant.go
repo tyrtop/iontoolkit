@@ -19,9 +19,10 @@ import (
 type elementRow = runtime.Element
 
 type sessionTarget struct {
-	eid  string
-	name string
-	tsg  string
+	eid   string
+	name  string
+	tsg   string
+	retry bool
 }
 
 type clientPool = runtime.Clients
@@ -110,7 +111,7 @@ func (m tuiModel) tsgForElement(eid string) string {
 }
 
 func (m tuiModel) activeSessionCreds() ionterm.Credentials {
-	s := m.sessions().Active()
+	s := m.frontSession()
 	if s == nil {
 		return m.credsFor(m.tenant().TSGID)
 	}

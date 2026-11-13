@@ -72,6 +72,7 @@ type Config struct {
 	AllowWrites  bool     `json:"allow_writes,omitempty"`
 	SessionCols  int      `json:"session_cols,omitempty"`
 	SessionRows  int      `json:"session_rows,omitempty"`
+	DetachedFor  string   `json:"detached_for,omitempty"`
 	PageStep     int      `json:"page_step,omitempty"`
 	Theme        string   `json:"theme,omitempty"`
 	HiddenThemes []string `json:"hidden_themes,omitempty"`

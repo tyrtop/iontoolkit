@@ -1,15 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
-	"strconv"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/runtime"
 )
 
@@ -42,8 +43,7 @@ func runShell(ctx context.Context, eid string) error {
 	rt := cliRuntime()
 	noteTenant()
 	if cols, rows, err := term.GetSize(int(os.Stdout.Fd())); err == nil && cols > 0 && rows > 0 {
-		_ = rt.Set("session_cols", strconv.Itoa(cols))
-		_ = rt.Set("session_rows", strconv.Itoa(rows))
+		rt.SetTerminal(cols, rows)
 	}
 	say := func(l string) { fmt.Fprintln(os.Stderr, l) }
 	if err := rt.Exec(&runtime.Call{Ctx: ctx, Args: map[string]string{"elements": eid}, Out: say}, "session.open"); err != nil {
@@ -54,7 +54,11 @@ func runShell(ctx context.Context, eid string) error {
 		return fmt.Errorf("element %s: the session did not open", eid)
 	}
 	defer s.Close()
-	out := s.Tap()
+	defer func() {
+		if err := rt.SaveCommands(); err != nil {
+			fmt.Fprintln(os.Stderr, "command history:", err)
+		}
+	}()
 
 	fd := int(os.Stdin.Fd())
 	old, err := term.MakeRaw(fd)
@@ -63,45 +67,28 @@ func runShell(ctx context.Context, eid string) error {
 	}
 	defer term.Restore(fd, old)
 
-	go func() {
-		buf := make([]byte, 1024)
-		for {
-			n, err := os.Stdin.Read(buf)
-			if n > 0 {
-				if i := bytes.IndexByte(buf[:n], 0x1d); i >= 0 {
-					if i > 0 {
-						_ = s.WriteRaw(buf[:i])
-					}
-					s.Close()
-					return
-				}
-				if bytes.IndexByte(buf[:n], '\r') >= 0 {
-					rt.RecordLine(s)
-				}
-				if s.WriteRaw(buf[:n]) != nil {
-					return
-				}
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-
-	defer func() {
-		if err := rt.SaveCommands(); err != nil {
-			fmt.Fprintln(os.Stderr, "command history:", err)
-		}
-	}()
-	for data := range out {
-		if app.Defaults.Verbose {
-			fmt.Printf("%q\r\n", data)
-		} else {
-			os.Stdout.Write(data)
-		}
+	var out io.Writer = os.Stdout
+	if app.Defaults.Verbose {
+		out = quoted{os.Stdout}
+	}
+	_, _, err = s.Attach(os.Stdin, out, ionterm.AttachOptions{
+		Catch: func(k uv.Key) bool { return k.String() == "ctrl+]" },
+		Enter: func() { rt.RecordLine(s) },
+	})
+	if err != nil {
+		return err
 	}
 	if s.Hung() {
 		return fmt.Errorf("element %s stopped answering", eid)
 	}
 	return s.Err()
+}
+
+type quoted struct{ w io.Writer }
+
+func (q quoted) Write(p []byte) (int, error) {
+	if _, err := fmt.Fprintf(q.w, "%q\r\n", p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

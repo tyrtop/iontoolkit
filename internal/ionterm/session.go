@@ -43,7 +43,7 @@ type Session struct {
 	notify func(string)
 	ctx    context.Context
 	cancel context.CancelFunc
-	taps   []chan []byte
+	taps   []*tap
 	quiet  bool
 
 	mu       sync.Mutex
@@ -54,6 +54,7 @@ type Session struct {
 	gotData  bool
 	line     []rune
 	lastSeen time.Time
+	changed  chan struct{}
 
 	pingEvery time.Duration
 	pongWait  time.Duration
@@ -70,6 +71,12 @@ func SetLivenessForTest(ping, pong time.Duration) (restore func()) {
 	oldPing, oldPong := pingEvery, pongWait
 	pingEvery, pongWait = ping, pong
 	return func() { pingEvery, pongWait = oldPing, oldPong }
+}
+
+func SetHandshakeForTest(d time.Duration) (restore func()) {
+	old := handshakeDeadline
+	handshakeDeadline = d
+	return func() { handshakeDeadline = old }
 }
 
 func Open(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds Credentials, notify func(string)) (*Session, error) {
@@ -124,8 +131,8 @@ func (s *Session) pumpOutput(ctx context.Context) {
 		}
 		s.emuMu.Lock()
 		_, err = s.emu.Write(data)
-		s.emuMu.Unlock()
 		if err != nil {
+			s.emuMu.Unlock()
 			s.fail(err)
 			return
 		}
@@ -134,10 +141,9 @@ func (s *Session) pumpOutput(ctx context.Context) {
 		s.lastSeen = time.Now()
 		taps := s.taps
 		s.mu.Unlock()
+		s.emuMu.Unlock()
 		for _, t := range taps {
-			select {
-			case t <- append([]byte(nil), data...):
-			case <-ctx.Done():
+			if !t.send(ctx, data) {
 				return
 			}
 		}
@@ -250,11 +256,12 @@ func (s *Session) markHung() {
 
 func (s *Session) stopTaps() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, t := range s.taps {
-		close(t)
-	}
+	taps := s.taps
 	s.taps, s.quiet = nil, true
+	s.mu.Unlock()
+	for _, t := range taps {
+		t.stop()
+	}
 }
 
 // SASE accepts a websocket for a missing element, then stays mute
@@ -282,7 +289,22 @@ func (s *Session) Hung() bool {
 	return s.hung
 }
 
+func (s *Session) Changed() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.changed == nil {
+		s.changed = make(chan struct{})
+	}
+	return s.changed
+}
+
 func (s *Session) markDirty() {
+	s.mu.Lock()
+	if s.changed != nil {
+		close(s.changed)
+		s.changed = nil
+	}
+	s.mu.Unlock()
 	if s.notify != nil {
 		s.notify(s.ElementID)
 	}
@@ -410,15 +432,31 @@ func (s *Session) Insert(text string) {
 }
 
 func (s *Session) Tap() <-chan []byte {
-	ch := make(chan []byte, 64)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.tapLocked().ch
+}
+
+func (s *Session) tapLocked() *tap {
+	t := newTap()
 	if s.closed || s.quiet {
-		close(ch)
-		return ch
+		t.stop()
+		return t
 	}
-	s.taps = append(s.taps, ch)
-	return ch
+	s.taps = append(s.taps, t)
+	return t
+}
+
+func (s *Session) untap(t *tap) {
+	s.mu.Lock()
+	for i, x := range s.taps {
+		if x == t {
+			s.taps = append(s.taps[:i:i], s.taps[i+1:]...)
+			break
+		}
+	}
+	s.mu.Unlock()
+	t.stop()
 }
 
 func (s *Session) WriteRaw(p []byte) error {

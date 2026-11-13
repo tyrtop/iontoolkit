@@ -87,7 +87,7 @@ func (m tuiModel) sectionRows() int {
 		}
 		return len(m.tenant().Users) + 1
 	case secSession:
-		return 2
+		return detachedRow + 1
 	case secTutorial:
 		return len(m.flows)
 	case secKeys:
@@ -343,8 +343,20 @@ func (m tuiModel) onUsersSectionKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+const detachedRow = 2
+
 func (m tuiModel) onSessionGeoKey(key string) (tea.Model, tea.Cmd) {
 	cols, rows := m.sessionGeometry()
+
+	if m.setCursor == detachedRow {
+		switch key {
+		case "enter", "space", " ", "+", "=":
+			return m.setOption("detached_for", "next"), nil
+		case "-", "_":
+			return m.setOption("detached_for", "prev"), nil
+		}
+		return m, nil
+	}
 
 	if key == "enter" {
 		return m.openGeometryForm(m.setCursor, cols, rows)
@@ -474,9 +486,15 @@ func (m tuiModel) sectionContent() []string {
 	case secSession:
 		cols, rows := m.sessionGeometry()
 		warn := ui.StyleWarn.Render("  do not change unless you know what you are doing!")
+		keep, _ := m.runtime().Get("detached_for")
+		detached := "closed after " + keep
+		if keep == "off" {
+			detached = "kept until they end"
+		}
 		out = append(out,
 			ui.Label("Buffer Cols")+fmt.Sprintf("%-6d", cols)+warn,
 			ui.Label("Buffer Rows")+fmt.Sprintf("%-6d", rows)+warn,
+			ui.Label("Detached")+detached,
 		)
 
 	case secReset:
@@ -605,6 +623,9 @@ func (m tuiModel) sectionHint() string {
 	case secUsers:
 		return "↑↓ row · enter new/edit · r run as · p password · d default · x remove · tab back"
 	case secSession:
+		if m.setCursor == detachedRow {
+			return "↑↓ row · enter next · -/+ change · tab back"
+		}
 		return "↑↓ row · enter type · -/+ adjust · tab back"
 	case secDebug:
 		return "read only · tab back · esc back"

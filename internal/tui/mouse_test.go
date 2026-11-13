@@ -1,85 +1,143 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/coder/websocket"
 )
 
-func TestAWheelNotchScrollsTheSessionPane(t *testing.T) {
-	m, _ := scrolledPane(t)
+func shellPane(t *testing.T) tuiModel {
+	t.Helper()
+	m, set := scrolledPane(t)
+	m = m.onSessionOpened(set.Tenants[0].Elements[0].ID)
 	m.phase = phaseSession
-	if m.sesScroll != 0 {
-		t.Fatalf("the pane starts held at %d", m.sesScroll)
-	}
+	return m
+}
 
-	next, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
-	m = next.(tuiModel)
-	if m.sesScroll == 0 {
-		t.Fatal("a notch up did not scroll the session pane")
+func rowOf(t *testing.T, m tuiModel, text string) int {
+	t.Helper()
+	for i, ln := range strings.Split(plain(m.View().Content), "\n") {
+		if strings.Contains(ln, text) {
+			return i
+		}
 	}
-	held := m.sesScroll
+	t.Fatalf("%q is not on screen:\n%s", text, plain(m.View().Content))
+	return 0
+}
 
-	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
-	m = next.(tuiModel)
-	if m.sesScroll >= held {
-		t.Errorf("a notch down left the offset at %d, want below %d", m.sesScroll, held)
+func mouse(m tuiModel, msg tea.Msg) (tuiModel, tea.Cmd) {
+	next, cmd := m.Update(msg)
+	return next.(tuiModel), cmd
+}
+
+func clipboard(t *testing.T, cmd tea.Cmd) string {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("nothing was sent to the clipboard")
 	}
+	msg := cmd()
+	if got := fmt.Sprintf("%T", msg); got != "tea.setClipboardMsg" {
+		t.Fatalf("the command sent %s, want an OSC 52 clipboard write", got)
+	}
+	return fmt.Sprint(msg)
+}
 
+func TestALiveShellIsDrawnInsideTheTabs(t *testing.T) {
+	m := shellPane(t)
+	got := plain(m.View().Content)
+	for _, want := range []string{"elements (", "store-0003-rtr-01", "L060", "ctrl+] elements"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the session screen is missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestOnlyAShellAsksForTheMouse(t *testing.T) {
+	m := shellPane(t)
+	for _, phase := range []tuiPhase{phasePicking, phaseResults, phaseMenu, phaseSettings, phaseMacros, phaseData} {
+		m.phase = phase
+		if got := m.View().MouseMode; got != tea.MouseModeNone {
+			t.Errorf("phase %d asks for mouse mode %v, want the terminal to keep the mouse", phase, got)
+		}
+	}
+	m.phase = phaseSession
+	if got := m.View().MouseMode; got != tea.MouseModeCellMotion {
+		t.Errorf("a shell asks for mouse mode %v, want cell motion so the wheel and a drag reach it", got)
+	}
+}
+
+func TestAWheelNotchScrollsTheShell(t *testing.T) {
+	m := shellPane(t)
+
+	m, _ = mouse(m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if m.sesScroll != wheelStep {
+		t.Fatalf("sesScroll = %d after a notch up, want %d", m.sesScroll, wheelStep)
+	}
 	for range 20 {
-		next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
-		m = next.(tuiModel)
+		m, _ = mouse(m, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	}
 	if m.sesScroll != 0 {
-		t.Errorf("the pane is held at %d after winding down, want the live bottom", m.sesScroll)
+		t.Errorf("sesScroll = %d after winding down, want the live bottom", m.sesScroll)
 	}
 }
 
-func TestAltVHandsTheMouseToTheTerminalAndBack(t *testing.T) {
-	m, conn := favModel(t)
-	m.phase = phaseSession
-	m.width, m.termHeight = 160, 30
-	m.height = m.usableHeight()
+func TestADragCopiesTheLinesItCrosses(t *testing.T) {
+	m := shellPane(t)
+	from, to := rowOf(t, m, "L050"), rowOf(t, m, "L052")
 
-	if got := m.mouseMode(); got != tea.MouseModeCellMotion {
-		t.Fatalf("mouse mode = %v on a fresh session, want iontk to have the wheel", got)
+	m, _ = mouse(m, tea.MouseClickMsg{Button: tea.MouseLeft, X: 0, Y: from})
+	m, _ = mouse(m, tea.MouseMotionMsg{Button: tea.MouseLeft, X: 10, Y: to})
+	if !strings.Contains(m.View().Content, "\x1b[7m") {
+		t.Error("the dragged text is not highlighted")
 	}
+	m, cmd := mouse(m, tea.MouseReleaseMsg{Button: tea.MouseLeft, X: 10, Y: to})
 
-	m, _ = pressSessionKey(t, m, altKey('v'))
-	if got := m.mouseMode(); got != tea.MouseModeNone {
-		t.Errorf("mouse mode = %v after alt+v, want the terminal to have the mouse back", got)
+	want := "L050  eth50 is up\nL051  eth51 is up\nL052  eth52"
+	if got := clipboard(t, cmd); got != want {
+		t.Errorf("copied %q, want %q", got, want)
 	}
-	if !strings.Contains(m.status, "terminal") {
-		t.Errorf("status = %q, want it to say who has the mouse", m.status)
-	}
-	if got := plain(m.View().Content); !strings.Contains(got, "alt+v wheel") {
-		t.Errorf("the footer does not offer the wheel back:\n%s", got)
-	}
-	if strings.Contains(conn.sent(), "\x1bv") {
-		t.Errorf("alt+v reached the device: %q", conn.sent())
-	}
-
-	m, _ = pressSessionKey(t, m, altKey('v'))
-	if got := m.mouseMode(); got != tea.MouseModeCellMotion {
-		t.Errorf("mouse mode = %v after a second alt+v, want the wheel back", got)
-	}
-	if got := plain(m.View().Content); !strings.Contains(got, "alt+v select") {
-		t.Errorf("the footer does not offer selecting:\n%s", got)
+	if m.status != "copied 3 lines" {
+		t.Errorf("status = %q, want it to say what was copied", m.status)
 	}
 }
 
-func TestTheMouseCanBeHandedBackOnADeadTab(t *testing.T) {
-	m, conn := favModel(t)
-	m.phase = phaseSession
-	conn.Close(websocket.StatusAbnormalClosure, "torn")
+func TestADragKeepsItsTextWhenTheShellScrolls(t *testing.T) {
+	m := shellPane(t)
+	row := rowOf(t, m, "L055")
 
-	s := m.sessions().Active()
-	waitForTUI(t, func() bool { return s.Err() != nil || s.Ended() })
+	m, _ = mouse(m, tea.MouseClickMsg{Button: tea.MouseLeft, X: 3, Y: row})
+	m, _ = mouse(m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	m, cmd := mouse(m, tea.MouseReleaseMsg{Button: tea.MouseLeft, X: 0, Y: row})
 
-	m, _ = pressSessionKey(t, m, altKey('v'))
-	if got := m.mouseMode(); got != tea.MouseModeNone {
-		t.Errorf("mouse mode = %v, want a dead tab to give the mouse up too", got)
+	if got := clipboard(t, cmd); got != "L052  eth52 is up\nL053  eth53 is up\nL054  eth54 is up\nL055" {
+		t.Errorf("copied %q, want from L052 down to where the drag began", got)
+	}
+}
+
+func TestAClickWithoutADragCopiesNothing(t *testing.T) {
+	m := shellPane(t)
+	row := rowOf(t, m, "L050")
+
+	m, _ = mouse(m, tea.MouseClickMsg{Button: tea.MouseLeft, X: 2, Y: row})
+	m, cmd := mouse(m, tea.MouseReleaseMsg{Button: tea.MouseLeft, X: 2, Y: row})
+	if cmd != nil {
+		t.Errorf("a click sent %v, want nothing copied", cmd())
+	}
+	if strings.Contains(m.View().Content, "\x1b[7m") {
+		t.Error("a click left a highlight")
+	}
+}
+
+func TestAKeyClearsTheSelection(t *testing.T) {
+	m := shellPane(t)
+	from, to := rowOf(t, m, "L050"), rowOf(t, m, "L052")
+	m, _ = mouse(m, tea.MouseClickMsg{Button: tea.MouseLeft, X: 0, Y: from})
+	m, _ = mouse(m, tea.MouseReleaseMsg{Button: tea.MouseLeft, X: 5, Y: to})
+
+	m = press(m, tea.Key{Code: 'a', Text: "a"})
+	if strings.Contains(m.View().Content, "\x1b[7m") {
+		t.Error("the highlight is still there after a key reached the shell")
 	}
 }

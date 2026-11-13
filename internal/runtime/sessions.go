@@ -2,31 +2,47 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"tyrtop.com/iontk/internal/ionterm"
 	"tyrtop.com/iontk/internal/sase/api"
+	"tyrtop.com/iontk/internal/sase/ioncli"
+	"tyrtop.com/iontk/internal/script"
 )
 
 const AreaSessions = "sessions"
 
 type Dial struct {
 	EID     string
+	Name    string
 	Attempt int
 	Of      int
 	LastErr string
 	Failed  bool
+	Waiting bool
+	Aside   bool
+	seq     int
 }
 
 type sessionsState struct {
 	mgr     *ionterm.Manager
 	dials   map[string]Dial
 	reports chan Dial
+	keep    chan struct{}
+	seq     int
+	stops   map[string]context.CancelFunc
+	stopped map[string]bool
+	term    [2]int
 }
+
+var ErrStopped = errors.New("closed before it opened")
 
 func (rt *Runtime) Sessions() *ionterm.Manager {
 	rt.mu.Lock()
@@ -79,8 +95,92 @@ func (rt *Runtime) NoteDial(d Dial) {
 	rt.editDials(func(m map[string]Dial) { m[d.EID] = d })
 }
 
-func (rt *Runtime) MarkDialing(eid string) {
-	rt.NoteDial(Dial{EID: eid, Attempt: 1, Of: 1})
+func (rt *Runtime) MarkDialing(eid, name string) {
+	rt.editDials(func(m map[string]Dial) {
+		delete(rt.sess.stopped, eid)
+		rt.markDial(m, eid, name)
+	})
+}
+
+func (rt *Runtime) noteOpening(eid, name string) bool {
+	ok := true
+	rt.editDials(func(m map[string]Dial) {
+		if rt.sess.stopped[eid] {
+			delete(rt.sess.stopped, eid)
+			ok = false
+			return
+		}
+		rt.markDial(m, eid, name)
+	})
+	return ok
+}
+
+func (rt *Runtime) markDial(m map[string]Dial, eid, name string) {
+	d, ok := m[eid]
+	if !ok || d.Failed {
+		rt.sess.seq++
+		d = Dial{EID: eid, seq: rt.sess.seq}
+	}
+	d.Attempt, d.Of, d.Failed, d.Waiting, d.LastErr = 1, 1, false, false, ""
+	if name != "" {
+		d.Name = name
+	}
+	m[eid] = d
+}
+
+func (rt *Runtime) startOpening(eid string, stop context.CancelFunc) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.sess.stopped[eid] {
+		delete(rt.sess.stopped, eid)
+		return false
+	}
+	if rt.sess.stops == nil {
+		rt.sess.stops = map[string]context.CancelFunc{}
+	}
+	rt.sess.stops[eid] = stop
+	return true
+}
+
+func (rt *Runtime) endOpening(eid string) {
+	rt.mu.Lock()
+	delete(rt.sess.stops, eid)
+	rt.mu.Unlock()
+}
+
+func (rt *Runtime) takeStopped(eid string) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	stopped := rt.sess.stopped[eid]
+	delete(rt.sess.stopped, eid)
+	return stopped
+}
+
+func (rt *Runtime) Opening() []Dial {
+	mgr := rt.Sessions()
+	rt.mu.RLock()
+	var out []Dial
+	for _, d := range rt.sess.dials {
+		if !d.Failed && !d.Aside && mgr.IndexOf(d.EID) < 0 {
+			out = append(out, d)
+		}
+	}
+	rt.mu.RUnlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].seq < out[j].seq })
+	return out
+}
+
+func (rt *Runtime) DetachedCount() int {
+	mgr := rt.Sessions()
+	n := mgr.DetachedCount()
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	for _, d := range rt.sess.dials {
+		if d.Aside && !d.Failed {
+			n++
+		}
+	}
+	return n
 }
 
 func (rt *Runtime) DialDone(eid string) {
@@ -90,7 +190,7 @@ func (rt *Runtime) DialDone(eid string) {
 func (rt *Runtime) DialFailed(eid, reason string) {
 	rt.editDials(func(m map[string]Dial) {
 		d := m[eid]
-		d.EID, d.Failed, d.LastErr = eid, true, reason
+		d.EID, d.Failed, d.Waiting, d.LastErr = eid, true, false, reason
 		m[eid] = d
 	})
 }
@@ -105,18 +205,28 @@ func (rt *Runtime) Connecting() bool {
 }
 
 func (rt *Runtime) reportDials(c *api.Client) {
-	ch := rt.dialReports()
 	c.SetDialReporter(func(a api.DialAttempt) {
-		d := Dial{EID: a.ElementID, Attempt: a.Attempt, Of: a.Of}
-		if a.Err != nil {
-			d.LastErr = a.Err.Error()
-		}
-		rt.NoteDial(d)
-		select {
-		case ch <- d:
-		default:
-		}
+		rt.noteDialing(a.ElementID, func(d *Dial) {
+			d.Attempt, d.Of = a.Attempt, a.Of
+			if a.Err != nil {
+				d.LastErr = a.Err.Error()
+			}
+		})
 	})
+}
+
+func (rt *Runtime) noteDialing(eid string, edit func(d *Dial)) {
+	var d Dial
+	rt.editDials(func(m map[string]Dial) {
+		d = m[eid]
+		d.EID, d.Failed, d.Waiting = eid, false, false
+		edit(&d)
+		m[eid] = d
+	})
+	select {
+	case rt.dialReports() <- d:
+	default:
+	}
 }
 
 func (rt *Runtime) Geometry() (int, int) {
@@ -125,6 +235,22 @@ func (rt *Runtime) Geometry() (int, int) {
 	cols, _ := strconv.Atoi(c)
 	rows, _ := strconv.Atoi(r)
 	return cols, rows
+}
+
+func (rt *Runtime) SetTerminal(cols, rows int) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.sess.term = [2]int{cols, rows}
+}
+
+func (rt *Runtime) dialSize() (int, int) {
+	rt.mu.RLock()
+	t := rt.sess.term
+	rt.mu.RUnlock()
+	if t[0] > 0 && t[1] > 0 {
+		return t[0], t[1]
+	}
+	return rt.Geometry()
 }
 
 func (rt *Runtime) Reopen() (*ionterm.Session, string, error) {
@@ -139,9 +265,19 @@ func (rt *Runtime) Reopen() (*ionterm.Session, string, error) {
 }
 
 func (rt *Runtime) OpenSession(ctx context.Context, eid, name, tsg string) (*ionterm.Session, error) {
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	if !rt.startOpening(eid, stop) {
+		return nil, ErrStopped
+	}
+	defer rt.endOpening(eid)
+
 	t := rt.TenantFor(tsg)
 	c, err := rt.Connect(ctx, t)
 	if err != nil {
+		if rt.takeStopped(eid) {
+			return nil, ErrStopped
+		}
 		return nil, fmt.Errorf("%s: %s", t.Name, rt.explain(err))
 	}
 	rt.mu.RLock()
@@ -151,21 +287,172 @@ func (rt *Runtime) OpenSession(ctx context.Context, eid, name, tsg string) (*ion
 	if dialer != nil {
 		d = dialer(c)
 	}
-	rt.MarkDialing(eid)
+	if !rt.noteOpening(eid, name) {
+		return nil, ErrStopped
+	}
 	if d == nil {
 		rt.DialFailed(eid, "no way to dial a device")
 		return nil, fmt.Errorf("%s: no way to dial a device", name)
 	}
-	cols, rows := rt.Geometry()
+	cols, rows := rt.dialSize()
 	user, pass := rt.Login(tsg)
 	rt.reportDials(c)
-	s, err := rt.Sessions().Open(ctx, d, eid, name, cols, rows, ionterm.Credentials{User: user, Pass: pass})
-	if err != nil {
+	s, err := rt.dialUntilHeard(ctx, d, eid, name, cols, rows, ionterm.Credentials{User: user, Pass: pass})
+	mgr := rt.Sessions()
+	rt.mu.Lock()
+	stopped, aside := rt.sess.stopped[eid], rt.sess.dials[eid].Aside
+	delete(rt.sess.stopped, eid)
+	switch {
+	case err != nil, stopped:
+	case aside:
+		mgr.AddDetached(s)
+		delete(rt.sess.dials, eid)
+	default:
+		mgr.Add(s)
+		delete(rt.sess.dials, eid)
+	}
+	rt.mu.Unlock()
+	switch {
+	case stopped:
+		if s != nil {
+			s.Close()
+		}
+		return nil, ErrStopped
+	case err != nil:
 		rt.DialFailed(eid, err.Error())
 		return nil, err
 	}
+	if aside {
+		rt.keepDetached(s)
+	}
 	rt.DialDone(eid)
 	return s, nil
+}
+
+func (rt *Runtime) asideOnceUp(eid string) bool {
+	return rt.editOpening(eid, func(d *Dial) { d.Aside = true })
+}
+
+func (rt *Runtime) stopOpening(eid string) bool {
+	return rt.editOpening(eid, func(d *Dial) {
+		if rt.sess.stopped == nil {
+			rt.sess.stopped = map[string]bool{}
+		}
+		rt.sess.stopped[eid] = true
+		if stop := rt.sess.stops[eid]; stop != nil {
+			stop()
+		}
+		d.Failed = true
+	})
+}
+
+func (rt *Runtime) editOpening(eid string, edit func(d *Dial)) bool {
+	mgr := rt.Sessions()
+	rt.mu.Lock()
+	d, dialing := rt.sess.dials[eid]
+	ok := dialing && !d.Failed && mgr.IndexOf(eid) < 0
+	if ok {
+		edit(&d)
+		if d.Failed {
+			delete(rt.sess.dials, eid)
+		} else {
+			rt.sess.dials[eid] = d
+		}
+	}
+	rt.mu.Unlock()
+	if ok {
+		rt.changed(Event{Area: AreaSessions, Rows: true})
+	}
+	return ok
+}
+
+const silentTries = 2
+
+func (rt *Runtime) dialUntilHeard(ctx context.Context, d ionterm.Dialer, eid, name string, cols, rows int, creds ionterm.Credentials) (*ionterm.Session, error) {
+	var err error
+	for try := 1; try <= silentTries; try++ {
+		var s *ionterm.Session
+		if s, err = rt.Sessions().Dial(ctx, d, eid, name, cols, rows, creds); err != nil {
+			return nil, err
+		}
+		rt.noteDialing(eid, func(x *Dial) { x.Waiting = true })
+		if err = awaitState(ctx, s, s.Answered); err == nil {
+			return s, nil
+		}
+		s.Close()
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		rt.noteDialing(eid, func(x *Dial) { x.LastErr = err.Error() })
+	}
+	return nil, fmt.Errorf("%w (%d tries)", err, silentTries)
+}
+
+func (rt *Runtime) DetachedFor() time.Duration {
+	v, _ := rt.Get("detached_for")
+	d, _ := time.ParseDuration(v)
+	return d
+}
+
+func (rt *Runtime) detachedChanged() <-chan struct{} {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.sess.keep == nil {
+		rt.sess.keep = make(chan struct{})
+	}
+	return rt.sess.keep
+}
+
+func (rt *Runtime) wakeDetached() {
+	rt.mu.Lock()
+	if rt.sess.keep != nil {
+		close(rt.sess.keep)
+		rt.sess.keep = nil
+	}
+	rt.mu.Unlock()
+}
+
+func (rt *Runtime) keepDetached(s *ionterm.Session) {
+	mgr := rt.Sessions()
+	since, left, ok := mgr.DetachedSince(s)
+	if !ok {
+		return
+	}
+	go func() {
+		for rt.watchDetached(mgr, s, since, left) {
+		}
+	}()
+}
+
+func (rt *Runtime) watchDetached(mgr *ionterm.Manager, s *ionterm.Session, since time.Time, left <-chan struct{}) bool {
+	changed, setting := s.Changed(), rt.detachedChanged()
+	if gone(s) != nil {
+		mgr.CloseDetached(s)
+		return false
+	}
+	var expired <-chan time.Time
+	if keep := rt.DetachedFor(); keep > 0 {
+		t := time.NewTimer(time.Until(since.Add(keep)))
+		defer t.Stop()
+		expired = t.C
+	}
+	select {
+	case <-left:
+		return false
+	case <-expired:
+		mgr.CloseDetached(s)
+		return false
+	case <-changed:
+	case <-setting:
+	}
+	return true
+}
+
+func Retryable(s *ionterm.Session) error {
+	if s.Err() != nil || s.Hung() || s.Ended() {
+		return nil
+	}
+	return fmt.Errorf("%s is still answering", s.Name)
 }
 
 var ErrLoggingIn = errors.New("the session is still logging in")
@@ -185,18 +472,49 @@ func (rt *Runtime) InsertLine(text string) error {
 	return nil
 }
 
-func (rt *Runtime) waitLoggedIn(ctx context.Context) {
-	waitReady(ctx, rt.Sessions().Active())
+func (rt *Runtime) waitLoggedIn(ctx context.Context) error {
+	return waitReady(ctx, rt.Sessions().Active())
 }
 
-func waitReady(ctx context.Context, s *ionterm.Session) {
+func waitReady(ctx context.Context, s *ionterm.Session) error {
 	if s == nil {
-		return
+		return nil
 	}
-	ready := time.Now().Add(10 * time.Second)
-	for !(s.LoggedIn() && promptSeen(s)) && time.Now().Before(ready) && ctx.Err() == nil {
-		time.Sleep(50 * time.Millisecond)
+	if err := awaitState(ctx, s, func() bool { return s.LoggedIn() && promptSeen(s) }); err != nil {
+		return fmt.Errorf("%s never got to its prompt: %w", s.Name, err)
 	}
+	return nil
+}
+
+func awaitState(ctx context.Context, s *ionterm.Session, done func() bool) error {
+	for {
+		changed := s.Changed()
+		if done() {
+			return nil
+		}
+		if err := gone(s); err != nil {
+			return err
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func gone(s *ionterm.Session) error {
+	switch {
+	case s.Err() != nil:
+		return s.Err()
+	case s.Ended():
+		return errors.New("the session ended")
+	case s.Hung():
+		return errors.New("the session stopped answering")
+	case s.Closed():
+		return errors.New("the session was closed")
+	}
+	return nil
 }
 
 func promptSeen(s *ionterm.Session) bool {
@@ -216,35 +534,133 @@ func (rt *Runtime) sessionFor(c *Call, cmd string) (*ionterm.Session, error) {
 	return nil, fmt.Errorf("%s: no session open", cmd)
 }
 
-func awaitText(ctx context.Context, s *ionterm.Session, before, expect string, wait time.Duration) (string, bool) {
-	deadline := time.Now().Add(wait)
-	for {
-		out, found := newOutput(s.Buffer(), before, expect)
-		if found || !time.Now().Before(deadline) || ctx.Err() != nil {
-			return out, found
-		}
-		select {
-		case <-time.After(250 * time.Millisecond):
-		case <-ctx.Done():
-		}
-	}
+type exchange struct {
+	prompt, typed, expect string
+	echoes, lines         int
+	paged                 int
 }
 
-func newOutput(now, before, expect string) (string, bool) {
-	after := now
-	lines := strings.Split(before, "\n")
-	anchor := strings.Join(lines[max(0, len(lines)-3):], "\n")
-	if i := strings.LastIndex(now[:min(len(now), len(before))], anchor); anchor != "" && i >= 0 {
-		after = now[i+len(anchor):]
+func newExchange(buf, prompt, text, expect string) *exchange {
+	lines := strings.Split(buf, "\n")
+	x := &exchange{prompt: prompt, typed: strings.TrimSpace(text), expect: expect, lines: len(lines), paged: -1}
+	x.echoes = len(x.echoSpans(lines))
+	return x
+}
+
+func (x *exchange) printable() bool {
+	return strings.TrimFunc(x.typed, unicode.IsControl) != ""
+}
+
+func (x *exchange) echoSpans(lines []string) [][2]int {
+	if !x.printable() {
+		return nil
 	}
-	_, rest, ok := strings.Cut(after, "\n")
-	if !ok {
-		return "", false
+	want := squash(x.typed)
+	var spans [][2]int
+	for i := 0; i < len(lines); i++ {
+		if !strings.HasPrefix(lines[i], x.prompt) {
+			continue
+		}
+		got := squash(lines[i][len(x.prompt):])
+		for j := i; got != "" && strings.HasPrefix(want, got); j++ {
+			if got == want {
+				spans = append(spans, [2]int{i, j})
+				i = j
+				break
+			}
+			if j+1 >= len(lines) {
+				break
+			}
+			got += squash(lines[j+1])
+		}
 	}
-	if i := strings.Index(rest, expect); i >= 0 {
-		return strings.TrimRight(rest[:i], "\n"), true
+	return spans
+}
+
+func squash(s string) string { return strings.Join(strings.Fields(s), "") }
+
+func (x *exchange) atPrompt(line string) bool { return strings.TrimSpace(line) == x.prompt }
+
+func (x *exchange) step(lines []string) (answer string, done bool, write string) {
+	last := len(lines) - 1
+	if last > x.paged && ioncli.IsPager(lines[last]) {
+		x.paged = last
+		return "", false, " "
 	}
-	return rest, false
+	from := min(x.lines, len(lines))
+	if x.printable() {
+		spans := x.echoSpans(lines)
+		if len(spans) <= x.echoes {
+			return "", false, ""
+		}
+		from = spans[len(spans)-1][1] + 1
+	}
+	if x.expect != "" {
+		text := strings.Join(lines[min(from, len(lines)):], "\n")
+		if i := strings.Index(text, x.expect); i >= 0 {
+			return strings.Trim(text[:i], "\n"), true, ""
+		}
+		return "", false, ""
+	}
+	if last < from || !x.atPrompt(lines[last]) {
+		return "", false, ""
+	}
+	var kept []string
+	for _, l := range lines[from:last] {
+		if rest, hit := ioncli.StripPager(l); hit {
+			if rest == "" {
+				continue
+			}
+			l = rest
+		}
+		kept = append(kept, l)
+	}
+	return strings.Trim(strings.Join(kept, "\n"), "\n"), true, ""
+}
+
+type SentLine struct {
+	Output  string
+	Planned bool
+	Writes  []script.Write
+}
+
+func (r SentLine) PlannedWrites() []script.Write { return r.Writes }
+
+func (r SentLine) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{"output": r.Output, "planned": r.Planned})
+}
+
+func isWrite(line string) bool {
+	return strings.TrimFunc(line, unicode.IsControl) != "" && !ioncli.IsReadOnly(line)
+}
+
+func (rt *Runtime) lineTarget(c *Call) (name, eid string) {
+	if s, err := rt.sessionFor(c, ""); err == nil {
+		return s.Name, s.ElementID
+	}
+	eid = c.Arg("element")
+	if len(rt.Elements()) == 0 {
+		rt.LoadCache()
+	}
+	for _, el := range rt.Elements() {
+		if el.ID == eid {
+			return el.Label(), eid
+		}
+	}
+	return eid, eid
+}
+
+func awaitAnswer(ctx context.Context, s *ionterm.Session, x *exchange) (string, error) {
+	var out string
+	err := awaitState(ctx, s, func() bool {
+		answer, done, write := x.step(strings.Split(s.Buffer(), "\n"))
+		if write != "" {
+			s.SendText(write)
+		}
+		out = answer
+		return done
+	})
+	return out, err
 }
 
 func sessionCommands() []Command {
@@ -274,6 +690,31 @@ func sessionCommands() []Command {
 					c.Say("%s open", r.Label())
 				}
 				return errors.Join(errs...)
+			},
+		},
+		{
+			Name: "session.retry", Slow: true, Help: "open a new session in place of one that failed, stopped answering or ended",
+			Long: "Open a new session on the element of one that failed, stopped answering or ended, and close the old one once the new one's device responds. If the new one doesn't come up, the old one is kept.",
+			Args: []Arg{{Name: "element", Help: "Element `ID` of the session (default: the active session)"}},
+			Run: func(rt *Runtime, c *Call) error {
+				s, err := rt.sessionFor(c, "session.retry")
+				if err != nil {
+					return err
+				}
+				if err := Retryable(s); err != nil {
+					return err
+				}
+				rows, note := rt.Reach(rt.rowsFor([]string{s.ElementID}, c.Tenant))
+				if len(rows) == 0 {
+					return errors.New(note)
+				}
+				if _, err := rt.OpenSession(c.Ctx, s.ElementID, s.Name, rows[0].TSG); err != nil {
+					rt.Refused(rows[0].TSG, err)
+					return fmt.Errorf("%s: %w", s.Name, err)
+				}
+				rt.Sessions().CloseDeadOn(s.ElementID)
+				c.Say("%s open again", s.Name)
+				return nil
 			},
 		},
 		{
@@ -323,16 +764,34 @@ func sessionCommands() []Command {
 					rt.Sessions().CloseActive()
 					return nil
 				}
+				if rt.stopOpening(eid) {
+					c.Say("stopped opening %s", rt.rowsFor([]string{eid}, c.Tenant)[0].Label())
+					return nil
+				}
 				if !rt.Sessions().Close(eid) {
-					return fmt.Errorf("session.close: no session is open on element %s", eid)
+					return fmt.Errorf("session.close: no session is open or opening on element %s", eid)
 				}
 				return nil
 			},
 		},
 		{
-			Name: "session.detach", Help: "put the active session aside, still connected",
+			Name: "session.detach", Help: "put a session aside, still connected; one still opening goes aside once it's up",
+			Args: []Arg{{Name: "element", Help: "Element `ID` of the session (default: the active session)"}},
 			Run: func(rt *Runtime, c *Call) error {
-				if s, ok := rt.Sessions().Detach(); ok {
+				mgr := rt.Sessions()
+				if eid := c.Arg("element"); eid != "" {
+					if rt.asideOnceUp(eid) {
+						c.Say("%s goes aside once it's up", rt.rowsFor([]string{eid}, c.Tenant)[0].Label())
+						return nil
+					}
+					i := mgr.IndexOf(eid)
+					if i < 0 {
+						return fmt.Errorf("session.detach: no session is open or opening on element %s", eid)
+					}
+					mgr.Select(i)
+				}
+				if s, ok := mgr.Detach(); ok {
+					rt.keepDetached(s)
 					c.Say("detached %s", s.Name)
 				}
 				return nil
@@ -365,44 +824,52 @@ func sessionCommands() []Command {
 			Name: "session.insert", Slow: true, Help: "put text on the active session's line without sending it",
 			Args: []Arg{{Name: "text", Required: true}},
 			Run: func(rt *Runtime, c *Call) error {
-				rt.waitLoggedIn(c.Ctx)
+				if err := rt.waitLoggedIn(c.Ctx); err != nil {
+					return fmt.Errorf("session.insert: %w", err)
+				}
 				return rt.InsertLine(c.Arg("text"))
 			},
 		},
 		{
-			Name: "session.send", Slow: true,
-			Help: "type a line into a session and wait for the answer",
+			Name: "session.send", Slow: true, Writes: true,
+			Help: "type a line into a session once it's at its prompt, and wait for the answer",
+			Long: "Type a line into a session once it's at its prompt, and wait for the answer. A line that isn't read-only (only dump, inspect, ping, dig and the other read-only verbs are) is listed instead of typed unless --doit is given.",
 			Args: []Arg{{Name: "text", Required: true, Help: "The `line` to type"},
-				{Name: "wait", Default: "2s", Help: "Time to wait, as a `duration` (with --expect, the most to wait)"},
-				{Name: "expect", Help: "Stop waiting once `text` comes back after the line, such as the prompt"},
+				{Name: "expect", Help: "The `text` that ends the answer (default: the session's prompt)"},
 				{Name: "element", Help: "Element `ID` of the session to type into (default: the active session)"}},
 			Run: func(rt *Runtime, c *Call) error {
+				var writes []script.Write
+				if line := strings.TrimSpace(c.Arg("text")); isWrite(line) {
+					who, eid := rt.lineTarget(c)
+					writes = []script.Write{{Method: "CLI", Path: eid, Body: line}}
+					if !c.DoIt {
+						c.Say("plan %s: %s", who, line)
+						c.Result = SentLine{Planned: true, Writes: writes}
+						return nil
+					}
+				}
 				s, err := rt.sessionFor(c, "session.send")
 				if err != nil {
 					return err
 				}
-				wait, err := time.ParseDuration(c.Arg("wait"))
-				if err != nil {
-					return fmt.Errorf("session.send: wait %q is not a duration", c.Arg("wait"))
+				if err := waitReady(c.Ctx, s); err != nil {
+					return fmt.Errorf("session.send: %w", err)
 				}
-				waitReady(c.Ctx, s)
 				text, expect := c.Arg("text"), c.Arg("expect")
-				now := time.Now()
-				done := rt.beginWait(Wait{What: s.Name + ": " + strings.TrimSpace(text), Since: now, Until: now.Add(wait)})
-				defer done()
-				before := s.Buffer()
-				s.SendText(text + "\r")
-				if expect == "" {
-					select {
-					case <-time.After(wait):
-					case <-c.Ctx.Done():
-					}
-					c.Say("%s", screenText(s.Render()))
-					return nil
+				what := s.Name + "'s prompt never came back"
+				if expect != "" {
+					what = fmt.Sprintf("%q never showed up on %s", expect, s.Name)
 				}
-				out, found := awaitText(c.Ctx, s, before, expect, wait)
+				done := rt.beginWait(Wait{What: s.Name + ": " + strings.TrimSpace(text), Since: time.Now()})
+				defer done()
+				x := newExchange(s.Buffer(), s.Name+"#", text, expect)
+				s.SendText(text + "\r")
+				out, err := awaitAnswer(c.Ctx, s, x)
 				c.Say("%s", screenText(s.Render()))
-				c.Result = map[string]any{"found": found, "output": out}
+				if err != nil {
+					return fmt.Errorf("session.send: %s: %w", what, err)
+				}
+				c.Result = SentLine{Output: out, Writes: writes}
 				return nil
 			},
 		},

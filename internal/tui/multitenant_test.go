@@ -1333,7 +1333,7 @@ func TestSelectingFromACachedListConnectsItsTenant(t *testing.T) {
 	if strings.Contains(got.status, "not connected") || strings.Contains(got.status, "skipped") {
 		t.Errorf("status = %q, want no complaint about connectivity", got.status)
 	}
-	if got.connecting == "" {
+	if dialingName(got) == "" {
 		t.Error("nothing reported as connecting")
 	}
 }

@@ -37,7 +37,7 @@ func TestSpinnerTicksOnlyWhileSomethingIsDialling(t *testing.T) {
 		t.Error("connectingAny() = true with nothing in flight")
 	}
 
-	m.runtime().MarkDialing("e1")
+	m.runtime().MarkDialing("e1", "rtr")
 	if !m.connectingAny() {
 		t.Error("connectingAny() = false while a dial is in flight")
 	}
@@ -60,7 +60,7 @@ func TestConnectBarReportsTheRetryAndWhetherTheIONIsOnline(t *testing.T) {
 	if _, err := m.sessions().Open(t.Context(), stubDialer{}, "e1", "rtr", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
-	m.noteDial(dialProgressMsg{eid: "e1", attempt: 2, of: 3, err: "dial: connection refused"})
+	m.runtime().NoteDial(runtime.Dial{EID: "e1", Attempt: 2, Of: 3, LastErr: "dial: connection refused"})
 
 	bar := plain(m.connectBar())
 	if !strings.Contains(bar, "2/3") {
@@ -95,7 +95,7 @@ func TestTheConnectBarKeepsItsRow(t *testing.T) {
 	}
 
 	connected := len(strings.Split(m.connectBar(), "\n"))
-	m.noteDial(dialProgressMsg{eid: "e1", attempt: 1, of: 3})
+	m.runtime().NoteDial(runtime.Dial{EID: "e1", Attempt: 1, Of: 3})
 	dialling := len(strings.Split(m.connectBar(), "\n"))
 	if connected != 1 || dialling != 1 {
 		t.Errorf("bar height = %d connected, %d dialling, want 1 either way", connected, dialling)
@@ -343,6 +343,8 @@ func TestTheConnectBarNamesBothHalves(t *testing.T) {
 		name      string
 		connected bool
 		dialing   bool
+		fresh     bool
+		waiting   bool
 		kill      bool
 		answered  bool
 		want      []string
@@ -359,8 +361,15 @@ func TestTheConnectBarNamesBothHalves(t *testing.T) {
 			want:     []string{"successfully dialed", "ion offline"},
 		},
 		{
-			name: "socket up and the ion has said nothing",
-			want: []string{"waiting for the ion", "ion offline"},
+			name:  "a new tab whose socket is still dialling",
+			fresh: true,
+			want:  []string{"dial 1/3 · ion offline · connecting to S0100-RTR-01"},
+		},
+		{
+			name:    "a new tab whose socket is up and the ion has said nothing",
+			fresh:   true,
+			waiting: true,
+			want:    []string{"dial 1/3 · ion offline · waiting for S0100-RTR-01"},
 		},
 		{
 			name:      "dialling, where the portal is the only evidence",
@@ -383,21 +392,26 @@ func TestTheConnectBarNamesBothHalves(t *testing.T) {
 			m.phase = phaseSession
 			t.Cleanup(m.sessions().CloseAll)
 
-			conn := newRecConn()
-			s, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if tt.answered {
-				conn.feed("S0100-RTR-01# ")
-				waitForTUI(t, s.Answered)
-			}
-			if tt.dialing {
-				m.runtime().NoteDial(runtime.Dial{EID: "1", Attempt: 2, Of: 3})
-			}
-			if tt.kill {
-				conn.Close(websocket.StatusAbnormalClosure, "torn")
-				waitForTUI(t, func() bool { return s.Err() != nil })
+			if tt.fresh {
+				m.frontDial = "1"
+				m.runtime().NoteDial(runtime.Dial{EID: "1", Name: "S0100-RTR-01", Attempt: 1, Of: 3, Waiting: tt.waiting})
+			} else {
+				conn := newRecConn()
+				s, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tt.answered {
+					conn.feed("S0100-RTR-01# ")
+					waitForTUI(t, s.Answered)
+				}
+				if tt.dialing {
+					m.runtime().NoteDial(runtime.Dial{EID: "1", Attempt: 2, Of: 3})
+				}
+				if tt.kill {
+					conn.Close(websocket.StatusAbnormalClosure, "torn")
+					waitForTUI(t, func() bool { return s.Err() != nil })
+				}
 			}
 
 			bar := plain(m.connectBar())

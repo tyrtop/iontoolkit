@@ -30,7 +30,7 @@ func (m tuiModel) onCommandsSaved(msg commandsSavedMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) recordSessionLine() tea.Cmd {
-	s := m.sessions().Active()
+	s := m.frontSession()
 	if s == nil || !m.runtime().RecordLine(s) {
 		return nil
 	}

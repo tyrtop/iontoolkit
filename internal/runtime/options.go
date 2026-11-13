@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/output"
@@ -122,11 +123,15 @@ func (rt *Runtime) set(name, value string) (string, error) {
 
 func (o Option) resolve(cur, typed string) (string, error) {
 	typed = strings.TrimSpace(typed)
-	if typed == "next" && len(o.Choices) > 0 {
+	if (typed == "next" || typed == "prev") && len(o.Choices) > 0 {
+		step := 1
+		if typed == "prev" {
+			step = len(o.Choices) - 1
+		}
 		next := o.Choices[0]
 		for i, c := range o.Choices {
 			if c == cur {
-				next = o.Choices[(i+1)%len(o.Choices)]
+				next = o.Choices[(i+step)%len(o.Choices)]
 				break
 			}
 		}
@@ -170,6 +175,17 @@ func (o Option) resolve(cur, typed string) (string, error) {
 	return typed, nil
 }
 
+func checkDetachedFor(v string) (string, error) {
+	v = strings.ToLower(v)
+	if v == "off" {
+		return v, nil
+	}
+	if d, err := time.ParseDuration(v); err != nil || d <= 0 {
+		return "", fmt.Errorf("%q is not a length of time like 3m, or off", v)
+	}
+	return v, nil
+}
+
 func atoi(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
@@ -188,6 +204,7 @@ const (
 	DefaultPageStep    = 10
 	DefaultSessionCols = 200
 	DefaultSessionRows = 50
+	DefaultDetachedFor = "3m"
 )
 
 var PageSteps = []string{"5", "10", "20", "25", "50"}
@@ -220,6 +237,19 @@ func builtinOptions() []Option {
 			Name: "session_rows", Help: "the height a device session is opened at", Kind: OptInt, Min: 10, Max: 200,
 			Get: func(c *config.Config) string { return intOr(c.SessionRows, DefaultSessionRows) },
 			Put: func(c *config.Config, v string) { c.SessionRows = atoi(v) },
+		},
+		{
+			Name: "detached_for", Help: "how long a detached shell is kept before it's closed, or off to keep it until it ends", Kind: OptChoice,
+			Choices: []string{"1m", "3m", "5m", "10m", "30m", "off"},
+			Get: func(c *config.Config) string {
+				if c.DetachedFor == "" {
+					return DefaultDetachedFor
+				}
+				return c.DetachedFor
+			},
+			Put:   func(c *config.Config, v string) { c.DetachedFor = v },
+			Check: checkDetachedFor,
+			After: func(rt *Runtime, _ string) { rt.wakeDetached() },
 		},
 		{
 			Name: "batch_format", Help: "how batch results are written", Kind: OptChoice, Choices: output.Formats(),
@@ -267,7 +297,7 @@ func builtinOptions() []Option {
 func optionCommands() []Command {
 	return []Command{
 		{
-			Name: "set", Help: "change an option: set name value; a bool with no value toggles, next steps a choice",
+			Name: "set", Help: "change an option: set name value; a bool with no value toggles, next or prev steps a choice",
 			Args: []Arg{{Name: "name"}, {Name: "value"}},
 			Run: func(rt *Runtime, c *Call) error {
 				name, value := c.Arg("name"), c.Arg("value")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/endpoint"
 	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/script"
@@ -21,14 +22,14 @@ func (r EndpointCall) PlannedWrites() []script.Write { return r.Writes }
 
 func (r EndpointCall) MarshalJSON() ([]byte, error) { return json.Marshal(r.Answer) }
 
-func callEndpoint(rt *runtime.Runtime, c *runtime.Call, what string, e endpoint.Endpoint, tsg, where string) error {
+func callEndpoint(rt *runtime.Runtime, c *runtime.Call, what string, e endpoint.Endpoint, to config.Tenant, where string) error {
 	res := EndpointCall{}
 	defer func() { c.Result = res }()
 	path, err := e.Fill(c.Args)
 	if err != nil {
 		return err
 	}
-	p, tenant, err := rt.PortalFor(c.Ctx, tsg)
+	p, tenant, err := rt.PortalAs(c.Ctx, to)
 	if err != nil {
 		return err
 	}

@@ -150,6 +150,33 @@ func TestSettingsSessionGeometryAdjusts(t *testing.T) {
 	}
 }
 
+func TestTheDetachedRowStepsThroughHowLongADetachedShellIsKept(t *testing.T) {
+	m := settingsModel(t)
+	m.setSection = secSession
+	m.setFocus = focusContent
+	m.setCursor = detachedRow
+
+	for _, step := range []struct {
+		key  rune
+		want string
+		says string
+	}{
+		{'+', "5m", "closed after 5m"},
+		{'-', "3m", "closed after 3m"},
+		{'-', "1m", "closed after 1m"},
+		{'-', "off", "kept until they end"},
+	} {
+		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: step.key, Text: string(step.key)}))
+		m = mm.(tuiModel)
+		if got, _ := m.runtime().Get("detached_for"); got != step.want {
+			t.Errorf("after %q detached_for = %q, want %q", step.key, got, step.want)
+		}
+		if page := plain(strings.Join(m.sectionContent(), "\n")); !strings.Contains(page, step.says) {
+			t.Errorf("after %q the section reads:\n%s\nwant %q", step.key, page, step.says)
+		}
+	}
+}
+
 func TestEditPasswordFromSettingsUsers(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection = secUsers

@@ -12,13 +12,13 @@ import (
 
 func TestALinePrintedUnderTheSpinnerStartsOnACleanLine(t *testing.T) {
 	start := time.Now()
-	waits := []runtime.Wait{{What: "S5037-RTR-01: debug bw-test src-interface 3", Since: start, Until: start.Add(5 * time.Minute)}}
+	waits := []runtime.Wait{{What: "S5037-RTR-01: debug bw-test src-interface 3", Since: start}}
 	var screen bytes.Buffer
 	s := newSpinner(&screen, func() []runtime.Wait { return waits }, []string{"*"}, 120, "workflow ion-bw-test")
 	s.start = start
 
 	s.draw(0, start.Add(65*time.Second))
-	if got := ui.Plain(screen.String()); !strings.Contains(got, "* S5037-RTR-01: debug bw-test src-interface 3 · 1m5s, up to 5m") {
+	if got := ui.Plain(screen.String()); !strings.Contains(got, "* S5037-RTR-01: debug bw-test src-interface 3 · 1m5s") {
 		t.Errorf("the spinner drew %q", got)
 	}
 	s.println(&screen, "downlink 149.48 Mbps")

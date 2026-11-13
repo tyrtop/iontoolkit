@@ -53,7 +53,6 @@ screens:
     alt+t: reopen-tab
     alt+f: favourites
     alt+y: export
-    alt+v: mouse
     alt+r: redial
     alt+right: next-tab
     alt+l: next-tab

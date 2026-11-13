@@ -129,7 +129,7 @@ type Runtime struct {
 func New() *Runtime {
 	rt := &Runtime{cmds: map[string]Command{}, opts: map[string]Option{}, subs: map[int]chan Event{}, changes: make(chan Event, 1024)}
 	rt.subs[-1] = rt.changes
-	for _, c := range concat(listCommands(), optionCommands(), fleetCommands(), haCommands(), batchCommands(), runsCommands(), sessionCommands(), dataCommands(), historyCommands(), tenantCommands(), inspectCommands(), tabCommands(), resultCommands()) {
+	for _, c := range concat(listCommands(), optionCommands(), fleetCommands(), haCommands(), batchCommands(), runsCommands(), sessionCommands(), dataCommands(), historyCommands(), tenantCommands(), inspectCommands(), resultCommands()) {
 		rt.Register(c)
 	}
 	for _, o := range builtinOptions() {

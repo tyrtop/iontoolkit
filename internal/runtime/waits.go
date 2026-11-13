@@ -9,15 +9,10 @@ import (
 type Wait struct {
 	What  string
 	Since time.Time
-	Until time.Time
 }
 
 func (w Wait) Line(now time.Time) string {
-	line := w.What + " · " + short(now.Sub(w.Since))
-	if !w.Until.IsZero() {
-		line += ", up to " + short(w.Until.Sub(w.Since))
-	}
-	return line
+	return w.What + " · " + short(now.Sub(w.Since))
 }
 
 func short(d time.Duration) string {

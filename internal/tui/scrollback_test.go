@@ -151,24 +151,6 @@ func TestTypingReturnsThePaneToLive(t *testing.T) {
 	}
 }
 
-func TestOnlyTheScrollingPanesAskForTheMouse(t *testing.T) {
-	m, _ := scrolledPane(t)
-	for _, phase := range []tuiPhase{
-		phasePicking, phaseResults, phaseMenu, phaseSettings, phaseMacros, phaseData,
-	} {
-		m.phase = phase
-		if got := m.mouseMode(); got != tea.MouseModeNone {
-			t.Errorf("phase %d mouseMode() = %v, want the terminal to keep the mouse so text "+
-				"can be selected; a notch already arrives as an arrow key there", phase, got)
-		}
-	}
-	m.phase = phaseSession
-	if got := m.mouseMode(); got == tea.MouseModeNone {
-		t.Error("the session pane asks for no mouse, so a notch recalls a command at the " +
-			"device prompt instead of scrolling")
-	}
-}
-
 func TestSwitchingTabsReturnsToLive(t *testing.T) {
 	m, _ := scrolledPane(t)
 

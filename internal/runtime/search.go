@@ -82,12 +82,15 @@ func (rt *Runtime) FindTenant(v string) (config.Tenant, error) {
 	}
 	seen := map[string]bool{}
 	for _, t := range append(all, rt.FleetTenants()...) {
+		if strings.EqualFold(t.Name, v) {
+			return t, nil
+		}
 		if seen[t.TSGID] {
 			continue
 		}
 		seen[t.TSGID] = true
 		known = append(known, t)
-		if strings.EqualFold(t.Name, v) || t.TSGID == v {
+		if t.TSGID == v {
 			return t, nil
 		}
 	}

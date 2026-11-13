@@ -16,30 +16,21 @@ type dialState struct {
 	of      int
 	lastErr string
 	failed  bool
+	waiting bool
 }
 
-type dialProgressMsg struct {
-	eid     string
-	attempt int
-	of      int
-	err     string
-}
+type dialProgressMsg struct{}
 
 func waitForDial(ch <-chan runtime.Dial) tea.Cmd {
 	if ch == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		d, ok := <-ch
-		if !ok {
+		if _, ok := <-ch; !ok {
 			return nil
 		}
-		return dialProgressMsg{eid: d.EID, attempt: d.Attempt, of: d.Of, err: d.LastErr}
+		return dialProgressMsg{}
 	}
-}
-
-func (m *tuiModel) noteDial(msg dialProgressMsg) {
-	m.runtime().NoteDial(runtime.Dial{EID: msg.eid, Attempt: msg.attempt, Of: msg.of, LastErr: msg.err})
 }
 
 func (m *tuiModel) dialDone(eid string) { m.runtime().DialDone(eid) }
@@ -53,11 +44,11 @@ func (m *tuiModel) dialFailed(eid, reason string) {
 
 func (m tuiModel) dialOf(eid string) (dialState, bool) {
 	d, ok := m.runtime().Dialing(eid)
-	return dialState{attempt: d.Attempt, of: d.Of, lastErr: d.LastErr, failed: d.Failed}, ok
+	return dialState{attempt: d.Attempt, of: d.Of, lastErr: d.LastErr, failed: d.Failed, waiting: d.Waiting}, ok
 }
 
 func (m tuiModel) connectingAny() bool {
-	return m.runtime().Connecting() || m.connecting != ""
+	return m.runtime().Connecting()
 }
 
 func (m tuiModel) retryPrompt() string {
@@ -162,50 +153,56 @@ func (m *tuiModel) rowStatusOf(el elementRow) (string, lipgloss.Style) {
 }
 
 func (m tuiModel) connectBar() string {
-	s := m.sessions().Active()
-	if s == nil {
-		if m.connecting == "" {
-			return ui.StyleDim.Render("  no session")
+	join := func(parts []string) string { return "  " + strings.Join(parts, ui.StyleDim.Render(" · ")) }
+	if t, dialing := m.dialingFront(); dialing {
+		st, ok := m.dialOf(t.eid)
+		if !ok {
+			st = dialState{attempt: 1, of: 1}
 		}
-		return "  " + m.spinner.View() + " connecting to " + m.connecting
+		return join(m.dialParts(t.eid, t.name, st))
+	}
+	s := m.frontSession()
+	if s == nil {
+		return ui.StyleDim.Render("  no session")
+	}
+	if st, ok := m.dialOf(s.ElementID); ok && !st.failed {
+		return join(m.dialParts(s.ElementID, s.Name, st))
 	}
 
 	var parts []string
-
-	if st, ok := m.dialOf(s.ElementID); ok && !st.failed {
-		what := "dial"
-		if m.redialing == s.ElementID {
-			what = "redial"
-		}
-		parts = append(parts, m.spinner.View()+" "+
-			ui.StyleWarn.Render(fmt.Sprintf("%s %d/%d", what, st.attempt, st.of)))
-		if st.lastErr != "" {
-			parts = append(parts, ui.StyleDim.Render("last: "+ui.Truncate(shortDialErr(st.lastErr), 40)))
-		}
-	} else {
-		switch {
-		case s.Err() != nil:
-			parts = append(parts, ui.StyleErr.Render(ui.MarkCross.String()+" failed"))
-		case s.Hung():
-			parts = append(parts, ui.StyleWarn.Render("~ not answering"))
-		case !s.Answered():
-			parts = append(parts, m.spinner.View()+" "+ui.StyleWarn.Render("waiting for the ion"))
-		default:
-			parts = append(parts, ui.StyleOK.Render(ui.MarkCheck.String()+" successfully dialed"))
-		}
+	switch {
+	case s.Err() != nil:
+		parts = append(parts, ui.StyleErr.Render(ui.MarkCross.String()+" failed"))
+	case s.Hung():
+		parts = append(parts, ui.StyleWarn.Render("~ not answering"))
+	default:
+		parts = append(parts, ui.StyleOK.Render(ui.MarkCheck.String()+" successfully dialed"))
 	}
-
 	parts = append(parts, m.ionLabel(s.ElementID))
-
 	if (s.Hung() || s.Err() != nil) && m.redialing != s.ElementID {
 		parts = append(parts, ui.StyleDim.Render("alt+r retry"))
 	}
-	return "  " + strings.Join(parts, ui.StyleDim.Render(" · "))
+	return join(parts)
 }
 
-func (m tuiModel) awaitingDevice() bool {
-	s := m.sessions().Active()
-	return s != nil && s.Err() == nil && !s.Hung() && !s.Ended() && !s.Answered()
+func (m tuiModel) dialParts(eid, name string, st dialState) []string {
+	what := "dial"
+	if m.redialing == eid {
+		what = "redial"
+	}
+	doing := "connecting to " + name
+	if st.waiting {
+		doing = "waiting for " + name
+	}
+	parts := []string{
+		m.spinner.View() + " " + ui.StyleWarn.Render(fmt.Sprintf("%s %d/%d", what, st.attempt, st.of)),
+		m.ionLabel(eid),
+		ui.StyleWarn.Render(doing),
+	}
+	if st.lastErr != "" {
+		parts = append(parts, ui.StyleDim.Render("last: "+ui.Truncate(shortDialErr(st.lastErr), 40)))
+	}
+	return parts
 }
 
 func (m tuiModel) ionLabel(eid string) string {

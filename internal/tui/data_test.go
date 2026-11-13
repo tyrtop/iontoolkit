@@ -376,7 +376,7 @@ func TestABareArrowScrollsTheDataPage(t *testing.T) {
 		t.Errorf("scroll = %d after up, want below %d", got, at)
 	}
 
-	if got := m.mouseMode(); got != tea.MouseModeNone {
+	if got := m.View().MouseMode; got != tea.MouseModeNone {
 		t.Errorf("mouseMode() = %v; asking for the mouse here costs click-to-select and buys "+
 			"nothing, since a notch already arrives as the arrow key above", got)
 	}

@@ -98,6 +98,10 @@ func (m tuiModel) onRuntime(msg runtimeMsg) (tea.Model, tea.Cmd) {
 	if m.phase == phaseLoading && len(m.rows()) > 0 {
 		m.phase = phasePicking
 	}
+	if m.spinIdle && m.wantsSpinner() {
+		m.spinIdle = false
+		return m, m.spinner.Tick
+	}
 	return m, nil
 }
 

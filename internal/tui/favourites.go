@@ -93,7 +93,7 @@ func (m tuiModel) onFavouriteKey(key string) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) saveFavourite(slot int) (tea.Model, tea.Cmd) {
 	line := ""
-	if s := m.sessions().Active(); s != nil {
+	if s := m.frontSession(); s != nil {
 		line = strings.TrimSpace(s.Line())
 	}
 	if line == "" {
@@ -122,7 +122,7 @@ func (m tuiModel) openFavouriteForm(slot int) (tea.Model, tea.Cmd) {
 	cmd := newField("command", "dump device status", false)
 	if f, ok := m.runtime().Favourite(slot); ok {
 		cmd.input.SetValue(f.Command)
-	} else if s := m.sessions().Active(); s != nil {
+	} else if s := m.frontSession(); s != nil {
 		cmd.input.SetValue(strings.TrimSpace(s.Line()))
 	}
 	at := newField("slot", "1-9", false)
@@ -152,7 +152,7 @@ func (m tuiModel) submitFavourite() (tea.Model, tea.Cmd) {
 
 func (m tuiModel) overlayFavourites(content string) string {
 	line := ""
-	if s := m.sessions().Active(); s != nil {
+	if s := m.frontSession(); s != nil {
 		line = strings.TrimSpace(s.Line())
 	}
 

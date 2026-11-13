@@ -172,7 +172,7 @@ func (m tuiModel) activateSlash() (tea.Model, tea.Cmd) {
 			m.slashInput.Blur()
 			return m, nil
 		case "login":
-			s := m.sessions().Active()
+			s := m.frontSession()
 			if s == nil {
 				return m.closeSlash(), nil
 			}
@@ -310,7 +310,7 @@ func (m tuiModel) viewSlash() string {
 	case slashDebug:
 		b.WriteString(ui.StyleCmd.Render("/debug") + "\n\n")
 		cols, rows := m.paneSize()
-		s := m.sessions().Active()
+		s := m.frontSession()
 		if s == nil {
 			b.WriteString(ui.StyleDim.Render("  no active session") + "\n")
 		} else {

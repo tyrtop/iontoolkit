@@ -160,6 +160,11 @@ func (rt *Runtime) signInLost(tsg, why string, keep bool) {
 }
 
 func (rt *Runtime) TenantFor(tsg string) config.Tenant {
+	for _, t := range rt.FleetTenants() {
+		if t.TSGID == tsg {
+			return t
+		}
+	}
 	if t, ok := rt.TenantOf(tsg); ok {
 		return t
 	}

@@ -170,10 +170,10 @@ func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p plac
 			if sc.Line != "" || !strings.HasPrefix(sc.Name, EndpointPrefix) || !ok {
 				return exec(sc)
 			}
-			tsg, where := run.TSGID, ""
+			to, where := run, ""
 			if in := w.In(name); in != "" {
 				t := p.tenants[in]
-				tsg = t.TSGID
+				to = t
 				if t.TSGID != run.TSGID {
 					where = " in " + t.Name
 				}
@@ -183,7 +183,7 @@ func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p plac
 				said = append(said, l)
 				c.Say("%s", l)
 			}}
-			err := callEndpoint(rt, call, WorkflowPrefix+w.Name, e, tsg, where)
+			err := callEndpoint(rt, call, WorkflowPrefix+w.Name, e, to, where)
 			return said, call.Result, err
 		},
 		Export:   func(text, slug, ext string) (string, error) { return rt.Export(slug, ext, text) },
@@ -200,6 +200,9 @@ func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p plac
 		record.Error = err.Error()
 	}
 	rt.EndRun(at, record)
+	if !c.DoIt && len(res.Writes) > 0 {
+		c.Say("dry run: %d write(s), nothing sent — add --doit to send", len(res.Writes))
+	}
 	return err
 }
 

@@ -181,8 +181,8 @@ func TestSignInInTheMiddleOfAnActionSkipsTheConfirmation(t *testing.T) {
 		if len(got.resumeSessions) != 0 {
 			t.Error("resumeSessions was not consumed, so it would replay again")
 		}
-		if got.connecting != "s0100-rtr-01" {
-			t.Errorf("connecting = %q, want the interrupted session reopened", got.connecting)
+		if dialingName(got) != "s0100-rtr-01" {
+			t.Errorf("connecting = %q, want the interrupted session reopened", dialingName(got))
 		}
 		if cmd == nil {
 			t.Error("no command returned, want the session dial started")
@@ -486,8 +486,8 @@ func TestExpiredTokenReopensTheBrowserAtTheActionThatFailed(t *testing.T) {
 		if got.phase != phaseSignIn {
 			t.Fatalf("phase = %v, want the browser opened instead of a doomed dial", got.phase)
 		}
-		if got.connecting != "" {
-			t.Errorf("connecting = %q, want no dial attempted", got.connecting)
+		if dialingName(got) != "" {
+			t.Errorf("connecting = %q, want no dial attempted", dialingName(got))
 		}
 		if len(got.resumeSessions) != 1 {
 			t.Errorf("resumeSessions = %v, want the request queued", got.resumeSessions)

@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"fmt"
+
+	"tyrtop.com/iontk/internal/config"
 )
 
 type Portal interface {
@@ -39,7 +41,23 @@ func (rt *Runtime) PortalFor(ctx context.Context, tsg string) (Portal, Tenant, e
 		}
 		tsg = cur.TSGID
 	}
-	t := rt.TenantFor(tsg)
+	return rt.reach(ctx, rt.TenantFor(tsg))
+}
+
+func (rt *Runtime) PortalAs(ctx context.Context, t config.Tenant) (Portal, Tenant, error) {
+	rt.mu.RLock()
+	fn := rt.portal
+	rt.mu.RUnlock()
+	if fn != nil {
+		return fn(ctx)
+	}
+	if t.TSGID == "" {
+		return rt.PortalFor(ctx, "")
+	}
+	return rt.reach(ctx, t)
+}
+
+func (rt *Runtime) reach(ctx context.Context, t config.Tenant) (Portal, Tenant, error) {
 	c, err := rt.Connect(ctx, t)
 	if err != nil {
 		return nil, Tenant{}, fmt.Errorf("%s: %s", t.Name, rt.explain(err))

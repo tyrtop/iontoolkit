@@ -382,7 +382,9 @@ func historyCommands() []Command {
 				if err != nil {
 					return err
 				}
-				rt.waitLoggedIn(c.Ctx)
+				if err := rt.waitLoggedIn(c.Ctx); err != nil {
+					return fmt.Errorf("fav.use: %w", err)
+				}
 				_, differs, err := rt.UseFavourite(n)
 				if differs != "" {
 					c.Say("favourite %d was %s — check it before sending", n, differs)

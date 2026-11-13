@@ -2,18 +2,26 @@ package ionterm
 
 import (
 	"context"
+	"slices"
 	"sync"
+	"time"
 )
 
 type Manager struct {
 	mu       sync.Mutex
 	sessions []*Session
-	detached []*Session
+	detached []*detachedSession
 	active   int
 	dirty    chan string
 	lastEID  string
 	lastName string
 	hasLast  bool
+}
+
+type detachedSession struct {
+	s     *Session
+	since time.Time
+	left  chan struct{}
 }
 
 func NewManager() *Manager {
@@ -35,18 +43,25 @@ func (m *Manager) notify(eid string) {
 }
 
 func (m *Manager) Open(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds Credentials) (*Session, error) {
-	s, err := Open(ctx, d, eid, name, cols, rows, creds, m.notify)
+	s, err := m.Dial(ctx, d, eid, name, cols, rows, creds)
 	if err != nil {
 		return nil, err
 	}
+	m.Add(s)
+	return s, nil
+}
 
+func (m *Manager) Dial(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds Credentials) (*Session, error) {
+	return Open(ctx, d, eid, name, cols, rows, creds, m.notify)
+}
+
+func (m *Manager) Add(s *Session) {
 	m.mu.Lock()
 	m.sessions = append(m.sessions, s)
 	m.active = len(m.sessions) - 1
 	m.mu.Unlock()
 
-	m.notify(eid)
-	return s, nil
+	m.notify(s.ElementID)
 }
 
 func (m *Manager) Count() int {
@@ -280,12 +295,13 @@ func (m *Manager) Reap() int {
 	}
 
 	detached := m.detached[:0:0]
-	for _, s := range m.detached {
-		if s.Ended() {
-			gone = append(gone, s)
+	for _, d := range m.detached {
+		if d.s.Ended() {
+			close(d.left)
+			gone = append(gone, d.s)
 			continue
 		}
-		detached = append(detached, s)
+		detached = append(detached, d)
 	}
 	m.detached = detached
 	m.mu.Unlock()
@@ -307,7 +323,7 @@ func (m *Manager) Detach() (*Session, bool) {
 	}
 	s := m.sessions[m.active]
 	m.sessions = append(m.sessions[:m.active], m.sessions[m.active+1:]...)
-	m.detached = append(m.detached, s)
+	m.detached = append(m.detached, newDetached(s))
 	m.lastEID, m.lastName, m.hasLast = s.ElementID, s.Name, true
 	if m.active >= len(m.sessions) {
 		m.active = len(m.sessions) - 1
@@ -321,6 +337,19 @@ func (m *Manager) Detach() (*Session, bool) {
 	return s, true
 }
 
+func (m *Manager) AddDetached(s *Session) {
+	m.mu.Lock()
+	m.detached = append(m.detached, newDetached(s))
+	m.lastEID, m.lastName, m.hasLast = s.ElementID, s.Name, true
+	m.mu.Unlock()
+
+	m.notify(s.ElementID)
+}
+
+func newDetached(s *Session) *detachedSession {
+	return &detachedSession{s: s, since: time.Now(), left: make(chan struct{})}
+}
+
 func (m *Manager) Reattach() (*Session, bool) {
 	if m == nil {
 		return nil, false
@@ -331,11 +360,12 @@ func (m *Manager) Reattach() (*Session, bool) {
 	for len(m.detached) > 0 {
 		cand := m.detached[len(m.detached)-1]
 		m.detached = m.detached[:len(m.detached)-1]
-		if cand.Closed() || cand.Ended() || cand.Err() != nil {
-			discard = append(discard, cand)
+		close(cand.left)
+		if cand.s.Closed() || cand.s.Ended() || cand.s.Err() != nil {
+			discard = append(discard, cand.s)
 			continue
 		}
-		s = cand
+		s = cand.s
 		break
 	}
 	m.mu.Unlock()
@@ -371,8 +401,43 @@ func (m *Manager) Detached() []*Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]*Session, len(m.detached))
-	copy(out, m.detached)
+	for i, d := range m.detached {
+		out[i] = d.s
+	}
 	return out
+}
+
+func (m *Manager) DetachedSince(s *Session) (time.Time, <-chan struct{}, bool) {
+	if m == nil {
+		return time.Time{}, nil, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, d := range m.detached {
+		if d.s == s {
+			return d.since, d.left, true
+		}
+	}
+	return time.Time{}, nil, false
+}
+
+func (m *Manager) CloseDetached(s *Session) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	at := slices.IndexFunc(m.detached, func(d *detachedSession) bool { return d.s == s })
+	if at < 0 {
+		m.mu.Unlock()
+		return false
+	}
+	close(m.detached[at].left)
+	m.detached = slices.Delete(m.detached, at, at+1)
+	m.mu.Unlock()
+
+	s.Close()
+	m.notify(s.ElementID)
+	return true
 }
 
 func (m *Manager) LastClosed() (string, string, bool) {
@@ -389,7 +454,11 @@ func (m *Manager) CloseAll() {
 		return
 	}
 	m.mu.Lock()
-	all := append(m.sessions, m.detached...)
+	all := append([]*Session(nil), m.sessions...)
+	for _, d := range m.detached {
+		close(d.left)
+		all = append(all, d.s)
+	}
 	m.sessions, m.detached = nil, nil
 	m.active = 0
 	m.mu.Unlock()

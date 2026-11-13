@@ -1,10 +1,13 @@
 package runtime
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/sase/api"
 )
 
 func secret(t *testing.T, st *config.Store, key string) string {
@@ -116,5 +119,56 @@ func TestUsersAddDefaultRunAsAndRemove(t *testing.T) {
 	}
 	if got := secret(t, st, config.IONPassKey("111", "noc")); got != "" || rt.RunAs("111") != "admin" || rt.IONUser() != "admin" {
 		t.Errorf("removed: password %q, run as %q, ion user %q", got, rt.RunAs("111"), rt.IONUser())
+	}
+}
+
+func TestTwoTenantsOnOneTSGAreEachFoundByName(t *testing.T) {
+	rt, _ := withConfig(t)
+	rt.Config().Tenants = []config.Tenant{
+		{Name: "Tractor Supply Co.", TSGID: "111", Auth: config.AuthBrowser, Added: true},
+		{Name: "tractorsupply", TSGID: "111", ClientID: "sa", Auth: config.AuthServiceAccount, Added: true},
+	}
+	for _, name := range []string{"Tractor Supply Co.", "tractorsupply"} {
+		got, err := rt.FindTenant(name)
+		if err != nil || got.Name != name {
+			t.Errorf("FindTenant(%q) = %q, %v; want the tenant of that name, not the first on its TSG", name, got.Name, err)
+		}
+	}
+	if got, _ := rt.FindTenant("111"); got.Name != "Tractor Supply Co." {
+		t.Errorf("FindTenant(tsg) = %q, want the first tenant on it", got.Name)
+	}
+}
+
+func TestAWorkflowsTenantSignsInAsItselfNotAsAnotherOnItsTSG(t *testing.T) {
+	rt, _ := withConfig(t)
+	browser := config.Tenant{Name: "Tractor Supply Co.", TSGID: "111", Auth: config.AuthBrowser, Added: true}
+	sa := config.Tenant{Name: "tractorsupply", TSGID: "111", ClientID: "sa", Auth: config.AuthServiceAccount, Added: true}
+	rt.Config().Tenants = []config.Tenant{browser, sa}
+	var asked []string
+	rt.UseConnector(Connector{Connect: func(_ context.Context, _ *config.Store, t config.Tenant) (*api.Client, error) {
+		asked = append(asked, t.Name)
+		return nil, errors.New("no portal here")
+	}})
+	rt.PortalAs(context.Background(), sa)
+	if len(asked) != 1 || asked[0] != sa.Name {
+		t.Errorf("signed in as %q, want only %q, the tenant the workflow was given", asked, sa.Name)
+	}
+}
+
+func TestAShellDialsAsTheTenantTheFleetWasLoadedAs(t *testing.T) {
+	rt, _ := withConfig(t)
+	browser := config.Tenant{Name: "Tractor Supply Co.", TSGID: "111", Auth: config.AuthBrowser, Added: true}
+	sa := config.Tenant{Name: "tractorsupply", TSGID: "111", ClientID: "sa", Auth: config.AuthServiceAccount, Added: true}
+	rt.Config().Tenants = []config.Tenant{browser, sa}
+	rt.SetAuthMode(AuthTenant)
+	rt.UseTenant(sa)
+	var asked []string
+	rt.UseConnector(Connector{Connect: func(_ context.Context, _ *config.Store, t config.Tenant) (*api.Client, error) {
+		asked = append(asked, t.Name)
+		return nil, errors.New("no portal here")
+	}})
+	rt.OpenSession(context.Background(), "e1", "S5037-RTR-01", "111")
+	if len(asked) != 1 || asked[0] != sa.Name {
+		t.Errorf("the shell signed in as %q, want only %q, the tenant the fleet was loaded as, not the first saved on its TSG", asked, sa.Name)
 	}
 }

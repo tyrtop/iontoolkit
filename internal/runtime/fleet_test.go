@@ -339,7 +339,7 @@ func TestSessionsOpenSendAndClose(t *testing.T) {
 		t.Errorf("list = %v, want the last opened active", said)
 	}
 	said = nil
-	if err := rt.Exec(&Call{Ctx: context.Background(), Args: map[string]string{"text": "dump device status", "wait": "300ms"},
+	if err := rt.Exec(&Call{Ctx: context.Background(), Args: map[string]string{"text": "dump device status"},
 		Out: func(s string) { said = append(said, s) }}, "session.send"); err != nil {
 		t.Fatal(err)
 	}

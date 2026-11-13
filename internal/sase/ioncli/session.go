@@ -63,6 +63,10 @@ func isPager(line string, pagers []string) bool {
 	return hit && line != ""
 }
 
+func IsPager(line string) bool { return isPager(line, DefaultPagers) }
+
+func StripPager(line string) (string, bool) { return stripPager(line, DefaultPagers) }
+
 func strip(s string) string {
 	return ansi.ReplaceAllString(s, "")
 }
