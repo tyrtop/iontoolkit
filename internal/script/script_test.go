@@ -148,6 +148,60 @@ end
 	}
 }
 
+func TestANamedWaitEndsTheRunWhenItShouldNotWait(t *testing.T) {
+	s := set(t, map[string]string{"claim.lua": `
+return function(ctx)
+  ctx.status("claimed")
+  local wait = ctx.budget("1200s")
+  while true do
+    pcall(function() wait:tick("10s", "the claim of NEW0001") end)
+    ctx.status("after the wait")
+  end
+end
+`})
+	start := time.Now()
+	got, err := s.Run(context.Background(), Run{Name: "claim", ExitOnWait: true})
+	var w *Waiting
+	if !errors.As(err, &w) || w.What != "the claim of NEW0001" {
+		t.Fatalf("error = %v, want it waiting on the claim", err)
+	}
+	if len(got) != 1 || got[0].Value != "claimed" {
+		t.Errorf("effects = %v, want only the line before the wait", got)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("the run took %s, want it ended at the wait", d)
+	}
+}
+
+func TestAWaitWithNoNameStillWaitsWhenItShouldNotWait(t *testing.T) {
+	s := set(t, map[string]string{"retry.lua": `
+return function(ctx)
+  local wait = ctx.budget("10s")
+  wait:tick("20ms")
+  ctx.status("retried")
+end
+`})
+	got, err := s.Run(context.Background(), Run{Name: "retry", ExitOnWait: true})
+	if err != nil || len(got) != 1 || got[0].Value != "retried" {
+		t.Errorf("effects = %v, error = %v, want it to wait and keep going", got, err)
+	}
+}
+
+func TestANamedWaitWaitsByDefault(t *testing.T) {
+	s := set(t, map[string]string{"claim.lua": `
+return function(ctx)
+  if ctx.exit_on_wait then ctx.fail("exit_on_wait is on") end
+  local wait = ctx.budget("10s")
+  wait:tick("20ms", "the claim of NEW0001")
+  ctx.status("waited")
+end
+`})
+	got, err := s.Run(context.Background(), Run{Name: "claim"})
+	if err != nil || len(got) != 1 || got[0].Value != "waited" {
+		t.Errorf("effects = %v, error = %v, want it to wait and keep going", got, err)
+	}
+}
+
 func TestAWhileTrueIsStoppedAndNamed(t *testing.T) {
 	s := set(t, map[string]string{"runaway.lua": `
 return function(ctx)

@@ -67,7 +67,7 @@ func runWrite(ctx context.Context, what string, out io.Writer) error {
 		app.ReloadWrites(cliRuntime())
 	}
 	args, rest := writeCall(what, els, flagWriteMatch, flagWriteSet)
-	return execPrinting(ctx, out, "write", args, rest, flagWriteDoit)
+	return execPrinting(ctx, out, "write", args, rest, flagWriteDoit, false)
 }
 
 func writeCall(what string, els, match, sets []string) (map[string]string, []string) {

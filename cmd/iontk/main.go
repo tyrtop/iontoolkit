@@ -4,12 +4,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 
 	"tyrtop.com/iontk/internal/logging"
+	"tyrtop.com/iontk/internal/script"
 )
+
+const exitWaiting = 75
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -25,6 +29,9 @@ func main() {
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		if waiting := (*script.Waiting)(nil); errors.As(err, &waiting) {
+			os.Exit(exitWaiting)
+		}
 		os.Exit(1)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/runtime"
 )
 
@@ -114,9 +115,13 @@ func fromRuntime(c *cobra.Command, rc runtime.Command, in io.Reader) {
 		}
 		strs[a.Name] = f.String(a.Name, a.Default, help)
 	}
-	var doit *bool
+	var doit, exitOnWait *bool
 	if rc.Writes {
 		doit = f.Bool("doit", false, "Send the writes instead of only listing them")
+	}
+	if strings.HasPrefix(rc.Name, app.WorkflowPrefix) {
+		exitOnWait = f.Bool("exit-on-wait", false,
+			"Exit with code 75 at the first wait that isn't done yet instead of waiting; run it again to keep going")
 	}
 
 	name, declared := rc.Name, rc.Args
@@ -144,7 +149,8 @@ func fromRuntime(c *cobra.Command, rc runtime.Command, in io.Reader) {
 				args[n] = string(b)
 			}
 		}
-		return execPrinting(cmd.Context(), cmd.OutOrStdout(), name, args, words, doit != nil && *doit)
+		return execPrinting(cmd.Context(), cmd.OutOrStdout(), name, args, words,
+			doit != nil && *doit, exitOnWait != nil && *exitOnWait)
 	}
 }
 

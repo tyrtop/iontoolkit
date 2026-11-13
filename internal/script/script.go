@@ -21,14 +21,82 @@ const DirName = "actions"
 type Set struct {
 	src  map[string]string
 	from map[string]string
+	real map[string]string
+	uses []used
+}
+
+type used struct {
+	name string
+	set  *Set
+}
+
+type module struct {
+	name, src, real string
+	owner           *Set
 }
 
 func Load(dir string) (*Set, error) { return load(dir, check) }
 
 func LoadPackage(dir string) (*Set, error) { return load(dir, compiles) }
 
+func (s *Set) Use(name string, u *Set) { s.uses = append(s.uses, used{name: name, set: u}) }
+
+func (s *Set) find(name string) (module, bool, error) {
+	if src, ok := s.src[name]; ok {
+		return module{name: name, src: src, real: s.real[name], owner: s}, true, nil
+	}
+	if wf, mod, ok := strings.Cut(name, "/"); ok {
+		for _, u := range s.uses {
+			if u.name == wf {
+				return u.set.find(mod)
+			}
+		}
+		return module{}, false, nil
+	}
+	var found []module
+	var from []string
+	for _, u := range s.uses {
+		m, ok, err := u.set.find(name)
+		if err != nil {
+			return module{}, false, err
+		}
+		if ok && !slicesHave(found, m.real) {
+			found = append(found, m)
+			from = append(from, u.name)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return module{}, false, nil
+	case 1:
+		return found[0], true, nil
+	}
+	return module{}, false, fmt.Errorf("require %q: %s each have a %s.lua; say which, as require(%q)",
+		name, strings.Join(from, " and "), name, from[0]+"/"+name)
+}
+
+func (s *Set) usedNote() string {
+	if len(s.uses) == 0 {
+		return ""
+	}
+	names := make([]string, len(s.uses))
+	for i, u := range s.uses {
+		names[i] = u.name
+	}
+	return " or in " + strings.Join(names, ", ")
+}
+
+func slicesHave(ms []module, real string) bool {
+	for _, m := range ms {
+		if m.real == real {
+			return true
+		}
+	}
+	return false
+}
+
 func load(dir string, check func(name, src string) error) (*Set, error) {
-	set := &Set{src: map[string]string{}, from: map[string]string{}}
+	set := &Set{src: map[string]string{}, from: map[string]string{}, real: map[string]string{}}
 	if dir == "" {
 		return set, nil
 	}
@@ -56,7 +124,10 @@ func load(dir string, check func(name, src string) error) (*Set, error) {
 			bad = append(bad, err.Error())
 			continue
 		}
-		set.src[name], set.from[name] = string(b), path
+		set.src[name], set.from[name], set.real[name] = string(b), path, path
+		if real, err := filepath.EvalSymlinks(path); err == nil {
+			set.real[name] = real
+		}
 	}
 	if len(bad) > 0 {
 		return set, fmt.Errorf("%s", strings.Join(bad, "; "))
@@ -171,11 +242,16 @@ type Run struct {
 	Exec   func(Call) ([]string, any, error)
 	Budget time.Duration
 
-	Input    map[string]string
-	DoIt     bool
-	OnStatus func(string)
-	OnReturn func(any)
+	Input      map[string]string
+	DoIt       bool
+	ExitOnWait bool
+	OnStatus   func(string)
+	OnReturn   func(any)
 }
+
+type Waiting struct{ What string }
+
+func (w *Waiting) Error() string { return "waiting on " + w.What }
 
 type Call struct {
 	Line string
@@ -224,6 +300,7 @@ func (s *Set) Run(ctx context.Context, r Run) ([]Effect, error) {
 
 	var effects []Effect
 	var failed *stopped
+	var waiting *Waiting
 	started := time.Now()
 
 	add := func(e Effect) { effects = append(effects, e) }
@@ -251,6 +328,7 @@ func (s *Set) Run(ctx context.Context, r Run) ([]Effect, error) {
 	}
 	L.SetField(api, "input", input)
 	L.SetField(api, "doit", lua.LBool(r.DoIt))
+	L.SetField(api, "exit_on_wait", lua.LBool(r.ExitOnWait))
 	L.SetGlobal("require", s.require(L))
 	L.SetField(api, "fail", L.NewFunction(func(L *lua.LState) int {
 		failed = &stopped{reason: L.CheckString(1)}
@@ -327,6 +405,12 @@ func (s *Set) Run(ctx context.Context, r Run) ([]Effect, error) {
 		b := L.NewTable()
 		L.SetField(b, "tick", L.NewFunction(func(L *lua.LState) int {
 			every := optDuration(L, 2, time.Second)
+			if what := L.OptString(3, ""); r.ExitOnWait && what != "" {
+				waiting = &Waiting{What: what}
+				cancel()
+				L.RaiseError("%s", waiting.Error())
+				return 0
+			}
 			if time.Now().Add(every).After(end) {
 				L.Push(lua.LFalse)
 				return 1
@@ -384,7 +468,11 @@ func (s *Set) Run(ctx context.Context, r Run) ([]Effect, error) {
 
 	L.Push(body)
 	L.Push(api)
-	if err := L.PCall(1, 1, nil); err != nil {
+	err = L.PCall(1, 1, nil)
+	if waiting != nil {
+		return effects, waiting
+	}
+	if err != nil {
 		if failed != nil {
 			return effects, failed
 		}
@@ -639,31 +727,60 @@ func tableFromLua(t *lua.LTable) any {
 
 func (s *Set) require(L *lua.LState) *lua.LFunction {
 	loaded := map[string]lua.LValue{}
-	return L.NewFunction(func(L *lua.LState) int {
-		name := L.CheckString(1)
-		if v, ok := loaded[name]; ok {
+	resolvers := map[*Set]*lua.LFunction{}
+	envs := map[*Set]*lua.LTable{}
+	var resolver func(owner *Set) *lua.LFunction
+	env := func(owner *Set) *lua.LTable {
+		if e, ok := envs[owner]; ok {
+			return e
+		}
+		e, mt := L.NewTable(), L.NewTable()
+		L.SetField(mt, "__index", L.G.Global)
+		L.SetMetatable(e, mt)
+		L.SetField(e, "require", resolver(owner))
+		envs[owner] = e
+		return e
+	}
+	resolver = func(owner *Set) *lua.LFunction {
+		if f, ok := resolvers[owner]; ok {
+			return f
+		}
+		f := L.NewFunction(func(L *lua.LState) int {
+			name := L.CheckString(1)
+			m, ok, err := owner.find(name)
+			if err != nil {
+				L.RaiseError("%s", err)
+				return 0
+			}
+			if !ok {
+				L.RaiseError("require %q: there is no %s.lua beside this script%s", name, name, owner.usedNote())
+				return 0
+			}
+			if v, ok := loaded[m.real]; ok {
+				L.Push(v)
+				return 1
+			}
+			fn, err := L.Load(strings.NewReader(m.src), m.name+".lua")
+			if err != nil {
+				L.RaiseError("require %q: %s", name, err)
+				return 0
+			}
+			if m.owner != s {
+				L.SetFEnv(fn, env(m.owner))
+			}
+			L.Push(fn)
+			L.Call(0, 1)
+			v := L.Get(-1)
+			L.Pop(1)
+			if v == lua.LNil {
+				v = lua.LTrue
+			}
+			loaded[m.real] = v
 			L.Push(v)
 			return 1
-		}
-		src, ok := s.src[name]
-		if !ok {
-			L.RaiseError("require %q: there is no %s.lua beside this script", name, name)
-			return 0
-		}
-		fn, err := L.Load(strings.NewReader(src), name+".lua")
-		if err != nil {
-			L.RaiseError("require %q: %s", name, err)
-			return 0
-		}
-		L.Push(fn)
-		L.Call(0, 1)
-		v := L.Get(-1)
-		L.Pop(1)
-		if v == lua.LNil {
-			v = lua.LTrue
-		}
-		loaded[name] = v
-		L.Push(v)
-		return 1
-	})
+		})
+		resolvers[owner] = f
+		return f
+	}
+	return resolver(s)
 }

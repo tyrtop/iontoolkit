@@ -22,6 +22,7 @@ type Run struct {
 	Status   []string          `json:"status"`
 	Writes   []script.Write    `json:"writes,omitempty"`
 	Data     any               `json:"data,omitempty"`
+	Waiting  string            `json:"waiting,omitempty"`
 	Error    string            `json:"error,omitempty"`
 }
 

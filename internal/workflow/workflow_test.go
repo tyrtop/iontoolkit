@@ -235,3 +235,97 @@ func TestACSVExcelSavedWithAByteOrderMarkReads(t *testing.T) {
 		t.Errorf("runs %v, err %v", runs, err)
 	}
 }
+
+const baseSites = "title: Base\nendpoints:\n  - name: sites\n    path: /sdwan/v4.9/api/sites\n"
+
+func TestAWorkflowUsesAnothersEndpointsAndLua(t *testing.T) {
+	root := t.TempDir()
+	folder(t, root, "base", map[string]string{
+		ManifestName: baseSites,
+		"main.lua":   `return function(ctx) end`,
+		"helper.lua": `local util = require("util") return { who = function() return "base helper, " .. util.who end }`,
+		"util.lua":   `return { who = "base util" }`,
+	})
+	dir := folder(t, root, "router", map[string]string{
+		ManifestName: "title: Router\nuses: [base]\nendpoints:\n  - name: element\n    path: /sdwan/v3.1/api/elements/{element_id}\n",
+		"main.lua":   `local h, u = require("helper"), require("util") return function(ctx) ctx.status(h.who()) ctx.status(u.who) end`,
+		"util.lua":   `return { who = "router util" }`,
+	})
+	w, err := LoadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := w.Endpoint("sites"); !ok || w.From("sites") != "base" || w.From("element") != "router" || len(w.Calls()) != 2 {
+		t.Errorf("calls = %+v, want element from router and sites from base", w.Calls())
+	}
+	var said []string
+	if _, err := w.Run(context.Background(), nil, Host{OnStatus: func(s string) { said = append(said, s) }}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(said, "|"); got != "base helper, base util|router util" {
+		t.Errorf("said %q, want base's helper to find base's util and router's main its own", got)
+	}
+}
+
+func TestAnEndpointUsedWithTwoPathsDoesNotLoad(t *testing.T) {
+	root := t.TempDir()
+	folder(t, root, "base", map[string]string{ManifestName: baseSites, "main.lua": `return function(ctx) end`})
+	dir := folder(t, root, "copy", map[string]string{
+		ManifestName: "title: Copy\nuses: [base]\nendpoints:\n  - name: sites\n    path: /sdwan/v4.13/api/sites\n",
+		"main.lua":   `return function(ctx) end`,
+	})
+	_, err := LoadOne(dir)
+	if err == nil || !strings.Contains(err.Error(), "sites is GET /sdwan/v4.13/api/sites in copy and GET /sdwan/v4.9/api/sites in base") {
+		t.Errorf("LoadOne() = %v, want both definitions named", err)
+	}
+}
+
+func TestTheSameEndpointUsedTwiceLoads(t *testing.T) {
+	root := t.TempDir()
+	folder(t, root, "base", map[string]string{ManifestName: baseSites, "main.lua": `return function(ctx) end`})
+	dir := folder(t, root, "copy", map[string]string{
+		ManifestName: "title: Copy\nuses: [base]\nendpoints:\n  - name: sites\n    path: /sdwan/v4.9/api/sites\n",
+		"main.lua":   `return function(ctx) end`,
+	})
+	if _, err := LoadOne(dir); err != nil {
+		t.Errorf("LoadOne() = %v, want a matching copy to load", err)
+	}
+}
+
+func TestUsesThatAreMissingOrCircularDoNotLoad(t *testing.T) {
+	root := t.TempDir()
+	missing := folder(t, root, "lonely", map[string]string{ManifestName: "title: Lonely\nuses: [nowhere]\n", "main.lua": `return function(ctx) end`})
+	if _, err := LoadOne(missing); err == nil || !strings.Contains(err.Error(), "uses nowhere, and there is no workflow there") {
+		t.Errorf("LoadOne(lonely) = %v", err)
+	}
+	a := folder(t, root, "a", map[string]string{ManifestName: "title: A\nuses: [b]\n", "main.lua": `return function(ctx) end`})
+	folder(t, root, "b", map[string]string{ManifestName: "title: B\nuses: [a]\n", "main.lua": `return function(ctx) end`})
+	if _, err := LoadOne(a); err == nil || !strings.Contains(err.Error(), "lead back to itself") {
+		t.Errorf("LoadOne(a) = %v", err)
+	}
+}
+
+func TestARequireTwoUsedWorkflowsCouldAnswerMustSayWhich(t *testing.T) {
+	root := t.TempDir()
+	for _, n := range []string{"one", "two"} {
+		folder(t, root, n, map[string]string{ManifestName: "title: " + n + "\n", "main.lua": `return function(ctx) end`,
+			"util.lua": `return "` + n + `"`})
+	}
+	run := func(main string) (string, error) {
+		dir := folder(t, root, "both", map[string]string{ManifestName: "title: Both\nuses: [one, two]\n", "main.lua": main})
+		w, err := LoadOne(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var said string
+		_, err = w.Run(context.Background(), nil, Host{OnStatus: func(s string) { said = s }}, false)
+		return said, err
+	}
+	if _, err := run(`return function(ctx) ctx.status(require("util")) end`); err == nil ||
+		!strings.Contains(err.Error(), `one and two each have a util.lua; say which, as require("one/util")`) {
+		t.Errorf("an unqualified require = %v", err)
+	}
+	if said, err := run(`return function(ctx) ctx.status(require("two/util")) end`); err != nil || said != "two" {
+		t.Errorf("require(\"two/util\") said %q, %v", said, err)
+	}
+}

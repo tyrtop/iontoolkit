@@ -36,6 +36,7 @@ func registerCommands(rt *runtime.Runtime) {
 	}
 	rt.Register(reloadCommand())
 	rt.Register(saveCommand())
+	rt.Register(endpointsCommand())
 }
 
 func ReloadCommands(rt *runtime.Runtime) {
@@ -119,7 +120,7 @@ func place(rt *runtime.Runtime, w workflow.Workflow, given map[string]string) (p
 		}
 	}
 	names := []string{workflow.TenantInput}
-	for _, e := range w.Endpoints {
+	for _, e := range w.Calls() {
 		if e.In != "" && !slices.Contains(names, e.In) {
 			names = append(names, e.In)
 		}
@@ -186,17 +187,19 @@ func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p plac
 			err := callEndpoint(rt, call, WorkflowPrefix+w.Name, e, to, where)
 			return said, call.Result, err
 		},
-		Export:   func(text, slug, ext string) (string, error) { return rt.Export(slug, ext, text) },
-		OnStatus: func(line string) { c.Say("%s", line) },
+		Export:     func(text, slug, ext string) (string, error) { return rt.Export(slug, ext, text) },
+		OnStatus:   func(line string) { c.Say("%s", line) },
+		ExitOnWait: c.ExitOnWait,
 	}
 	res, err := w.Run(c.Ctx, p.input, host, c.DoIt)
 	c.Result = res
 	record := runtime.Run{Workflow: w.Name, Tenant: run.Name, TSG: run.TSGID, Inputs: res.Inputs, DoIt: c.DoIt,
-		Started: started, Finished: time.Now(), Status: append([]string{}, res.Status...), Writes: res.Writes, Data: res.Data}
+		Started: started, Finished: time.Now(), Status: append([]string{}, res.Status...), Writes: res.Writes, Data: res.Data,
+		Waiting: res.Waiting}
 	if record.Inputs == nil {
 		record.Inputs = p.input
 	}
-	if err != nil {
+	if err != nil && res.Waiting == "" {
 		record.Error = err.Error()
 	}
 	rt.EndRun(at, record)

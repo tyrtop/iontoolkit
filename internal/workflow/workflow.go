@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,12 +36,15 @@ type Workflow struct {
 	Entry       string  `yaml:"entry,omitempty"`
 	Budget      string  `yaml:"budget,omitempty"`
 
-	Endpoints []Call `yaml:"endpoints,omitempty"`
+	Uses      []string `yaml:"uses,omitempty"`
+	Endpoints []Call   `yaml:"endpoints,omitempty"`
 
-	Dir    string        `yaml:"-"`
-	budget time.Duration `yaml:"-"`
-	set    *script.Set   `yaml:"-"`
-	calls  *endpoint.Set `yaml:"-"`
+	Dir    string            `yaml:"-"`
+	budget time.Duration     `yaml:"-"`
+	set    *script.Set       `yaml:"-"`
+	calls  *endpoint.Set     `yaml:"-"`
+	all    []Call            `yaml:"-"`
+	from   map[string]string `yaml:"-"`
 }
 
 type Call struct {
@@ -71,11 +75,12 @@ func Load(dir string) ([]Workflow, error) {
 	}
 	var out []Workflow
 	var bad []string
+	l := newLoader()
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		w, err := LoadOne(filepath.Join(dir, e.Name()))
+		w, err := l.loadOne(filepath.Join(dir, e.Name()))
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
@@ -92,15 +97,50 @@ func Load(dir string) ([]Workflow, error) {
 	return out, nil
 }
 
-func LoadOne(dir string) (Workflow, error) {
+type loader struct {
+	done    map[string]Workflow
+	loading map[string]bool
+}
+
+func newLoader() *loader {
+	return &loader{done: map[string]Workflow{}, loading: map[string]bool{}}
+}
+
+func LoadOne(dir string) (Workflow, error) { return newLoader().loadOne(dir) }
+
+func Parse(dir string, b []byte) (Workflow, error) { return newLoader().parse(dir, b) }
+
+func (l *loader) loadOne(dir string) (Workflow, error) {
+	key := absDir(dir)
+	if w, ok := l.done[key]; ok {
+		return w, nil
+	}
 	b, err := os.ReadFile(filepath.Join(dir, ManifestName))
 	if err != nil {
 		return Workflow{}, err
 	}
-	return Parse(dir, b)
+	w, err := l.parse(dir, b)
+	if err == nil {
+		l.done[key] = w
+	}
+	return w, err
 }
 
-func Parse(dir string, b []byte) (Workflow, error) {
+func absDir(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
+
+func usedDir(dir, name string) string {
+	if strings.ContainsAny(name, `/\`) {
+		return filepath.Join(dir, name)
+	}
+	return filepath.Join(filepath.Dir(absDir(dir)), name)
+}
+
+func (l *loader) parse(dir string, b []byte) (Workflow, error) {
 	name := filepath.Base(dir)
 	var err error
 	var w Workflow
@@ -113,17 +153,46 @@ func Parse(dir string, b []byte) (Workflow, error) {
 	if err := w.normalize(); err != nil {
 		return Workflow{}, fmt.Errorf("%s: %w", name, err)
 	}
-	eps := make([]endpoint.Endpoint, len(w.Endpoints))
+	own := make([]endpoint.Endpoint, len(w.Endpoints))
 	for i, e := range w.Endpoints {
+		own[i] = e.Endpoint
+	}
+	if _, err := endpoint.Build(name, "", nil, own); err != nil {
+		return Workflow{}, fmt.Errorf("%s/%s: %w", name, ManifestName, err)
+	}
+
+	key := absDir(dir)
+	if l.loading[key] {
+		return Workflow{}, fmt.Errorf("%s: its uses lead back to itself", name)
+	}
+	l.loading[key] = true
+	defer delete(l.loading, key)
+	var used []Workflow
+	for _, u := range w.Uses {
+		uw, err := l.loadOne(usedDir(dir, u))
+		if os.IsNotExist(err) {
+			return Workflow{}, fmt.Errorf("%s/%s: uses %s, and there is no workflow there", name, ManifestName, u)
+		}
+		if err != nil {
+			return Workflow{}, fmt.Errorf("%s: uses %s: %w", name, u, err)
+		}
+		used = append(used, uw)
+	}
+
+	if err := w.resolve(used); err != nil {
+		return Workflow{}, fmt.Errorf("%s/%s: %w", name, ManifestName, err)
+	}
+	eps := make([]endpoint.Endpoint, len(w.all))
+	for i, e := range w.all {
 		eps[i] = e.Endpoint
 	}
 	if w.calls, err = endpoint.Build(name, "", nil, eps); err != nil {
 		return Workflow{}, fmt.Errorf("%s/%s: %w", name, ManifestName, err)
 	}
-	for _, e := range w.Endpoints {
+	for _, e := range w.all {
 		err := e.SDWAN()
 		if err == nil && e.In != "" && !w.hasInput(e.In) {
-			err = fmt.Errorf("%s goes in: %s, which is not an input", e.Name, e.In)
+			err = fmt.Errorf("%s goes in: %s, which is not an input%s", e.Name, e.In, w.fromNote(e.Name))
 		}
 		if err == nil && strings.EqualFold(e.Method, "WS") {
 			err = fmt.Errorf("%s opens a session; a workflow calls, it does not dial", e.Name)
@@ -139,9 +208,74 @@ func Parse(dir string, b []byte) (Workflow, error) {
 	if !set.Has(w.Entry) {
 		return Workflow{}, fmt.Errorf("%s: no %s.lua to start from", name, w.Entry)
 	}
+	for _, u := range used {
+		set.Use(u.Name, u.set)
+	}
 	w.set = set
 	return w, nil
 }
+
+func (w *Workflow) resolve(used []Workflow) error {
+	w.all, w.from = nil, map[string]string{}
+	add := func(c Call, owner string) error {
+		for _, have := range w.all {
+			if have.Name != c.Name {
+				continue
+			}
+			if sameCall(have, c) {
+				return nil
+			}
+			return fmt.Errorf("%s is %s in %s and %s in %s; give it one definition",
+				c.Name, describeCall(have), w.from[c.Name], describeCall(c), owner)
+		}
+		w.all = append(w.all, c)
+		w.from[c.Name] = owner
+		return nil
+	}
+	for _, c := range w.Endpoints {
+		if err := add(c, w.Name); err != nil {
+			return err
+		}
+	}
+	for _, u := range used {
+		for _, c := range u.all {
+			if err := add(c, u.from[c.Name]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func method(c Call) string {
+	if c.Method == "" {
+		return "GET"
+	}
+	return strings.ToUpper(c.Method)
+}
+
+func sameCall(a, b Call) bool {
+	return method(a) == method(b) && a.Host == b.Host && a.Path == b.Path && a.In == b.In
+}
+
+func describeCall(c Call) string {
+	s := method(c) + " " + c.Host + c.Path
+	if c.In != "" {
+		s += " in " + c.In
+	}
+	return s
+}
+
+func (w Workflow) fromNote(name string) string {
+	if from := w.from[name]; from != "" && from != w.Name {
+		return " (it comes from " + from + ")"
+	}
+	return ""
+}
+
+func (w Workflow) Calls() []Call { return w.all }
+
+func (w Workflow) From(name string) string { return w.from[name] }
 
 func (w Workflow) Endpoint(name string) (endpoint.Endpoint, bool) {
 	if w.calls == nil {
@@ -152,7 +286,7 @@ func (w Workflow) Endpoint(name string) (endpoint.Endpoint, bool) {
 }
 
 func (w Workflow) In(name string) string {
-	for _, e := range w.Endpoints {
+	for _, e := range w.all {
 		if e.Name == name {
 			return e.In
 		}
@@ -246,17 +380,19 @@ func (w Workflow) CheckInputs(given map[string]string) (map[string]string, error
 }
 
 type Host struct {
-	Exec     func(script.Call) ([]string, any, error)
-	Export   func(text, slug, ext string) (string, error)
-	OnStatus func(string)
+	Exec       func(script.Call) ([]string, any, error)
+	Export     func(text, slug, ext string) (string, error)
+	OnStatus   func(string)
+	ExitOnWait bool
 }
 
 type Result struct {
-	DoIt   bool
-	Inputs map[string]string
-	Status []string
-	Writes []script.Write
-	Data   any
+	DoIt    bool
+	Inputs  map[string]string
+	Status  []string
+	Writes  []script.Write
+	Data    any
+	Waiting string
 }
 
 func (w Workflow) Run(ctx context.Context, input map[string]string, host Host, doit bool) (Result, error) {
@@ -267,11 +403,12 @@ func (w Workflow) Run(ctx context.Context, input map[string]string, host Host, d
 
 	res := Result{DoIt: doit, Inputs: in}
 	run := script.Run{
-		Name:   w.Entry,
-		Input:  in,
-		DoIt:   doit,
-		Budget: w.budget,
-		Export: host.Export,
+		Name:       w.Entry,
+		Input:      in,
+		DoIt:       doit,
+		ExitOnWait: host.ExitOnWait,
+		Budget:     w.budget,
+		Export:     host.Export,
 		OnStatus: func(line string) {
 			res.Status = append(res.Status, line)
 			if host.OnStatus != nil {
@@ -290,6 +427,10 @@ func (w Workflow) Run(ctx context.Context, input map[string]string, host Host, d
 		}
 	}
 	if _, err = w.set.Run(ctx, run); err != nil {
+		var waiting *script.Waiting
+		if errors.As(err, &waiting) {
+			res.Waiting = waiting.What
+		}
 		err = fmt.Errorf("%s: %w", w.Name, err)
 	}
 	return res, err

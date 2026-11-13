@@ -40,7 +40,7 @@ func noteTenant() {
 	tenantNotes = nil
 }
 
-func execPrinting(ctx context.Context, out io.Writer, name string, args map[string]string, rest []string, doit bool) error {
+func execPrinting(ctx context.Context, out io.Writer, name string, args map[string]string, rest []string, doit, exitOnWait bool) error {
 	rt := cliRuntime()
 	cmd, _ := rt.Command(name)
 	if cmd.Slow {
@@ -59,7 +59,7 @@ func execPrinting(ctx context.Context, out io.Writer, name string, args map[stri
 		spin = startSpinner(rt, strings.ReplaceAll(name, ".", " "))
 	}
 	err = rt.Exec(&runtime.Call{
-		Ctx: ctx, Args: args, Rest: rest, DoIt: doit,
+		Ctx: ctx, Args: args, Rest: rest, DoIt: doit, ExitOnWait: exitOnWait,
 		Out: func(line string) {
 			if spin != nil {
 				spin.println(lines, line)
