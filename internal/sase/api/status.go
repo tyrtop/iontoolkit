@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 type ElementStatus struct {
@@ -362,7 +364,7 @@ func badCertificate(err error) bool {
 		errors.As(err, &invalid) || errors.As(err, &header)
 }
 
-// urllib3 sleeps nothing after the first failure, then factor × 2^(failures-1)
+// urllib3 sleeps 0s after the first failure, then factor × 2^(failures-1)
 func backoffBefore(retry int) time.Duration {
 	if retry <= 1 {
 		return 0
@@ -378,15 +380,71 @@ func (s *Client) call(ctx context.Context, what, method, url string, body []byte
 	return s.callAs(ctx, "", what, method, url, body, write)
 }
 
+func giveUp(method string, status, attempt int) bool {
+	return !again(method, status) || (attempt >= retries && status != http.StatusTooManyRequests)
+}
+
+const slowest = rate.Limit(0.5)
+
+func (s *Client) slowDown(after time.Duration) {
+	s.paceMu.Lock()
+	defer s.paceMu.Unlock()
+	now := time.Now()
+	if until := now.Add(after); until.After(s.heldTill) {
+		s.heldTill = until
+	}
+	if now.Sub(s.cutAt) < time.Second {
+		return
+	}
+	s.cutAt = now
+	s.limiter.SetLimit(max(s.limiter.Limit()/2, slowest))
+	s.limiter.SetBurst(1)
+}
+
+func (s *Client) speedUp() {
+	s.paceMu.Lock()
+	defer s.paceMu.Unlock()
+	l := s.limiter.Limit()
+	if l >= s.ceiling {
+		return
+	}
+	l = min(l+1/l, s.ceiling)
+	s.limiter.SetLimit(l)
+	if l == s.ceiling {
+		s.limiter.SetBurst(s.burst)
+	}
+}
+
+func (s *Client) held(ctx context.Context) error {
+	s.paceMu.Lock()
+	wait := time.Until(s.heldTill)
+	s.paceMu.Unlock()
+	if wait <= 0 {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(wait):
+		return nil
+	}
+}
+
 func (s *Client) callAs(ctx context.Context, tok, what, method, url string, body []byte, write bool) ([]byte, error) {
 	for attempt := 0; ; attempt++ {
 		answer, status, after, err := s.attempt(ctx, tok, what, method, url, body, write)
-		if err == nil || ctx.Err() != nil || attempt >= retries || !again(method, status) {
+		switch {
+		case status == http.StatusTooManyRequests:
+			s.slowDown(after)
+		case err == nil:
+			s.speedUp()
+		}
+		if err == nil || ctx.Err() != nil || giveUp(method, status, attempt) {
 			return answer, err
 		}
 		wait := after
 		if wait <= 0 {
-			wait = backoffBefore(attempt + 1)
+			wait = backoffBefore(min(attempt+1, retries))
 		}
 		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wait {
 			return answer, err
@@ -403,6 +461,9 @@ func (s *Client) callAs(ctx context.Context, tok, what, method, url string, body
 }
 
 func (s *Client) attempt(ctx context.Context, tok, what, method, url string, body []byte, write bool) ([]byte, int, time.Duration, error) {
+	if err := s.held(ctx); err != nil {
+		return nil, -1, 0, fmt.Errorf("%s: rate limit wait: %w", what, err)
+	}
 	if err := s.limiter.Wait(ctx); err != nil {
 		return nil, -1, 0, fmt.Errorf("%s: rate limit wait: %w", what, err)
 	}

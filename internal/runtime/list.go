@@ -415,6 +415,25 @@ func (rt *Runtime) MatchIndices() []int {
 	return rt.list.matches
 }
 
+func (rt *Runtime) MatchedElements() []Element {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	out := make([]Element, len(rt.list.matches))
+	for n, i := range rt.list.matches {
+		out[n] = rt.list.rows[i]
+	}
+	return out
+}
+
+func (rt *Runtime) MatchedAt(n int) (Element, bool) {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	if n < 0 || n >= len(rt.list.matches) {
+		return Element{}, false
+	}
+	return rt.list.rows[rt.list.matches[n]], true
+}
+
 func (rt *Runtime) Query() string {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()

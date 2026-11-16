@@ -515,6 +515,37 @@ func TestAWorkflowRunGoesWhereItsTenantInputsSay(t *testing.T) {
 	}
 }
 
+func TestAWorkflowGivenTwoTenantsRunsOncePerTenant(t *testing.T) {
+	rt, wires := twoTenantRuntime(t)
+	lines, _, err := exec(rt, WorkflowPrefix+"copy", map[string]string{"site": "S0100", "tenant": "Acme Co\nGlobex", "into": "t2"}, nil, true)
+	text := strings.Join(lines, "\n")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, text)
+	}
+	for _, want := range []string{"2 run(s)", "Acme Co | tenant Acme Co", "Globex | tenant Globex", "2 run(s) done"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %q in:\n%s", want, text)
+		}
+	}
+	for tsg, w := range wires {
+		w.mu.Lock()
+		read := w.read
+		w.mu.Unlock()
+		if len(read) != 1 {
+			t.Errorf("%s was read %v, want its own run's one read", tsg, read)
+		}
+	}
+	runs := rt.Runs()
+	if len(runs) != 2 || runs[0].TSG == runs[1].TSG {
+		t.Errorf("runs %+v", runs)
+	}
+
+	_, _, err = exec(rt, WorkflowPrefix+"copy", map[string]string{"tenant": "Acme Co\nGlobex", "inputs": "rows.csv", "into": "t2"}, nil, false)
+	if err == nil || !strings.Contains(err.Error(), "put a tenant column in the file instead") {
+		t.Errorf("two tenants with --inputs = %v", err)
+	}
+}
+
 func TestAWorkflowsRuntimeCommandsRunInItsTenant(t *testing.T) {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))

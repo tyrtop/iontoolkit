@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -71,6 +72,78 @@ func TestA429WithoutRetryAfterBacksOff(t *testing.T) {
 	r.StatusCode = http.StatusBadGateway
 	if retryAfter(r) != 7*time.Second {
 		t.Error("urllib3 sleeps for a Retry-After on any status it retries")
+	}
+}
+
+func TestA429IsSentAgainPastTheRetryLimitAndOtherErrorsAreNot(t *testing.T) {
+	if giveUp(http.MethodPost, http.StatusTooManyRequests, retries*4) {
+		t.Error("a 429 gave up")
+	}
+	if !giveUp(http.MethodGet, http.StatusBadGateway, retries) {
+		t.Error("a 502 kept going past the retry limit")
+	}
+	if !giveUp(http.MethodPost, http.StatusBadGateway, 0) {
+		t.Error("a POST was sent again after a 502")
+	}
+}
+
+func TestA429SlowsEveryRequestAndHalvesTheRateOnceASecond(t *testing.T) {
+	c := NewClient(http.DefaultClient, nil, "tok", false, 100, 100)
+	c.slowDown(0)
+	c.slowDown(0)
+	if c.Rate() != 50 || c.limiter.Burst() != 1 {
+		t.Fatalf("after two 429s in one second: rate %v, burst %d", c.Rate(), c.limiter.Burst())
+	}
+	for range 20 {
+		c.cutAt = time.Time{}
+		c.slowDown(0)
+	}
+	if c.Rate() != float64(slowest) {
+		t.Errorf("rate %v, want the floor %v", c.Rate(), slowest)
+	}
+}
+
+func TestAnswersBringTheRateBackToWhatWasAsked(t *testing.T) {
+	c := NewClient(http.DefaultClient, nil, "tok", false, 100, 100)
+	c.slowDown(0)
+	for i := 0; i < 10000 && c.Rate() < 100; i++ {
+		c.speedUp()
+	}
+	if c.Rate() != 100 || c.limiter.Burst() != 100 {
+		t.Errorf("rate %v, burst %d", c.Rate(), c.limiter.Burst())
+	}
+}
+
+func TestARetryAfterHoldsEveryRequest(t *testing.T) {
+	c := NewClient(http.DefaultClient, nil, "tok", false, 100, 100)
+	c.slowDown(300 * time.Millisecond)
+	start := time.Now()
+	if err := c.held(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if waited := time.Since(start); waited < 250*time.Millisecond {
+		t.Errorf("waited %s", waited)
+	}
+}
+
+func TestAPostThatGotA429IsSentAgain(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	c := NewClient(srv.Client(), nil, "tok", false, 100, 100)
+	start := time.Now()
+	if _, err := c.call(t.Context(), "probe", http.MethodPost, srv.URL+"/x", []byte(`{}`), true); err != nil {
+		t.Fatal(err)
+	}
+	if n := calls.Load(); n != 2 || time.Since(start) < time.Second {
+		t.Errorf("%d calls in %s", n, time.Since(start))
 	}
 }
 

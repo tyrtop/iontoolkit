@@ -32,6 +32,7 @@ type Arg struct {
 	Required bool
 	Default  string
 	Bool     bool
+	Many     bool
 }
 
 type Call struct {

@@ -89,8 +89,8 @@ func workflowCommand(w workflow.Workflow) runtime.Command {
 		}
 	}
 	if !w.Declares(workflow.TenantInput) {
-		args = append(args, runtime.Arg{Name: workflow.TenantInput,
-			Help: "Tenant to run against, by name or TSG ID (needed when more than one is loaded)"})
+		args = append(args, runtime.Arg{Name: workflow.TenantInput, Many: true,
+			Help: "Tenant to run against, by name or TSG ID (needed when more than one is loaded); give it more than once to run once per tenant"})
 	}
 	if each != "" {
 		args = append(args, runtime.Arg{Name: each,
@@ -101,6 +101,17 @@ func workflowCommand(w workflow.Workflow) runtime.Command {
 		Source: filepath.Join(w.Dir, workflow.ManifestName),
 		Args:   args, Writes: true, Each: each,
 		Run: func(rt *runtime.Runtime, c *runtime.Call) error {
+			if tenants := strings.Split(c.Arg(workflow.TenantInput), "\n"); len(tenants) > 1 && !w.Declares(workflow.TenantInput) {
+				if each != "" && c.Arg(each) != "" {
+					return fmt.Errorf("--%s can't be given with more than one %s; put a %s column in the file instead",
+						each, workflow.TenantInput, workflow.TenantInput)
+				}
+				runs := make([]map[string]string, len(tenants))
+				for i, t := range tenants {
+					runs[i] = map[string]string{workflow.TenantInput: t}
+				}
+				return runRows(rt, c, w, each, runs)
+			}
 			if each != "" && c.Arg(each) != "" {
 				return runEach(rt, c, w, each)
 			}
@@ -344,6 +355,10 @@ func runEach(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each str
 	if err != nil {
 		return err
 	}
+	return runRows(rt, c, w, each, runs)
+}
+
+func runRows(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each string, runs []map[string]string) error {
 	tags := runTags(w, runs)
 	var mu sync.Mutex
 	say := func(tag, line string) {
@@ -378,11 +393,12 @@ func runEach(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each str
 			continue
 		}
 		v := in[w.Inputs[0].Name]
-		if at, dup := seen[v]; dup && v != "" {
+		key := p.tenants[workflow.TenantInput].TSGID + "\x00" + v
+		if at, dup := seen[key]; dup && v != "" {
 			return fmt.Errorf("runs %d and %d both have %s %s, and two runs at once would act on the same one",
 				at, i+1, w.Inputs[0].Name, v)
 		}
-		seen[v] = i + 1
+		seen[key] = i + 1
 	}
 	at := max(1, Defaults.Concurrency)
 	c.Say("%d run(s), up to %d at a time", len(runs), at)
@@ -433,6 +449,9 @@ func runTags(w workflow.Workflow, runs []map[string]string) []string {
 	seen := map[string]int{}
 	for i, run := range runs {
 		tag := strings.TrimSpace(run[first])
+		if tag == "" {
+			tag = strings.TrimSpace(run[workflow.TenantInput])
+		}
 		if tag == "" {
 			tag = fmt.Sprintf("run %d", i+1)
 		}

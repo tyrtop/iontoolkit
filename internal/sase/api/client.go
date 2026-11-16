@@ -24,6 +24,12 @@ type Client struct {
 	limiter    *rate.Limiter
 	verbose    bool
 
+	paceMu   sync.Mutex
+	ceiling  rate.Limit
+	burst    int
+	heldTill time.Time
+	cutAt    time.Time
+
 	tokenMu        sync.RWMutex
 	token          string
 	expires        time.Time
@@ -84,6 +90,8 @@ func NewClient(client, wsClient *http.Client, token string, verbose bool, rps fl
 		client:   client,
 		wsClient: wsClient,
 		limiter:  rate.NewLimiter(rate.Limit(rps), burst),
+		ceiling:  rate.Limit(rps),
+		burst:    burst,
 		token:    token,
 		verbose:  verbose,
 	}
@@ -141,6 +149,8 @@ func NewServiceAccountClient(ctx context.Context, client, wsClient *http.Client,
 		client:    client,
 		wsClient:  wsClient,
 		limiter:   rate.NewLimiter(rate.Limit(rps), burst),
+		ceiling:   rate.Limit(rps),
+		burst:     burst,
 		verbose:   verbose,
 		src:       serviceAccount{client: client, id: id, secret: secret, tsg: tsg},
 		tokenErrs: make(chan error, 1),
@@ -163,6 +173,8 @@ func NewTokenSourceClient(ctx context.Context, client, wsClient *http.Client, sr
 		client:    client,
 		wsClient:  wsClient,
 		limiter:   rate.NewLimiter(rate.Limit(rps), burst),
+		ceiling:   rate.Limit(rps),
+		burst:     burst,
 		verbose:   verbose,
 		src:       src,
 		tokenErrs: make(chan error, 1),

@@ -12,3 +12,6 @@ dist/
 # go test -c and -cpuprofile leave these behind.
 *.test
 *.out
+*.gif
+*.tape
+*.jsonl

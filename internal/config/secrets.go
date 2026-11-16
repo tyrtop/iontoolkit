@@ -43,8 +43,10 @@ type keyringSecrets struct{}
 
 func (keyringSecrets) Backend() string { return "keyring" }
 
+func probeKey(pid int) string { return fmt.Sprintf("probe-%d", pid) }
+
 func (keyringSecrets) probe() error {
-	const k = "probe"
+	k := probeKey(os.Getpid())
 	if err := keyring.Set(keyringService, k, "1"); err != nil {
 		return err
 	}

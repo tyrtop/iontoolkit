@@ -33,7 +33,7 @@ type Plan struct {
 
 func (p Plan) Empty() bool { return len(p.Changes) == 0 }
 
-// the whole record, _etag and all: the portal refuses a stale one
+// the full record with its _etag: the portal rejects a stale one
 func (p Plan) Body() ([]byte, error) { return json.Marshal(p.After) }
 
 func (w Spec) Records(ctx context.Context, g Getter, vars map[string]string) ([]map[string]any, error) {
@@ -205,7 +205,7 @@ func lookup(rec map[string]any, key string) (any, bool) {
 	return cur, true
 }
 
-// a DHCP interface carries static_config as null
+// a DHCP interface has static_config set to null
 func assign(rec map[string]any, key string, v any) error {
 	parts := strings.Split(key, ".")
 	cur := rec

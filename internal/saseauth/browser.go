@@ -156,7 +156,7 @@ func stopWaiting(cancel func()) {
 	}
 }
 
-// Chrome hands a second launch on one user-data-dir to the first
+// Chrome passes a second launch on one user-data-dir to the first
 var profileLocks sync.Map
 
 func lockProfile(ctx context.Context, dir string) (func(), error) {

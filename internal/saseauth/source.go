@@ -122,7 +122,7 @@ func (s *Source) Token(ctx context.Context) (string, time.Duration, error) {
 			return "", 0, err
 		}
 		stored = fmt.Errorf("stored refresh token rejected: %w", err)
-		// the auth server refuses a refresh token another run has rotated
+		// the auth server rejects a refresh token another run has rotated
 		if again := s.storedOtherThan(rt); again != "" {
 			log.Info("the stored refresh token changed since this run read it; trying that one")
 			tok, err := s.refreshWith(ctx, again, log)

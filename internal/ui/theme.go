@@ -329,7 +329,7 @@ func ParseThemes(b []byte) ([]Theme, error) {
 	return set.Themes, nil
 }
 
-// lipgloss renders an unparseable color as nothing, not as wrong
+// lipgloss draws an invalid color as blank, with no error
 func (t Theme) validate() error {
 	if strings.TrimSpace(t.Name) == "" {
 		return fmt.Errorf("a theme needs a name")

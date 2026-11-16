@@ -108,14 +108,14 @@ views:
           - header: STATE
             value: "{{ (unwrap .st).operational_state }}{{ with (unwrap .st).extended_state }} ({{ . }}){{ end }}"
             width: 18
-          # the record's mac_address is null on every interface hardware answered
+          # the record's mac_address is null on every interface seen on hardware
           - header: MAC
             value: "{{ dash (unwrap .st).mac_address }}"
             width: 17
           - header: ADDRESS
             value: "{{ dash (first (unwrap .st).ipv4_addresses) }}"
             width: 18
-          # the record says how the address was asked for, not what came up
+          # the record shows how the address was requested, not what came up
           - header: CONFIG
             value: "{{ with .item.ipv4_config }}{{ dash .type }}{{ else }}-{{ end }}"
             width: 7

@@ -836,10 +836,11 @@ func (m *tuiModel) rebuildRows() {
 		m.listCache = make(map[string]rowCells, len(m.rows()))
 	}
 
-	cells := make([]rowCells, 0, len(m.matched()))
-	widths := make([][]int, 0, len(m.matched()))
-	for _, i := range m.matched() {
-		rc := m.rowCells(cols, m.rows()[i])
+	matched := m.matchedRows()
+	cells := make([]rowCells, 0, len(matched))
+	widths := make([][]int, 0, len(matched))
+	for _, el := range matched {
+		rc := m.rowCells(cols, el)
 		cells = append(cells, rc)
 		widths = append(widths, rc.width)
 	}
@@ -879,7 +880,7 @@ func (m *tuiModel) rebuildRows() {
 
 func (m *tuiModel) listRow(n int) table.Row {
 	rc := m.listCells[n]
-	el := m.rows()[m.matched()[n]]
+	el, _ := m.matchedAt(n)
 	here := n == m.cursor()
 
 	row := func(s string) string { return s }
@@ -1155,8 +1156,7 @@ func (m tuiModel) onPickKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd
 			m.filterOn = false
 			m.filter.Blur()
 
-			if len(m.matched()) == 1 {
-				el := m.rows()[m.matched()[0]]
+			if el, ok := m.matchedAt(0); ok && len(m.matched()) == 1 {
 				if m.mode() == modeBatch || m.mode() == modeMacro {
 					m.runtime().Select(el.Key())
 					m.rebuildRows()
@@ -1317,11 +1317,7 @@ func (m *tuiModel) applyFilter() {
 }
 
 func (m tuiModel) current() (elementRow, bool) {
-	c := m.cursor()
-	if c < 0 || c >= len(m.matched()) {
-		return elementRow{}, false
-	}
-	return m.rows()[m.matched()[c]], true
+	return m.matchedAt(m.cursor())
 }
 
 func (m tuiModel) total() int { return m.batch().Total() }

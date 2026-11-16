@@ -542,7 +542,7 @@ func openSafeLibs(L *lua.LState) {
 		L.Push(lua.LString(open.name))
 		L.Call(1, 0)
 	}
-	// print writes straight to the terminal the TUI is drawing on
+	// print writes directly to the terminal the TUI is drawing on
 	for _, gone := range []string{"dofile", "loadfile", "load", "loadstring", "print", "collectgarbage"} {
 		L.SetGlobal(gone, lua.LNil)
 	}

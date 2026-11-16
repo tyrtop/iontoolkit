@@ -357,6 +357,20 @@ func (m tuiModel) matched() []int {
 	return m.rt.MatchIndices()
 }
 
+func (m tuiModel) matchedRows() []elementRow {
+	if m.rt == nil {
+		return nil
+	}
+	return m.rt.MatchedElements()
+}
+
+func (m tuiModel) matchedAt(n int) (elementRow, bool) {
+	if m.rt == nil {
+		return elementRow{}, false
+	}
+	return m.rt.MatchedAt(n)
+}
+
 func (m tuiModel) tenant() config.Tenant {
 	if m.rt == nil {
 		return config.Tenant{}

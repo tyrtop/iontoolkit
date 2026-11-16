@@ -101,6 +101,7 @@ func fromRuntime(c *cobra.Command, rc runtime.Command, in io.Reader) {
 	f := c.Flags()
 	strs := map[string]*string{}
 	bools := map[string]*bool{}
+	many := map[string]*[]string{}
 	for _, a := range rc.Args {
 		if a.Name == "help" || a.Name == "doit" {
 			continue
@@ -111,6 +112,10 @@ func fromRuntime(c *cobra.Command, rc runtime.Command, in io.Reader) {
 		}
 		if a.Bool {
 			bools[a.Name] = f.Bool(a.Name, false, help)
+			continue
+		}
+		if a.Many {
+			many[a.Name] = f.StringArray(a.Name, nil, help)
 			continue
 		}
 		strs[a.Name] = f.String(a.Name, a.Default, help)
@@ -149,6 +154,11 @@ func fromRuntime(c *cobra.Command, rc runtime.Command, in io.Reader) {
 					return fmt.Errorf("--%s: %w", n, err)
 				}
 				args[n] = string(b)
+			}
+		}
+		for n, v := range many {
+			if cmd.Flags().Changed(n) {
+				args[n] = strings.Join(*v, "\n")
 			}
 		}
 		return execPrinting(cmd.Context(), cmd.OutOrStdout(), name, args, words, runFlags{

@@ -105,6 +105,24 @@ func TestKeyringSecretsWithMock(t *testing.T) {
 	}
 }
 
+func TestKeyringProbeLeavesAnotherProcessesProbeAlone(t *testing.T) {
+	keyring.MockInit()
+
+	other := probeKey(os.Getpid() + 1)
+	if err := keyring.Set(keyringService, other, "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := (keyringSecrets{}).probe(); err != nil {
+		t.Fatalf("probe = %v", err)
+	}
+	if _, err := keyring.Get(keyringService, other); err != nil {
+		t.Errorf("the probe removed %s: %v", other, err)
+	}
+	if _, err := keyring.Get(keyringService, probeKey(os.Getpid())); err == nil {
+		t.Error("the probe left its own key behind")
+	}
+}
+
 func TestOpenSecretsFallsBackToFileWhenKeyringFails(t *testing.T) {
 	keyring.MockInitWithError(errors.New("no secret service"))
 

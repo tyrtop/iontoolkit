@@ -1,6 +1,4 @@
-# bg and fg go out as OSC 11 and 10, which take a hex only: an index there
-# resolves to xterm's value, not the terminal's own. An index under 16 is
-# remapped by the terminal's own theme.
+# OSC 10 and 11 take hex only; an index gets xterm's color
 
 themes:
   - name: classic
