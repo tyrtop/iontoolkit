@@ -329,3 +329,44 @@ func TestARequireTwoUsedWorkflowsCouldAnswerMustSayWhich(t *testing.T) {
 		t.Errorf("require(\"two/util\") said %q, %v", said, err)
 	}
 }
+
+func TestAWorkflowOfStepsLoadsItsStepsAndTheirEndpoints(t *testing.T) {
+	root := t.TempDir()
+	noop := `return function(ctx) end`
+	folder(t, root, "one", map[string]string{ManifestName: baseSites, "main.lua": noop})
+	folder(t, root, "two", map[string]string{
+		ManifestName: "title: Two\ninputs:\n  - name: site\n    required: true\n  - name: note\n",
+		"main.lua":   noop,
+	})
+	dir := folder(t, root, "both", map[string]string{
+		ManifestName: "title: Both\ninputs:\n  - name: site\n    required: true\nsteps: [one, two]\n",
+	})
+	w, err := LoadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := w.StepFlows()
+	if len(steps) != 2 || steps[0].Name != "one" || steps[1].Name != "two" {
+		t.Fatalf("steps = %+v, want one then two", steps)
+	}
+	if _, ok := w.Endpoint("sites"); !ok {
+		t.Error("the step's endpoint is not among the workflow's")
+	}
+	if got := steps[1].Takes(map[string]string{"site": "S1", "other": "x"}); len(got) != 1 || got["site"] != "S1" {
+		t.Errorf("two takes %v, want only its own input, site", got)
+	}
+
+	for _, tt := range []struct{ name, manifest, lua, want string }{
+		{"gone", "title: Gone\nsteps: [nowhere]\n", "", "step nowhere: there is no workflow there"},
+		{"twice", "title: Twice\nsteps: [one]\n", noop, "lists steps and has a main.lua"},
+		{"short", "title: Short\nsteps: [two]\n", "", "step two needs site, which is not an input here"},
+	} {
+		files := map[string]string{ManifestName: tt.manifest}
+		if tt.lua != "" {
+			files["main.lua"] = tt.lua
+		}
+		if _, err := LoadOne(folder(t, root, tt.name, files)); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: LoadOne() = %v, want %q", tt.name, err, tt.want)
+		}
+	}
+}

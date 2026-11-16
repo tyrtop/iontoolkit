@@ -115,13 +115,15 @@ func fromRuntime(c *cobra.Command, rc runtime.Command, in io.Reader) {
 		}
 		strs[a.Name] = f.String(a.Name, a.Default, help)
 	}
-	var doit, exitOnWait *bool
+	var doit, exitOnWait, resume *bool
 	if rc.Writes {
 		doit = f.Bool("doit", false, "Send the writes instead of only listing them")
 	}
 	if strings.HasPrefix(rc.Name, app.WorkflowPrefix) {
 		exitOnWait = f.Bool("exit-on-wait", false,
 			"Exit with code 75 at the first wait that isn't done yet instead of waiting; run it again to keep going")
+		resume = f.Bool("resume", false,
+			"Find the last write an earlier run got onto the portal and pick up after it")
 	}
 
 	name, declared := rc.Name, rc.Args
@@ -149,8 +151,8 @@ func fromRuntime(c *cobra.Command, rc runtime.Command, in io.Reader) {
 				args[n] = string(b)
 			}
 		}
-		return execPrinting(cmd.Context(), cmd.OutOrStdout(), name, args, words,
-			doit != nil && *doit, exitOnWait != nil && *exitOnWait)
+		return execPrinting(cmd.Context(), cmd.OutOrStdout(), name, args, words, runFlags{
+			doit: doit != nil && *doit, exitOnWait: exitOnWait != nil && *exitOnWait, resume: resume != nil && *resume})
 	}
 }
 

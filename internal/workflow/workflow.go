@@ -37,6 +37,7 @@ type Workflow struct {
 	Budget      string  `yaml:"budget,omitempty"`
 
 	Uses      []string `yaml:"uses,omitempty"`
+	Steps     []string `yaml:"steps,omitempty"`
 	Endpoints []Call   `yaml:"endpoints,omitempty"`
 
 	Dir    string            `yaml:"-"`
@@ -45,6 +46,7 @@ type Workflow struct {
 	calls  *endpoint.Set     `yaml:"-"`
 	all    []Call            `yaml:"-"`
 	from   map[string]string `yaml:"-"`
+	steps  []Workflow        `yaml:"-"`
 }
 
 type Call struct {
@@ -178,8 +180,23 @@ func (l *loader) parse(dir string, b []byte) (Workflow, error) {
 		}
 		used = append(used, uw)
 	}
+	for _, s := range w.Steps {
+		sw, err := l.loadOne(usedDir(dir, s))
+		if os.IsNotExist(err) {
+			return Workflow{}, fmt.Errorf("%s/%s: step %s: there is no workflow there", name, ManifestName, s)
+		}
+		if err != nil {
+			return Workflow{}, fmt.Errorf("%s: step %s: %w", name, s, err)
+		}
+		for _, in := range sw.Inputs {
+			if in.Required && in.Default == "" && !w.hasInput(in.Name) {
+				return Workflow{}, fmt.Errorf("%s/%s: step %s needs %s, which is not an input here", name, ManifestName, s, in.Name)
+			}
+		}
+		w.steps = append(w.steps, sw)
+	}
 
-	if err := w.resolve(used); err != nil {
+	if err := w.resolve(append(used, w.steps...)); err != nil {
 		return Workflow{}, fmt.Errorf("%s/%s: %w", name, ManifestName, err)
 	}
 	eps := make([]endpoint.Endpoint, len(w.all))
@@ -205,7 +222,10 @@ func (l *loader) parse(dir string, b []byte) (Workflow, error) {
 	if err != nil {
 		return Workflow{}, fmt.Errorf("%s: %w", name, err)
 	}
-	if !set.Has(w.Entry) {
+	switch {
+	case len(w.Steps) > 0 && set.Has(w.Entry):
+		return Workflow{}, fmt.Errorf("%s: lists steps and has a %s.lua; it runs one or the other", name, w.Entry)
+	case len(w.Steps) == 0 && !set.Has(w.Entry):
 		return Workflow{}, fmt.Errorf("%s: no %s.lua to start from", name, w.Entry)
 	}
 	for _, u := range used {
@@ -274,6 +294,18 @@ func (w Workflow) fromNote(name string) string {
 }
 
 func (w Workflow) Calls() []Call { return w.all }
+
+func (w Workflow) StepFlows() []Workflow { return w.steps }
+
+func (w Workflow) Takes(given map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, in := range w.Inputs {
+		if v, ok := given[in.Name]; ok {
+			out[in.Name] = v
+		}
+	}
+	return out
+}
 
 func (w Workflow) From(name string) string { return w.from[name] }
 
@@ -382,8 +414,11 @@ func (w Workflow) CheckInputs(given map[string]string) (map[string]string, error
 type Host struct {
 	Exec       func(script.Call) ([]string, any, error)
 	Export     func(text, slug, ext string) (string, error)
+	Keep       func(name, text string) (string, error)
+	Kept       func(name string) (text, where string, err error)
 	OnStatus   func(string)
 	ExitOnWait bool
+	Resume     bool
 }
 
 type Result struct {
@@ -407,8 +442,11 @@ func (w Workflow) Run(ctx context.Context, input map[string]string, host Host, d
 		Input:      in,
 		DoIt:       doit,
 		ExitOnWait: host.ExitOnWait,
+		Resume:     host.Resume,
 		Budget:     w.budget,
 		Export:     host.Export,
+		Keep:       host.Keep,
+		Kept:       host.Kept,
 		OnStatus: func(line string) {
 			res.Status = append(res.Status, line)
 			if host.OnStatus != nil {

@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/endpoint"
 	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/write"
@@ -163,8 +165,130 @@ func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p plac
 	if run.Name != "" {
 		c.Say("tenant %s", run.Name)
 	}
+	var res workflow.Result
+	var err error
+	if steps := w.StepFlows(); len(steps) > 0 {
+		res, err = runSteps(rt, c, w, steps, p, run)
+	} else {
+		var pick *pickUp
+		if c.Resume {
+			pick = walk(rt, c, w, p, run)
+			if pick.failed != nil {
+				return fmt.Errorf("resume: the dry run that lists the writes failed: %w", pick.failed)
+			}
+			pick.locate()
+			pick.report(c)
+		}
+		res, err = runOne(rt, c, w, p, run, pick)
+	}
+	c.Result = res
+	record := runtime.Run{Workflow: w.Name, Tenant: run.Name, TSG: run.TSGID, Inputs: res.Inputs, DoIt: c.DoIt,
+		Started: started, Finished: time.Now(), Status: append([]string{}, res.Status...), Writes: res.Writes, Data: res.Data,
+		Waiting: res.Waiting}
+	if record.Inputs == nil {
+		record.Inputs = p.input
+	}
+	if err != nil && res.Waiting == "" {
+		record.Error = err.Error()
+	}
+	rt.EndRun(at, record)
+	if !c.DoIt && len(res.Writes) > 0 {
+		c.Say("dry run: %d write(s), nothing sent — add --doit to send", len(res.Writes))
+	}
+	return err
+}
+
+func runOne(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p placed, run config.Tenant, pick *pickUp) (workflow.Result, error) {
+	send := func(call *runtime.Call, e endpoint.Endpoint, to config.Tenant, where string) error {
+		return callEndpoint(rt, call, WorkflowPrefix+w.Name, e, to, where)
+	}
+	if pick != nil {
+		send = pick.send
+	}
+	host := endpointHost(rt, c, w, p, run, send)
+	host.Export = func(text, slug, ext string) (string, error) { return rt.Export(slug, ext, text) }
+	host.Keep, host.Kept = keeper(rt, run)
+	host.OnStatus = func(line string) { c.Say("%s", line) }
+	host.ExitOnWait, host.Resume = c.ExitOnWait, c.Resume
+	return w.Run(c.Ctx, p.input, host, c.DoIt)
+}
+
+func runSteps(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, steps []workflow.Workflow, p placed, run config.Tenant) (workflow.Result, error) {
+	all := workflow.Result{DoIt: c.DoIt}
+	in, err := w.CheckInputs(p.input)
+	if err != nil {
+		return all, err
+	}
+	all.Inputs = in
+	p = placed{input: in, tenants: p.tenants}
+	from := 0
+	var pick *pickUp
+	if c.Resume {
+		if from, pick, err = findStep(rt, c, steps, p, run); err != nil {
+			return all, err
+		}
+	}
+	for i := from; i < len(steps); i++ {
+		c.Say("step %d of %d: %s", i+1, len(steps), steps[i].Name)
+		res, err := runOne(rt, c, steps[i], placed{input: steps[i].Takes(in), tenants: p.tenants}, run, pick)
+		pick = nil
+		all.Status = append(all.Status, res.Status...)
+		all.Writes = append(all.Writes, res.Writes...)
+		all.Data, all.Waiting = res.Data, res.Waiting
+		if err != nil {
+			return all, err
+		}
+	}
+	return all, nil
+}
+
+func keeper(rt *runtime.Runtime, t config.Tenant) (func(name, text string) (string, error), func(name string) (string, string, error)) {
+	where := func(name string) (string, error) {
+		st := rt.Store()
+		if st == nil {
+			return "", fmt.Errorf("no config directory to keep it in")
+		}
+		if name == "" || strings.HasPrefix(name, ".") || strings.ContainsAny(name, `/\:`) {
+			return "", fmt.Errorf("%q is not a name to keep something under", name)
+		}
+		who := t.TSGID
+		if who == "" {
+			who = "tenant"
+		}
+		return filepath.Join(st.Root, "kept", who, name+".json"), nil
+	}
+	keep := func(name, text string) (string, error) {
+		path, err := where(name)
+		if err != nil {
+			return "", err
+		}
+		if _, err := os.Stat(path); err == nil {
+			return "", fmt.Errorf("%s is already there, and is not written over", path)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return "", err
+		}
+		return path, os.WriteFile(path, []byte(text), 0o600)
+	}
+	kept := func(name string) (string, string, error) {
+		path, err := where(name)
+		if err != nil {
+			return "", "", err
+		}
+		b, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			return "", path, nil
+		}
+		return string(b), path, err
+	}
+	return keep, kept
+}
+
+type sender func(call *runtime.Call, e endpoint.Endpoint, to config.Tenant, where string) error
+
+func endpointHost(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p placed, run config.Tenant, send sender) workflow.Host {
 	exec := scriptExec(rt, c, true, run)
-	host := workflow.Host{
+	return workflow.Host{
 		Exec: func(sc script.Call) ([]string, any, error) {
 			name := strings.TrimPrefix(sc.Name, EndpointPrefix)
 			e, ok := w.Endpoint(name)
@@ -184,29 +308,10 @@ func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p plac
 				said = append(said, l)
 				c.Say("%s", l)
 			}}
-			err := callEndpoint(rt, call, WorkflowPrefix+w.Name, e, to, where)
+			err := send(call, e, to, where)
 			return said, call.Result, err
 		},
-		Export:     func(text, slug, ext string) (string, error) { return rt.Export(slug, ext, text) },
-		OnStatus:   func(line string) { c.Say("%s", line) },
-		ExitOnWait: c.ExitOnWait,
 	}
-	res, err := w.Run(c.Ctx, p.input, host, c.DoIt)
-	c.Result = res
-	record := runtime.Run{Workflow: w.Name, Tenant: run.Name, TSG: run.TSGID, Inputs: res.Inputs, DoIt: c.DoIt,
-		Started: started, Finished: time.Now(), Status: append([]string{}, res.Status...), Writes: res.Writes, Data: res.Data,
-		Waiting: res.Waiting}
-	if record.Inputs == nil {
-		record.Inputs = p.input
-	}
-	if err != nil && res.Waiting == "" {
-		record.Error = err.Error()
-	}
-	rt.EndRun(at, record)
-	if !c.DoIt && len(res.Writes) > 0 {
-		c.Say("dry run: %d write(s), nothing sent — add --doit to send", len(res.Writes))
-	}
-	return err
 }
 
 func scriptExec(rt *runtime.Runtime, c *runtime.Call, echo bool, in config.Tenant) func(script.Call) ([]string, any, error) {

@@ -40,6 +40,7 @@ type Call struct {
 	Rest       []string
 	DoIt       bool
 	ExitOnWait bool
+	Resume     bool
 	Out        func(line string)
 	Tenant     config.Tenant
 

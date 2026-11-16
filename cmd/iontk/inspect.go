@@ -31,5 +31,5 @@ func runInspect(ctx context.Context, eid string) error {
 	if flagInspectRaw {
 		args["raw"] = "yes"
 	}
-	return execPrinting(ctx, os.Stdout, "element.inspect", args, nil, false, false)
+	return execPrinting(ctx, os.Stdout, "element.inspect", args, nil, runFlags{})
 }

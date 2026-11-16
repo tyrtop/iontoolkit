@@ -239,12 +239,15 @@ type Run struct {
 	Name   string
 	State  map[string]any
 	Export func(text, slug, ext string) (string, error)
+	Keep   func(name, text string) (string, error)
+	Kept   func(name string) (text, where string, err error)
 	Exec   func(Call) ([]string, any, error)
 	Budget time.Duration
 
 	Input      map[string]string
 	DoIt       bool
 	ExitOnWait bool
+	Resume     bool
 	OnStatus   func(string)
 	OnReturn   func(any)
 }
@@ -329,6 +332,7 @@ func (s *Set) Run(ctx context.Context, r Run) ([]Effect, error) {
 	L.SetField(api, "input", input)
 	L.SetField(api, "doit", lua.LBool(r.DoIt))
 	L.SetField(api, "exit_on_wait", lua.LBool(r.ExitOnWait))
+	L.SetField(api, "resume", lua.LBool(r.Resume))
 	L.SetGlobal("require", s.require(L))
 	L.SetField(api, "fail", L.NewFunction(func(L *lua.LState) int {
 		failed = &stopped{reason: L.CheckString(1)}
@@ -370,6 +374,46 @@ func (s *Set) Run(ctx context.Context, r Run) ([]Effect, error) {
 			add(Effect{Kind: EffectExport, Value: where})
 			L.Push(lua.LString(where))
 			return 1
+		}))
+	}
+
+	if r.Keep != nil && r.Kept != nil {
+		L.SetField(api, "keep", L.NewFunction(func(L *lua.LState) int {
+			name := L.CheckString(1)
+			var b strings.Builder
+			enc := json.NewEncoder(&b)
+			enc.SetEscapeHTML(false)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(tableFromLua(L.CheckTable(2))); err != nil {
+				L.RaiseError("keep %s: %s", name, err)
+				return 0
+			}
+			where, err := r.Keep(name, b.String())
+			if err != nil {
+				L.RaiseError("keep %s: %s", name, err)
+				return 0
+			}
+			L.Push(lua.LString(where))
+			return 1
+		}))
+		L.SetField(api, "kept", L.NewFunction(func(L *lua.LState) int {
+			name := L.CheckString(1)
+			text, where, err := r.Kept(name)
+			if err != nil {
+				L.RaiseError("kept %s: %s", name, err)
+				return 0
+			}
+			if text == "" {
+				return 0
+			}
+			var v any
+			if err := json.Unmarshal([]byte(text), &v); err != nil {
+				L.RaiseError("kept %s: %s is not JSON: %s", name, where, err)
+				return 0
+			}
+			L.Push(toLua(L, v))
+			L.Push(lua.LString(where))
+			return 2
 		}))
 	}
 
