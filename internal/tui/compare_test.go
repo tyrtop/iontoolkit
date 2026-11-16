@@ -74,7 +74,7 @@ func TestCompareAsksTheDeviceAndMarksEachRow(t *testing.T) {
 	next, cmd := m.openDataTabs([]sessionTarget{{eid: el.ID, name: el.Name, tsg: m.tenant().TSGID}})
 	m = runDataLoads(t, next.(tuiModel), cmd)
 
-	if got := plain(m.dataPage(m.dataTabs()[0]).String()); !strings.Contains(got, "c asks the device") {
+	if got := plain(m.dataPage(m.dataTabs()[0]).String()); !strings.Contains(got, "c queries the device") {
 		t.Errorf("the page does not offer the comparison:\n%s", got)
 	}
 

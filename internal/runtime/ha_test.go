@@ -420,7 +420,7 @@ func TestHAListNamesOneActiveAndOneStandbyPerPair(t *testing.T) {
 			t.Errorf("site %s = %v, want one active and one standby", site, ws)
 		}
 	}
-	if !strings.Contains(said, "Acme Co: 6 clustered elements, 3 active, 3 standby, 0 unknown (6 asked of the portal)") {
+	if !strings.Contains(said, "Acme Co: 6 clustered elements, 3 active, 3 standby, 0 unknown (6 requested from the portal)") {
 		t.Errorf("said:\n%s", said)
 	}
 

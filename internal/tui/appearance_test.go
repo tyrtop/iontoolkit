@@ -408,7 +408,7 @@ func TestDeletingASchemeTakesTwoPresses(t *testing.T) {
 	if _, ok := ui.ThemeByName("workbench"); ok {
 		t.Errorf("the scheme is still there: %s", m.status)
 	}
-	if !strings.Contains(m.status, "gone") {
+	if !strings.Contains(m.status, "is deleted") {
 		t.Errorf("status = %q after deleting", m.status)
 	}
 	if m.setCursor >= m.sectionRows() {

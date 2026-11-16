@@ -222,7 +222,7 @@ func TestARunLaunchedFakeSaysSoRatherThanSwappingAgain(t *testing.T) {
 	t.Cleanup(func() { app.LaunchedFake = "" })
 
 	m := settingsAt(t, secDebug)
-	if got := plain(m.testingLine()); !strings.Contains(got, "this whole run") {
+	if got := plain(m.testingLine()); !strings.Contains(got, "this entire run") {
 		t.Errorf("the row reads %q, want it to say the run was launched fake", got)
 	}
 

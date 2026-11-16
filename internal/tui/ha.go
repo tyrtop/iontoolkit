@@ -63,12 +63,12 @@ func (m tuiModel) haPath() string {
 	case clustered == 0:
 		return "no clustered elements in the list"
 	case h.Total == 0:
-		return fmt.Sprintf("%d clustered elements in %d clusters — nothing asked yet",
+		return fmt.Sprintf("%d clustered elements in %d clusters — none requested yet",
 			clustered, len(clusters))
 	case h.Bulk == "used":
 		return fmt.Sprintf("%d clusters in one tenant-wide query", h.Total)
 	case h.Bulk != "":
-		return fmt.Sprintf("%d/%d clusters one at a time (%s) — the query was refused: %s",
+		return fmt.Sprintf("%d/%d clusters one at a time (%s) — the query was rejected: %s",
 			h.Done, h.Total, m.runtime().SweepETA(m.tenant().TSGID, h.Total-h.Done), h.Bulk)
 	}
 	return fmt.Sprintf("%d/%d clusters", h.Done, h.Total)

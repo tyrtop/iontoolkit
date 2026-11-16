@@ -294,7 +294,7 @@ func (m tuiModel) renderSession() (string, *tea.Cursor) {
 	case s.Err() != nil:
 		status = s.Err().Error() + " — alt+r opens a new session on this ION"
 	case s.Hung():
-		status = "connection stopped answering — alt+r opens a new session on this ION"
+		status = "connection stopped responding — alt+r opens a new session on this ION"
 	}
 
 	if view.Offset > 0 {

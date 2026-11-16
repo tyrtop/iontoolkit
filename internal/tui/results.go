@@ -368,7 +368,7 @@ func (m tuiModel) viewResults() string {
 	}
 
 	if len(m.resMatches) == 0 {
-		b.WriteString(ui.StyleDim.Render("  nothing completed yet") + "\n")
+		b.WriteString(ui.StyleDim.Render("  none completed yet") + "\n")
 	} else {
 		b.WriteString(m.resTable.View() + "\n")
 	}

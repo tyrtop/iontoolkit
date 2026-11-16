@@ -59,7 +59,7 @@ func authCommands() []runtime.Command {
 				}
 				ident := src.Identity()
 				if !ident.ScopedTo(f.TSGID) {
-					return fmt.Errorf("signed in, but the token is scoped to %q rather than tenant %s", ident.Scope, f.TSGID)
+					return fmt.Errorf("signed in, but the token is scoped to %q instead of tenant %s", ident.Scope, f.TSGID)
 				}
 				rt.Clients().Drop(t.TSGID)
 				cl, err := rt.Connect(c.Ctx, t)
@@ -147,7 +147,7 @@ func authCommands() []runtime.Command {
 			Args: []runtime.Arg{{Name: "tenants", Required: true}},
 			Run: func(rt *runtime.Runtime, c *runtime.Call) error {
 				if len(rt.Discovered()) == 0 {
-					return fmt.Errorf("nothing found to add yet: auth.signin first, or auth.signin add=…")
+					return fmt.Errorf("zero tenants found to add yet: auth.signin first, or auth.signin add=…")
 				}
 				if err := pick(rt, c.Arg("tenants")); err != nil {
 					return err

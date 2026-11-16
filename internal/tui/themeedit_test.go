@@ -260,7 +260,7 @@ func TestLeavingThePickerLandsInTheEditor(t *testing.T) {
 func TestTheEditorsActionRowsAreListedAndSayWhatTheyDo(t *testing.T) {
 	m := editorOn(t, "nord")
 	out := plain(m.viewSettings())
-	for _, want := range []string{randomRow, similarRow, undoRow, "nothing to undo yet", "placeholder"} {
+	for _, want := range []string{randomRow, similarRow, undoRow, "no edits to undo yet", "placeholder"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the editor does not offer %q:\n%s", want, out)
 		}
@@ -312,7 +312,7 @@ func TestUndoWalksBackOneChangeAtATime(t *testing.T) {
 	}
 
 	next, _ = m.onSettingsKey("u")
-	if got := next.(tuiModel).status; !strings.Contains(got, "nothing to undo") {
+	if got := next.(tuiModel).status; !strings.Contains(got, "no edits to undo") {
 		t.Errorf("status = %q with the stack empty", got)
 	}
 }

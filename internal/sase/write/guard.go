@@ -54,7 +54,7 @@ func (g Guard) Send(ctx context.Context, s Sender, method, path string, body []b
 
 func (g Guard) Apply(ctx context.Context, s Sender, w Spec, p Plan) ([]byte, error) {
 	if p.Empty() {
-		return nil, fmt.Errorf("%s: nothing to change", p.Label)
+		return nil, fmt.Errorf("%s: the plan has zero changes", p.Label)
 	}
 	if !w.Verified {
 		return nil, unverified(w)

@@ -175,7 +175,7 @@ func (e permanentError) Temporary() bool { return false }
 
 func (s *Source) SignIn(ctx context.Context) error {
 	log := s.log()
-	log.Info("interactive sign-in asked for")
+	log.Info("interactive sign-in requested")
 
 	tok, err := Login(ctx, s.tsg, s.opt)
 	if err != nil {

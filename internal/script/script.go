@@ -797,7 +797,7 @@ func (s *Set) require(L *lua.LState) *lua.LFunction {
 				return 0
 			}
 			if !ok {
-				L.RaiseError("require %q: there is no %s.lua beside this script%s", name, name, owner.usedNote())
+				L.RaiseError("require %q: there is no %s.lua next to this script%s", name, name, owner.usedNote())
 				return 0
 			}
 			if v, ok := loaded[m.real]; ok {

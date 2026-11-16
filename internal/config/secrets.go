@@ -26,7 +26,7 @@ func SecretsWarning(s Secrets) string {
 	case "file":
 		return "plaintext file — no OS keyring available"
 	case "memory":
-		return "in memory — nothing is kept past this run"
+		return "in memory — none of it is kept past this run"
 	}
 	return "OS keyring"
 }

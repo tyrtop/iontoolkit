@@ -227,7 +227,7 @@ func (km *keymap) readBytes(b []byte, screen, what string) error {
 	}
 	for name, steps := range f.Actions {
 		if len(steps) == 0 {
-			return fmt.Errorf("%s: action %q does nothing", what, name)
+			return fmt.Errorf("%s: action %q has zero steps", what, name)
 		}
 		km.actions[name] = steps
 	}
@@ -307,7 +307,7 @@ func (km keymap) checkStep(name string, at int, st actionStep) error {
 		n++
 	}
 	if n == 0 {
-		return fmt.Errorf("%s says nothing", where)
+		return fmt.Errorf("%s has zero verbs", where)
 	}
 	return nil
 }
@@ -430,7 +430,7 @@ func (km keymap) count() int {
 func keybindsSeed(km keymap) string {
 	var b strings.Builder
 	b.WriteString("# Key bindings. A key named here does what you say over what iontk binds\n")
-	b.WriteString("# it to, and `none` hands the key back. examples/keybinds.yaml has an\n")
+	b.WriteString("# it to, and `none` gives the key back. examples/keybinds.yaml has an\n")
 	b.WriteString("# action of your own in it, and the verbs one can be written from.\n\n")
 	b.WriteString("keys:\n")
 	for _, key := range sortedBindings(km.bound[scrAny]) {

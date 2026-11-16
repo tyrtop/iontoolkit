@@ -631,7 +631,7 @@ func TestTheServiceAccountPageAddsAndForgets(t *testing.T) {
 		t.Errorf("status = %q, want it to say the secret has to be typed again", m.status)
 	}
 	next, _ = m.onSwitchKey("u")
-	if got := next.(tuiModel).status; !strings.Contains(got, "nothing to undo") {
+	if got := next.(tuiModel).status; !strings.Contains(got, "no removed tenant to undo") {
 		t.Errorf("status = %q with nothing left to undo", got)
 	}
 }

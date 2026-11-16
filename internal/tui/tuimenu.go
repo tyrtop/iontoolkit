@@ -811,7 +811,7 @@ func (m tuiModel) startSignInAuto() (tea.Model, tea.Cmd) {
 	if !m.runtime().BrowserSignedIn() || why == "" {
 		return m.startSignIn()
 	}
-	logging.L().Info("automatic sign-in refused", "tsg", m.tenant().TSGID, "why", why)
+	logging.L().Info("automatic sign-in turned down", "tsg", m.tenant().TSGID, "why", why)
 	m.signInResume = false
 	m.status = m.tenantName(m.tenant().TSGID) + ": " + why +
 		" — already signed in, so another browser sign-in will not help"
@@ -875,7 +875,7 @@ func (m tuiModel) viewSignedIn() string {
 			}
 		}
 	} else {
-		row("sign-in", ui.StyleDim.Render("lifetime not stated by the token"))
+		row("sign-in", ui.StyleDim.Render("the token gives no lifetime"))
 	}
 
 	b.WriteString("\n")

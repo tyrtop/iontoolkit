@@ -229,7 +229,7 @@ func (rt *Runtime) ApplyHA(res HAResult) HANext {
 		rt.note(fmt.Sprintf("HA state unread for %d cluster(s): %s", h.Failed, h.Err))
 	}
 	if res.Bulk != "" && res.Bulk != "used" {
-		rt.note("HA one cluster at a time (" + rt.SweepETA(res.TSG, rt.HA().Total) + "): the tenant-wide query was refused — " + res.Bulk)
+		rt.note("HA one cluster at a time (" + rt.SweepETA(res.TSG, rt.HA().Total) + "): the tenant-wide query was rejected — " + res.Bulk)
 	}
 	switch {
 	case len(res.RestElements) > 0:
@@ -318,7 +318,7 @@ func (rt *Runtime) FetchHABulk(ctx context.Context, tsg string, w HAWork, ids []
 		sts, err = c.SpokeClusterStatuses(ctx, path, ask)
 	}
 	if err != nil {
-		logging.L().Warn("ha falling back to the per-cluster sweep", "tsg", tsg,
+		logging.L().Warn("ha falling back to one query per cluster", "tsg", tsg,
 			"asked", len(ask), "clusters", len(w.Pairs), "err", err)
 		res := HAResult{TSG: tsg, Bulk: rt.explain(err), Rest: w.Pairs}
 		if len(w.NoSite) > 0 {
@@ -530,7 +530,7 @@ func haCommands() []Command {
 			}
 			how := "read already"
 			if asked > 0 {
-				how = fmt.Sprintf("%d asked of the portal", asked)
+				how = fmt.Sprintf("%d requested from the portal", asked)
 			}
 			c.Say("%s: %d clustered elements, %d active, %d standby, %d unknown (%s)",
 				t.Name, len(states), n[HAActive], n[HAStandby], len(states)-n[HAActive]-n[HAStandby], how)

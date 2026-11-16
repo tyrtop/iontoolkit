@@ -165,7 +165,7 @@ func TestTheWorkflowListFiltersLikeTheMacroList(t *testing.T) {
 	for _, k := range []string{"n", "o", "p", "e"} {
 		m, _ = typeKey(m, k)
 	}
-	if got := plain(m.viewWorkflows()); !strings.Contains(got, "nothing matches the filter") {
+	if got := plain(m.viewWorkflows()); !strings.Contains(got, "zero matches for the filter") {
 		t.Errorf("a filter matching nothing still lists:\n%s", got)
 	}
 	m, _ = typeKey(m, "esc")
@@ -195,7 +195,7 @@ func TestAPasteLandsInTheFocusedWorkflowInputAndTheFilter(t *testing.T) {
 	m, _ = typeKey(m, "/")
 	next, _ = m.Update(tea.PasteMsg{Content: "nope"})
 	m = next.(tuiModel)
-	if got := plain(m.viewWorkflows()); !strings.Contains(got, "nothing matches the filter") {
+	if got := plain(m.viewWorkflows()); !strings.Contains(got, "zero matches for the filter") {
 		t.Errorf("a pasted filter did not filter:\n%s", got)
 	}
 }

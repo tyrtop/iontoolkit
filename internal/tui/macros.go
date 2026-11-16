@@ -163,7 +163,7 @@ func (m tuiModel) runArmedMacro(rows []elementRow) (tea.Model, tea.Cmd) {
 	mac, ok := m.runtime().Macro(m.armed())
 	if !ok {
 		m.runtime().Disarm()
-		m.status = "that macro is gone — pick another from the menu"
+		m.status = "that macro no longer exists — pick another from the menu"
 		return m, nil
 	}
 	return m.runMacro(mac, rows)
@@ -193,7 +193,7 @@ func (m tuiModel) macroWarnPrompt() string {
 		"run it anyway",
 		m.retryChoices(),
 		"",
-		ui.StyleDim.Render("answered once, then never asked again"),
+		ui.StyleDim.Render("reply once and it never comes up again"),
 	}
 	return ui.Modal(lines, m.width)
 }
@@ -329,7 +329,7 @@ func (m tuiModel) viewMacros() string {
 
 	list := m.macroRows()
 	if len(m.runtime().Macros()) > 0 && len(list) == 0 {
-		b.WriteString(ui.StyleDim.Render("  nothing matches the filter") + "\n")
+		b.WriteString(ui.StyleDim.Render("  zero matches for the filter") + "\n")
 	}
 
 	for i, mac := range list {

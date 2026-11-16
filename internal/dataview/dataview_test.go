@@ -63,7 +63,7 @@ func TestLoadRejectsWhatAViewMayNotCall(t *testing.T) {
 		{
 			name: "walking up out of it",
 			yaml: `views: [{name: X, endpoints: [{name: a, path: /sdwan/../iam/v1/tokens}], fetch: {a: a}, sections: [{title: T, rows: [{label: L, value: V}]}]}]`,
-			want: "walks out",
+			want: "has a . or .. segment",
 		},
 		{
 			name: "a misspelled key",

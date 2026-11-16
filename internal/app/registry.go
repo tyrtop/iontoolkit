@@ -94,7 +94,7 @@ func workflowCommand(w workflow.Workflow) runtime.Command {
 	}
 	if each != "" {
 		args = append(args, runtime.Arg{Name: each,
-			Help: "Run once for each row of a CSV, YAML or JSON `file` (flags fill in what a row leaves out)"})
+			Help: "Run once for each row of a CSV, YAML or JSON `file` (flags fill in what a row is missing)"})
 	}
 	return runtime.Command{
 		Name: WorkflowPrefix + w.Name, Help: w.Title, Long: w.Description, Slow: true,
@@ -148,7 +148,7 @@ func place(rt *runtime.Runtime, w workflow.Workflow, given map[string]string) (p
 			}
 			p.tenants[n] = t
 		case n != workflow.TenantInput:
-			return p, fmt.Errorf("%s says which tenant some of the calls go to, and is empty", n)
+			return p, fmt.Errorf("%s names the tenant some of the calls go to, and is empty", n)
 		default:
 			if fleet := rt.FleetTenants(); len(fleet) > 1 {
 				return p, fmt.Errorf("%d tenants are loaded (%s): say which with tenant", len(fleet), runtime.TenantNames(fleet))
@@ -204,7 +204,7 @@ func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p plac
 	}
 	rt.EndRun(at, record)
 	if !c.DoIt && len(res.Writes) > 0 {
-		c.Say("dry run: %d write(s), nothing sent — add --doit to send", len(res.Writes))
+		c.Say("dry run: %d write(s), none sent — add --doit to send", len(res.Writes))
 	}
 	return err
 }
@@ -507,7 +507,7 @@ func writeSpec(rt *runtime.Runtime, what string) (write.Spec, error) {
 	}
 	spec, ok := specs.Spec(what)
 	if !ok {
-		return write.Spec{}, fmt.Errorf("nothing called %q can be written; there is %s", what, strings.Join(specs.Names(), ", "))
+		return write.Spec{}, fmt.Errorf("writes.yaml has none called %q; there is %s", what, strings.Join(specs.Names(), ", "))
 	}
 	return spec, nil
 }
@@ -545,7 +545,7 @@ func writeTargets(rt *runtime.Runtime, c *runtime.Call, arg string) ([]*writeGro
 func writeRecordsCommand() runtime.Command {
 	return runtime.Command{
 		Name: "write.records", Slow: true,
-		Help: "the records of one kind an element has, as writes.yaml reads them: what=interface element=ID",
+		Help: "the records of one kind an element has, as writes.yaml describes them: what=interface element=ID",
 		Args: []runtime.Arg{
 			{Name: "what", Required: true, Help: "which kind of record, a name in writes.yaml"},
 			{Name: "element", Required: true, Help: "the element's ID"},
@@ -619,11 +619,11 @@ func runWrite(rt *runtime.Runtime, c *runtime.Call) error {
 	}
 	switch changes := write.Changes(all); {
 	case changes == 0:
-		c.Say("nothing to change")
+		c.Say("zero changes to make")
 		return write.Unplanned(all)
 	case !c.DoIt:
 		c.Say("")
-		c.Say("dry run: %d change(s), nothing sent — add --doit to send", changes)
+		c.Say("dry run: %d change(s), none sent — add --doit to send", changes)
 		return write.Unplanned(all)
 	}
 

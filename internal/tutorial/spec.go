@@ -232,7 +232,7 @@ func (s *Set) validate() error {
 			return fmt.Errorf("%s: no text, so it would show an empty bar", where)
 		}
 		if p.Box && len(p.Keys) > 0 {
-			return fmt.Errorf("%s: a box holds every key while it is up, so keys: would do nothing; drop one of the two", where)
+			return fmt.Errorf("%s: a box takes every key while it is up, so keys: would have no effect; drop one of the two", where)
 		}
 		for _, k := range append(p.Keys, p.Stop) {
 			if k != "" && strings.ContainsAny(k, " \t") {

@@ -13,7 +13,7 @@ var ActionsFolder string
 
 const ActionPrefix = "action."
 
-const ActionsRefused = "lua action refused: "
+const ActionsRefused = "lua action rejected: "
 
 func ActionsPath(st *config.Store) string {
 	if ActionsFolder != "" {

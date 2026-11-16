@@ -199,7 +199,7 @@ func (m tuiModel) tabModeName() string {
 func (m tuiModel) growTabList(list string) (tea.Model, tea.Cmd) {
 	set := slices.Clone(m.tabColors(list))
 	if len(set) >= maxTabColors {
-		m.status = fmt.Sprintf("%d is as many as a rotation holds", maxTabColors)
+		m.status = fmt.Sprintf("%d is the most a rotation can have", maxTabColors)
 		return m, nil
 	}
 	set = append(set, ui.SimilarColor(set[len(set)-1], 1))

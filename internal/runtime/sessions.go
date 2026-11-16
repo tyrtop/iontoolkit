@@ -259,7 +259,7 @@ func (rt *Runtime) Reopen() (*ionterm.Session, string, error) {
 	}
 	eid, _, ok := rt.Sessions().LastClosed()
 	if !ok {
-		return nil, "", fmt.Errorf("nothing to reattach")
+		return nil, "", fmt.Errorf("no closed session to reattach")
 	}
 	return nil, eid, nil
 }
@@ -452,7 +452,7 @@ func Retryable(s *ionterm.Session) error {
 	if s.Err() != nil || s.Hung() || s.Ended() {
 		return nil
 	}
-	return fmt.Errorf("%s is still answering", s.Name)
+	return fmt.Errorf("%s is still responding", s.Name)
 }
 
 var ErrLoggingIn = errors.New("the session is still logging in")
@@ -510,7 +510,7 @@ func gone(s *ionterm.Session) error {
 	case s.Ended():
 		return errors.New("the session ended")
 	case s.Hung():
-		return errors.New("the session stopped answering")
+		return errors.New("the session stopped responding")
 	case s.Closed():
 		return errors.New("the session was closed")
 	}
@@ -693,8 +693,8 @@ func sessionCommands() []Command {
 			},
 		},
 		{
-			Name: "session.retry", Slow: true, Help: "open a new session in place of one that failed, stopped answering or ended",
-			Long: "Open a new session on the element of one that failed, stopped answering or ended, and close the old one once the new one's device responds. If the new one doesn't come up, the old one is kept.",
+			Name: "session.retry", Slow: true, Help: "open a new session in place of one that failed, stopped responding or ended",
+			Long: "Open a new session on the element of one that failed, stopped responding or ended, and close the old one once the new one's device responds. If the new one doesn't come up, the old one is kept.",
 			Args: []Arg{{Name: "element", Help: "Element `ID` of the session (default: the active session)"}},
 			Run: func(rt *Runtime, c *Call) error {
 				s, err := rt.sessionFor(c, "session.retry")
@@ -856,7 +856,7 @@ func sessionCommands() []Command {
 					return fmt.Errorf("session.send: %w", err)
 				}
 				text, expect := c.Arg("text"), c.Arg("expect")
-				what := s.Name + "'s prompt never came back"
+				what := s.Name + "'s prompt never showed up"
 				if expect != "" {
 					what = fmt.Sprintf("%q never showed up on %s", expect, s.Name)
 				}

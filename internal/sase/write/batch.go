@@ -21,7 +21,7 @@ type ElementPlans struct {
 
 func (w Spec) CheckSet(set map[string]string) error {
 	if len(set) == 0 {
-		return fmt.Errorf("%s: nothing to set", w.Name)
+		return fmt.Errorf("%s: zero fields to set", w.Name)
 	}
 	for k := range set {
 		if _, ok := w.Field(k); !ok {

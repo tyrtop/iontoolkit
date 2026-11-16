@@ -181,7 +181,7 @@ func (rt *Runtime) UndoMacro() (config.Macro, int, error) {
 	err := rt.editSaved(func(c *config.CommandStore) error {
 		n := len(rt.hist.undone)
 		if n == 0 {
-			return fmt.Errorf("nothing to undo")
+			return fmt.Errorf("no removed macro to undo")
 		}
 		m = rt.hist.undone[n-1]
 		if err := c.SetMacro(m); err != nil {
@@ -306,7 +306,7 @@ func historyCommands() []Command {
 	}
 	return []Command{
 		{
-			Name: "history", Help: "the device commands typed, most used first: model= puts that model's first, q= narrows",
+			Name: "history", Help: "the device commands typed, most used first: model= puts that model's first, q= filters",
 			Args: []Arg{{Name: "model"}, {Name: "q"}},
 			Run: func(rt *Runtime, c *Call) error {
 				for _, u := range rt.Ranked(c.Arg("model"), c.Arg("q")) {
@@ -462,7 +462,7 @@ func historyCommands() []Command {
 				events, err := rt.StartMacro(c.Ctx, c.Arg("name"), rows, c.Arg("anyway") == "yes")
 				var mm *MacroMismatchError
 				if errors.As(err, &mm) {
-					return fmt.Errorf("%w, anyway=yes runs it (and is not asked again)", err)
+					return fmt.Errorf("%w, anyway=yes runs it (and won't ask again)", err)
 				}
 				if err != nil {
 					return err
@@ -490,7 +490,7 @@ func (rt *Runtime) StartMacro(ctx context.Context, name string, rows []Element, 
 		return nil, fmt.Errorf("%s: %w", m.Name, err)
 	}
 	if len(rows) == 0 {
-		return nil, fmt.Errorf("nothing selected — pick elements, then run the macro")
+		return nil, fmt.Errorf("no elements selected — pick some, then run the macro")
 	}
 	if why := MacroMismatch(m, rows); why != "" && !rt.Acked(WarnMacroModel) {
 		if !anyway {

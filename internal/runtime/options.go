@@ -153,7 +153,7 @@ func (o Option) resolve(cur, typed string) (string, error) {
 	case OptInt:
 		n, err := strconv.Atoi(typed)
 		if err != nil {
-			return "", fmt.Errorf("%q is not a whole number", typed)
+			return "", fmt.Errorf("%q is not an integer", typed)
 		}
 		if (o.Min != 0 || o.Max != 0) && (n < o.Min || n > o.Max) {
 			return "", fmt.Errorf("%d is outside %d–%d", n, o.Min, o.Max)
@@ -276,12 +276,12 @@ func builtinOptions() []Option {
 			Check: output.NormalizeOrientation,
 		},
 		{
-			Name: "batch_to_file", Help: "batch results go to a file in batch_dir rather than the screen", Kind: OptBool,
+			Name: "batch_to_file", Help: "batch results go to a file in batch_dir instead of the screen", Kind: OptBool,
 			Get: func(c *config.Config) string { return boolText(c.BatchToFile) },
 			Put: func(c *config.Config, v string) { c.BatchToFile = v == "true" },
 		},
 		{
-			Name: "tutorial_seen", Help: "the first-run tutorial has been offered; false offers it again", Kind: OptBool,
+			Name: "tutorial_seen", Help: "the first-run tutorial prompt has been shown; false shows it again", Kind: OptBool,
 			Get: func(c *config.Config) string { return boolText(c.TutorialSeen) },
 			Put: func(c *config.Config, v string) { c.TutorialSeen = v == "true" },
 		},

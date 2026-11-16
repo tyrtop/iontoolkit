@@ -281,7 +281,7 @@ func (s *Client) QueryJSON(ctx context.Context, path, field string, ids []string
 		return nil, err
 	}
 	if field == "" || len(ids) == 0 {
-		return nil, fmt.Errorf("query %s: nothing to ask about", path)
+		return nil, fmt.Errorf("query %s: no field or IDs to ask about", path)
 	}
 	filter := fmt.Sprintf(`{%q:{"in":[%s]}}`, field, quoted(ids))
 	return s.post(ctx, strings.TrimPrefix(path, "/"), apiHost()+path, queryBody(filter, limit, page))
@@ -306,7 +306,7 @@ func checkPath(path, what string) error {
 	}
 	for _, seg := range strings.Split(path, "/") {
 		if seg == ".." {
-			return fmt.Errorf("path %q walks up out of /sdwan", path)
+			return fmt.Errorf("path %q goes up out of /sdwan", path)
 		}
 	}
 	return nil

@@ -67,7 +67,7 @@ func TestNextStepsAChoiceAndAnIntCycle(t *testing.T) {
 func TestBadValuesChangeNothing(t *testing.T) {
 	rt, st := withConfig(t)
 	tests := []struct{ name, value, want string }{
-		{"page_step", "lots", "not a whole number"},
+		{"page_step", "lots", "not an integer"},
 		{"session_cols", "9", "outside 40–400"},
 		{"allow_writes", "maybe", "not true or false"},
 		{"default_mode", "macro", "not one of"},

@@ -12,8 +12,8 @@ import (
 func inspectCommands() []Command {
 	return []Command{{
 		Name: "element.inspect", Slow: true,
-		Help: "what the portal knows about one element, as JSON: id= raw=yes for each response as it came",
-		Args: []Arg{{Name: "id", Required: true}, {Name: "raw", Bool: true, Help: "each response as it came"}},
+		Help: "what the portal knows about one element, as JSON: id= raw=yes for each response as received",
+		Args: []Arg{{Name: "id", Required: true}, {Name: "raw", Bool: true, Help: "each response as received"}},
 		Run: func(rt *Runtime, c *Call) error {
 			eid := c.Arg("id")
 			var tsg string

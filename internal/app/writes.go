@@ -30,7 +30,7 @@ func ReloadWrites(rt *runtime.Runtime) {
 	problem := ""
 	if err != nil {
 		problem = err.Error()
-		logging.L().Warn("writes refused", "err", err)
+		logging.L().Warn("writes rejected", "err", err)
 	}
 	rt.SetWrites(set, problem)
 }

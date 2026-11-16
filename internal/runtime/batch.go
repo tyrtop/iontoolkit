@@ -496,7 +496,7 @@ func (rt *Runtime) Export(slug, ext, text string) (string, error) {
 	}
 	text = strings.TrimRight(text, "\n")
 	if strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("nothing to export")
+		return "", fmt.Errorf("no text to export")
 	}
 	now := time.Now()
 	f, where, err := output.Open(filepath.Join(st.ExportsDir(), output.ExportName(slug, ext, now)), "", "", now)
@@ -530,7 +530,7 @@ func (rt *Runtime) SaveBatch(path, dir, format, orient string) (string, error) {
 		}
 	}
 	if path == "" && dir == "" {
-		return "", fmt.Errorf("nowhere to save to: set batch_dir, or give to=")
+		return "", fmt.Errorf("no place to save to: set batch_dir, or give to=")
 	}
 	out, where, err := output.Open(path, dir, format, time.Now())
 	if err != nil {

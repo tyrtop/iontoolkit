@@ -63,7 +63,7 @@ func (m tuiModel) testingLine() string {
 			ui.StyleDim.Render(fmt.Sprintf("  %s, %d elements", m.tenant().Name, len(m.rows())))
 	case app.LaunchedFake != "":
 		return ui.StyleWarn.Render("on") +
-			ui.StyleDim.Render("  this whole run, from "+app.LaunchedFake)
+			ui.StyleDim.Render("  this entire run, from "+app.LaunchedFake)
 	}
 	return ui.StyleDim.Render("off")
 }
@@ -90,7 +90,7 @@ func (m tuiModel) onTestingKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	next, cmd := m.enterTestingWorld()
-	next.status = "testing mode: nothing here reaches the network"
+	next.status = "testing mode: none of this hits the network"
 	return next, cmd
 }
 

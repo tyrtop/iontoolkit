@@ -136,7 +136,7 @@ func TestThePickerListsAndClearsSlots(t *testing.T) {
 
 	next, _ := after.onFavouriteKey("2")
 	empty := next.(tuiModel)
-	if !strings.Contains(empty.status, "nothing on the line") {
+	if !strings.Contains(empty.status, "no command on the line") {
 		t.Errorf("status = %q, want it to say there is nothing to save", empty.status)
 	}
 	if !empty.favPick {
@@ -288,7 +288,7 @@ func TestThePickerSaysWhenThereIsNothingToAdd(t *testing.T) {
 	m.height = m.usableHeight()
 
 	next, _ := m.openFavourites()
-	if got := plain(next.(tuiModel).View().Content); !strings.Contains(got, "nothing on the line") {
+	if got := plain(next.(tuiModel).View().Content); !strings.Contains(got, "no command on the line") {
 		t.Errorf("the picker claims it can add an empty line:\n%s", got)
 	}
 }

@@ -183,7 +183,7 @@ func firstErr(errs map[string]string) string {
 	for _, k := range sortedKeys(errs) {
 		return errs[k]
 	}
-	return "nothing answered"
+	return "none responded"
 }
 
 func (v View) pathFor(name string, ctx map[string]any) (string, error) {

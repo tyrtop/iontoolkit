@@ -743,7 +743,7 @@ func TestTheResetSectionsTwoRowsArmSeparately(t *testing.T) {
 	}
 	next, _ = m.onSettingsKey("y")
 	m = next.(tuiModel)
-	if !strings.Contains(m.status, "shipped schemes are back") {
+	if !strings.Contains(m.status, "built-in schemes are back") {
 		t.Errorf("status = %q, want the restore to have run", m.status)
 	}
 	if len(m.cfg().Tenants) == 0 {

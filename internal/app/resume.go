@@ -47,7 +47,7 @@ func walk(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p placed, r
 		if path, err := e.Fill(call.Args); err == nil && (e.Method == "" || e.Method == http.MethodGet) && strings.Contains(path, standIn) {
 			at, ok := pk.real(path)
 			if !ok {
-				return fmt.Errorf("%s: status 404: what it reads is not on the portal yet", path)
+				return fmt.Errorf("%s: status 404: what it fetches is not on the portal yet", path)
 			}
 			v, err := pk.get(to, at)
 			call.Result = EndpointCall{Answer: v}

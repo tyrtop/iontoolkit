@@ -138,7 +138,7 @@ func (m tuiModel) readFlows() tuiModel {
 	m.flows, m.flowsErr = flows, ""
 	if err != nil {
 		m.flowsErr = err.Error()
-		logging.L().Warn("tutorial refused", "err", err)
+		logging.L().Warn("tutorial rejected", "err", err)
 	}
 	if note := m.unboundPages(); note != "" {
 		m.flowsErr = joinErr(m.flowsErr, note)

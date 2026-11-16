@@ -278,7 +278,7 @@ func (rt *Runtime) BeginCheck() (DataTab, error) {
 	}
 	set := rt.Views()
 	if set == nil || len(dataview.CompareViews(set.Views, tab.Vars())) == 0 {
-		return tab, fmt.Errorf("no view asks this element's CLI anything")
+		return tab, fmt.Errorf("no view queries this element's CLI")
 	}
 	name := tab.TSG
 	if t, ok := rt.TenantOf(tab.TSG); ok {
@@ -344,11 +344,11 @@ func CheckSummary(byView map[string]dataview.Comparison) string {
 	case total == 0:
 		return ""
 	case differ > 0:
-		return fmt.Sprintf("%d of %d CLI checks disagree with the portal", differ, total)
+		return fmt.Sprintf("%d of %d CLI checks don't agree with the portal", differ, total)
 	case unknown == total:
-		return "the device answered none of the CLI checks"
+		return "the device responded to none of the CLI checks"
 	default:
-		return fmt.Sprintf("the device agrees on all %d CLI checks", total-unknown)
+		return fmt.Sprintf("the device matches on all %d CLI checks", total-unknown)
 	}
 }
 

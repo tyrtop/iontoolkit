@@ -45,7 +45,7 @@ type yamlEdit struct {
 func (m tuiModel) openEdit() (tea.Model, tea.Cmd) {
 	t, ok := m.editTarget()
 	if !ok {
-		m.status = "nothing on this page comes from a file yet"
+		m.status = "none of this page comes from a file yet"
 		return m, nil
 	}
 	if t.path == "" {

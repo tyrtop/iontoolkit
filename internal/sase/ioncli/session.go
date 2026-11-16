@@ -137,7 +137,7 @@ func readUntilPrompt(ctx context.Context, conn Conn, prompt string, pagers []str
 		if at > answeredAt && isPager(last, pagers) {
 			// the device wants a keypress; a return runs an empty command
 			if err := conn.Write(ctx, websocket.MessageText, []byte(" ")); err != nil {
-				return buf.String(), fmt.Errorf("answering %q: %w", last, err)
+				return buf.String(), fmt.Errorf("replying to %q: %w", last, err)
 			}
 			answeredAt = at
 		}

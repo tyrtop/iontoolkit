@@ -213,7 +213,7 @@ views:
       - title: Switchovers
         when: "{{ .cluster_id }}"
         for_each: cl.switch_over_events
-        empty: no switchovers recorded
+        empty: no switchovers logged
         max_items: 12
         columns:
           - header: WHEN

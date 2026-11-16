@@ -64,7 +64,7 @@ func (m tuiModel) comparePane(p *dataPage, tab dataTab, view string, width int) 
 
 	cmp, ok := tab.Check.ByView[view]
 	if !ok || !tab.Check.Ran() {
-		p.head(head + " " + ui.StyleDim.Render("· c asks the device and compares"))
+		p.head(head + " " + ui.StyleDim.Render("· c queries the device and compares"))
 		return
 	}
 

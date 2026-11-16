@@ -101,7 +101,7 @@ const FileName = "fixtures.yaml"
 
 func (s *Set) normalize() error {
 	if len(s.Tenants) == 0 {
-		return fmt.Errorf("no tenants: a fixture with nothing in it would look like a failed sign-in")
+		return fmt.Errorf("no tenants: an empty fixture would look like a failed sign-in")
 	}
 	if s.UnknownResponse == "" {
 		s.UnknownResponse = defaultUnknown

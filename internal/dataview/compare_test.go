@@ -230,7 +230,7 @@ func TestLoadRejectsABadCompareBlock(t *testing.T) {
 		{
 			name: "no rows",
 			yaml: `views: [{name: X, sections: [{title: T, rows: [{label: L, value: V}]}], compare: {commands: {a: "dump device status"}}}]`,
-			want: "compares nothing",
+			want: "compares zero rows",
 		},
 		{
 			name: "nothing asked of the device",

@@ -182,7 +182,7 @@ func (w *Spec) normalize() error {
 		w.Match = "name"
 	}
 	if len(w.Fields) == 0 {
-		return fmt.Errorf("names no fields, so there is nothing to edit")
+		return fmt.Errorf("names no fields, so there's not a thing to edit")
 	}
 	keys := map[string]bool{}
 	for i := range w.Fields {

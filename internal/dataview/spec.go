@@ -247,9 +247,9 @@ func (sec *Section) normalize(v View) error {
 	case sec.ForEach != "" && len(sec.Rows) > 0:
 		return fmt.Errorf("%s has both rows and for_each; a section is one or the other", where)
 	case sec.ForEach == "" && len(sec.Columns) > 0:
-		return fmt.Errorf("%s has columns but no for_each to draw them from", where)
+		return fmt.Errorf("%s has columns but no for_each to take them from", where)
 	case sec.ForEach != "" && len(sec.Columns) == 0:
-		return fmt.Errorf("%s iterates %s but declares no columns", where, sec.ForEach)
+		return fmt.Errorf("%s iterates %s but defines no columns", where, sec.ForEach)
 	case sec.ForEach == "" && len(sec.Rows) == 0:
 		return fmt.Errorf("%s is empty", where)
 	}
@@ -273,7 +273,7 @@ func (c *Compare) normalize(v View) error {
 	}
 	view := v.Name
 	if len(c.Rows) == 0 {
-		return fmt.Errorf("view %q compares nothing: a compare block with no rows is a dial for no answer", view)
+		return fmt.Errorf("view %q compares zero rows: a compare block with no rows dials the device for no reason", view)
 	}
 	if len(c.Commands) == 0 {
 		return fmt.Errorf("view %q compares without asking the device anything", view)

@@ -327,7 +327,7 @@ func listCommands() []Command {
 			Run: func(rt *Runtime, c *Call) error {
 				rt.editList(func(l *listState) (string, bool) {
 					if !l.showSel && len(l.selected) == 0 {
-						return "nothing selected", true
+						return "none selected", true
 					}
 					l.showSel = !l.showSel
 					l.refilter()
@@ -342,7 +342,7 @@ func listCommands() []Command {
 			Run: func(rt *Runtime, c *Call) error {
 				rt.editList(func(l *listState) (string, bool) {
 					if len(l.selected) == 0 {
-						return "nothing selected", true
+						return "none selected", true
 					}
 					n := len(l.selected)
 					l.cleared = l.selected
@@ -360,7 +360,7 @@ func listCommands() []Command {
 			Run: func(rt *Runtime, c *Call) error {
 				rt.editList(func(l *listState) (string, bool) {
 					if len(l.cleared) == 0 {
-						return "nothing to undo", true
+						return "no cleared selection to undo", true
 					}
 					for k := range l.cleared {
 						l.selected[k] = true

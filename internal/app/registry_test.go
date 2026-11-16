@@ -510,7 +510,7 @@ func TestAWorkflowRunGoesWhereItsTenantInputsSay(t *testing.T) {
 		t.Errorf("an unknown tenant = %v", err)
 	}
 	_, _, err = exec(rt, WorkflowPrefix+"copy", map[string]string{"site": "S0100", "tenant": "t1"}, nil, false)
-	if err == nil || !strings.Contains(err.Error(), "into says which tenant") {
+	if err == nil || !strings.Contains(err.Error(), "into names the tenant") {
 		t.Errorf("an empty in: input = %v", err)
 	}
 }

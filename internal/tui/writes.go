@@ -73,7 +73,7 @@ func (m tuiModel) startWrite() (tea.Model, tea.Cmd) {
 	}
 	writes, _ := m.runtime().Writes()
 	if writes == nil || len(writes.Writes) == 0 {
-		m.status = "nothing is editable — writes.yaml names no records"
+		m.status = "zero editable records — writes.yaml names none"
 		return m, nil
 	}
 	m.wr = writeState{eid: tab.EID, tsg: tab.TSG, vars: tab.Vars(), specs: writes.Writes}
@@ -163,7 +163,7 @@ func (m tuiModel) onWritePlanned(msg writePlannedMsg) (tea.Model, tea.Cmd) {
 	case msg.err != "" && !msg.found:
 		m.wr.err = msg.err
 	case !msg.found || msg.plan.Empty():
-		m.wr.err = "nothing changed"
+		m.wr.err = "not a thing changed"
 	default:
 		m.wr.plan, m.wr.blocked, m.wr.err, m.wr.step = msg.plan, msg.blocked, "", writeReview
 	}
@@ -289,7 +289,7 @@ func (m tuiModel) viewWrite() string {
 
 	case writePick:
 		if len(m.wr.recs) == 0 && m.wr.err == "" {
-			b.WriteString(ui.StyleDim.Render("nothing to edit on this element") + "\n")
+			b.WriteString(ui.StyleDim.Render("zero records to edit on this element") + "\n")
 		}
 		for i, rec := range m.wr.recs {
 			b.WriteString(pickLine(i == m.wr.cursor, m.wr.spec.LabelOf(m.wr.vars, rec), width) + "\n")

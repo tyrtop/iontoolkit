@@ -186,7 +186,7 @@ func Parse(b []byte) (*Set, error) {
 	names := builtinNames()
 	for _, c := range set.Columns {
 		if c.Template == nil && c.Fetch == "" && c.From == "" && c.Go == "" && !slices.Contains(names, c.Name) {
-			return nil, fmt.Errorf("column %q is not one iontk draws (%s) and has no value of its own",
+			return nil, fmt.Errorf("column %q is not one iontk renders (%s) and has no value of its own",
 				c.Name, strings.Join(names, ", "))
 		}
 	}
@@ -234,7 +234,7 @@ func (s *Set) normalize() error {
 		}
 	}
 	if marks > 1 {
-		return fmt.Errorf("%d columns carry the selection mark; it goes on one", marks)
+		return fmt.Errorf("%d columns have the selection mark; it goes on one", marks)
 	}
 	return nil
 }
@@ -249,13 +249,13 @@ func (c *Spec) normalize(at int) error {
 	case c.Fetch == "" && (c.Bulk != "" || c.Key != ""):
 		return fmt.Errorf("%s has a bulk: or a key: and no fetch: to fall back on", where)
 	case c.Fetch != "" && c.Value == "":
-		return fmt.Errorf("%s fetches and says no value", where)
+		return fmt.Errorf("%s fetches and gives no value", where)
 	case c.Fetch != "" && c.From != "":
-		return fmt.Errorf("%s fetches, so its value reads the answer; drop the from:", where)
+		return fmt.Errorf("%s fetches, so its value comes from the answer; drop the from:", where)
 	case c.On != "" && c.Fetch == "":
 		return fmt.Errorf("%s has an on: and no fetch: for it to join", where)
 	case c.Bulk != "" && c.Fleet():
-		return fmt.Errorf("%s fetches once for the fleet, so a bulk: query adds nothing", where)
+		return fmt.Errorf("%s fetches once for the fleet, so a bulk: query has no effect", where)
 	case c.Fetch != "" && c.Go != "":
 		return fmt.Errorf("%s fetches and also names a go:", where)
 	case c.Go != "" && c.Value != "":
@@ -263,11 +263,11 @@ func (c *Spec) normalize(at int) error {
 	case c.Go != "" && !slices.Contains(Providers, c.Go):
 		return fmt.Errorf("%s names go: %q, and the ones iontk works out are %s", where, c.Go, strings.Join(Providers, ", "))
 	case c.Go != "" && c.From != "":
-		return fmt.Errorf("%s reads %q and also names a go:; iontk works that one out itself", where, c.From)
+		return fmt.Errorf("%s has from: %q and also names a go:; iontk works that one out itself", where, c.From)
 	case c.From != "" && c.From != FromElement && c.From != FromSite:
-		return fmt.Errorf("%s reads %q; a column reads %q or %q", where, c.From, FromElement, FromSite)
+		return fmt.Errorf("%s has from: %q; a column's from: is %q or %q", where, c.From, FromElement, FromSite)
 	case c.From == FromSite && c.Value == "":
-		return fmt.Errorf("%s reads the site but says no value", where)
+		return fmt.Errorf("%s pulls from the site but gives no value", where)
 	case c.Min < 0 || c.Max < 0:
 		return fmt.Errorf("%s has a negative width", where)
 	case c.Max > 0 && c.Min > c.Max:
@@ -325,7 +325,7 @@ func (c *Spec) resolve(calls *endpoint.Set) error {
 	var err error
 	if c.Fetch != "" {
 		if c.Endpoint, err = calls.SDWAN(c.Fetch); err == nil && c.Endpoint.Method != http.MethodGet {
-			err = fmt.Errorf("%s is a %s; a column reads with GET", c.Fetch, c.Endpoint.Method)
+			err = fmt.Errorf("%s is a %s; a column only uses GET", c.Fetch, c.Endpoint.Method)
 		}
 		if err != nil {
 			return fmt.Errorf("column %q fetch: %w", c.Name, err)

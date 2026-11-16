@@ -174,7 +174,7 @@ func (m tuiModel) connectBar() string {
 	case s.Err() != nil:
 		parts = append(parts, ui.StyleErr.Render(ui.MarkCross.String()+" failed"))
 	case s.Hung():
-		parts = append(parts, ui.StyleWarn.Render("~ not answering"))
+		parts = append(parts, ui.StyleWarn.Render("~ not responding"))
 	default:
 		parts = append(parts, ui.StyleOK.Render(ui.MarkCheck.String()+" successfully dialed"))
 	}

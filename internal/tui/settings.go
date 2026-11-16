@@ -500,11 +500,11 @@ func (m tuiModel) sectionContent() []string {
 	case secReset:
 		out = append(out, ui.StyleWarn.Render("Factory Reset"))
 		out = append(out, ui.StyleWarn.Render("Restore Themes")+
-			ui.StyleDim.Render("   restores default iontk themes - user themes are untouched"))
+			ui.StyleDim.Render("   restores default iontk themes - user themes are unchanged"))
 		if m.resetArmed {
 			what := "delete every tenant, ION password, token and scheme"
 			if m.setCursor == themeRestoreRow {
-				what = "put the shipped schemes back"
+				what = "put the built-in schemes back"
 			}
 			out = append(out, "",
 				ui.StyleErr.Render("press y to "+what),
@@ -553,11 +553,11 @@ func (m tuiModel) sectionContent() []string {
 			ui.Label("Elements")+ui.StyleDim.Render(fmt.Sprintf("%d cached, %d shown", m.cacheCount(), len(m.matched()))),
 			ui.Label("Sessions")+ui.StyleDim.Render(fmt.Sprintf("%d open, %d detached", m.sessions().Count(), m.sessions().DetachedCount())),
 			ui.Label("HA")+ui.StyleDim.Render(m.haPath()),
-			ui.Label("Catalog")+ui.StyleDim.Render(fmt.Sprintf("%d commands, %d offered", len(ioncmd.Embedded()), len(m.catalog()))),
+			ui.Label("Catalog")+ui.StyleDim.Render(fmt.Sprintf("%d commands, %d available", len(ioncmd.Embedded()), len(m.catalog()))),
 			ui.Label("Terminal")+ui.StyleDim.Render(fmt.Sprintf("%d x %d", m.width, m.height)),
 		)
 		if app.Debug {
-			out = append(out, "", ui.StyleWarn.Render("--debug: throwaway config, no saved tenants, secrets held only in memory"))
+			out = append(out, "", ui.StyleWarn.Render("--debug: temporary config, no saved tenants, secrets kept only in memory"))
 		}
 		if tail := logging.Recent(logTailLines); len(tail) > 0 {
 			out = append(out, "")
@@ -573,7 +573,7 @@ const logTailLines = 5
 
 func logLine() string {
 	if err := logging.Problem(); err != nil {
-		return ui.StyleWarn.Render("nothing written: " + err.Error())
+		return ui.StyleWarn.Render("log not written: " + err.Error())
 	}
 	if !logging.On() {
 		return ui.StyleDim.Render("off")
@@ -593,7 +593,7 @@ func (m tuiModel) sectionHint() string {
 	}
 	if m.setSection == secReset && m.resetArmed {
 		if m.setCursor == themeRestoreRow {
-			return "y restore the shipped themes · any other key cancels"
+			return "y restore the built-in themes · any other key cancels"
 		}
 		return "y reset · any other key cancels"
 	}
@@ -632,7 +632,7 @@ func (m tuiModel) sectionHint() string {
 	case secReset:
 		if m.resetArmed {
 			if m.setCursor == themeRestoreRow {
-				return "y restore the shipped themes · any other key cancels"
+				return "y restore the built-in themes · any other key cancels"
 			}
 			return "y reset · any other key cancels"
 		}

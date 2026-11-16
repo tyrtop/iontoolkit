@@ -261,7 +261,7 @@ func TestSignedInConfirmationWhenTheTokenIsSilentAboutExpiry(t *testing.T) {
 	m.runtime().SetIdentity(saseauth.Identity{Name: "Ben Hall"})
 
 	out := plain(m.viewSignedIn())
-	if !strings.Contains(out, "not stated") {
+	if !strings.Contains(out, "gives no lifetime") {
 		t.Errorf("want the unknown session lifetime said plainly rather than guessed:\n%s", out)
 	}
 }
@@ -374,7 +374,7 @@ func TestMenuKeybinds(t *testing.T) {
 		m.runtime().ResetSessions()
 		mm, _ := m.onMenuKey("alt+t")
 		got := mm.(tuiModel)
-		if !strings.Contains(got.status, "nothing to reattach") {
+		if !strings.Contains(got.status, "no closed session to reattach") {
 			t.Errorf("status = %q, want it to say there is nothing to reattach", got.status)
 		}
 		if got.phase != phaseMenu {

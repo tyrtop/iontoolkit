@@ -24,7 +24,7 @@ func (rt *Runtime) saveConfig() error {
 func (rt *Runtime) setSecret(key, v string) error {
 	st := rt.Store()
 	if st == nil {
-		return fmt.Errorf("nowhere to keep secrets")
+		return fmt.Errorf("no place to keep secrets")
 	}
 	return st.Secrets.Set(key, v)
 }
@@ -56,7 +56,7 @@ func (rt *Runtime) savedTenant(name string) (config.Tenant, error) {
 	}
 	t, ok := cfg.Tenant(name)
 	if !ok {
-		return t, fmt.Errorf("tenant %s is gone", name)
+		return t, fmt.Errorf("tenant %s no longer exists", name)
 	}
 	return t, nil
 }
@@ -198,7 +198,7 @@ func (rt *Runtime) UndoRemoveTenant() (config.Tenant, error) {
 	n := len(rt.ws.removed)
 	if n == 0 {
 		rt.mu.Unlock()
-		return config.Tenant{}, fmt.Errorf("nothing to undo")
+		return config.Tenant{}, fmt.Errorf("no removed tenant to undo")
 	}
 	t := rt.ws.removed[n-1]
 	rt.ws.removed = rt.ws.removed[:n-1]
@@ -239,7 +239,7 @@ func (rt *Runtime) AddUser(tenant, tsg, user, pass string) (config.Tenant, error
 	t, ok := rt.Config().Tenant(tenant)
 	if !ok {
 		if tsg == "" {
-			return t, fmt.Errorf("tenant %s is gone", tenant)
+			return t, fmt.Errorf("tenant %s no longer exists", tenant)
 		}
 		t = config.Tenant{Name: tenant, TSGID: tsg, Auth: config.AuthBrowser}
 	}
@@ -410,7 +410,7 @@ func tenantCommands() []Command {
 	tenantArg := Arg{Name: "tenant", Help: "the tenant's name; the one in use when empty"}
 	return []Command{
 		{
-			Name: "auth.mode", Help: "which sign-ins the tenant list shows: browser or tenant (service accounts); next flips it",
+			Name: "auth.mode", Help: "which sign-ins the tenant list shows: browser or tenant (service accounts); next switches it",
 			Args: []Arg{{Name: "mode", Default: "next"}},
 			Run: func(rt *Runtime, c *Call) error {
 				mode := c.Arg("mode")

@@ -40,12 +40,12 @@ func resetCommands() []runtime.Command {
 				rt.ClearIssues()
 				rt.ForgetAuth()
 				rt.ResetFleet()
-				c.Say("reset — nothing is saved any more")
+				c.Say("reset — all saved state is deleted")
 				return themeErr
 			},
 		},
 		{
-			Name: "theme.hide", Help: "hide a shipped scheme, or delete one of your own: name=",
+			Name: "theme.hide", Help: "hide a built-in scheme, or delete one of your own: name=",
 			Args: []runtime.Arg{{Name: "name", Required: true}},
 			Run: func(rt *runtime.Runtime, c *runtime.Call) error {
 				cfg, st, name := rt.Config(), rt.Store(), c.Arg("name")
@@ -60,7 +60,7 @@ func resetCommands() []runtime.Command {
 					if _, still := ui.ThemeByName(name); still {
 						c.Say("%s is back to the one iontk ships", name)
 					} else {
-						c.Say("%s is gone", name)
+						c.Say("%s is deleted", name)
 					}
 				} else {
 					cfg.HiddenThemes = append(slices.Clone(cfg.HiddenThemes), name)
@@ -75,7 +75,7 @@ func resetCommands() []runtime.Command {
 			},
 		},
 		{
-			Name: "theme.restore", Help: "bring back every shipped scheme: your overrides removed, nothing hidden",
+			Name: "theme.restore", Help: "bring back every built-in scheme: your overrides removed, none hidden",
 			Run: func(rt *runtime.Runtime, c *runtime.Call) error {
 				cfg, st := rt.Config(), rt.Store()
 				if cfg == nil || st == nil {
@@ -94,7 +94,7 @@ func resetCommands() []runtime.Command {
 				if err := st.SaveConfig(cfg); err != nil {
 					return err
 				}
-				c.Say("the shipped schemes are back · %d override(s) removed, %d unhidden", n, hidden)
+				c.Say("the built-in schemes are back · %d override(s) removed, %d unhidden", n, hidden)
 				return nil
 			},
 		},

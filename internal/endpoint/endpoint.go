@@ -95,7 +95,7 @@ func checkShape(e Endpoint) error {
 	p, _, _ := strings.Cut(e.Path, "?")
 	for _, seg := range strings.Split(p, "/") {
 		if seg == ".." || seg == "." {
-			return fmt.Errorf("path %q walks out of itself", e.Path)
+			return fmt.Errorf("path %q has a . or .. segment", e.Path)
 		}
 	}
 	_, _, err := split(e.Path)

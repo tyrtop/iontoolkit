@@ -17,7 +17,7 @@ var writeMethods = map[string]bool{
 func (s *Client) Send(ctx context.Context, method, path string, body []byte) ([]byte, error) {
 	method = strings.ToUpper(method)
 	if !writeMethods[method] {
-		return nil, fmt.Errorf("%s is not a write; reads go through GetJSON", method)
+		return nil, fmt.Errorf("%s is not a write; for a read, use GetJSON", method)
 	}
 	if err := checkPath(path, "write"); err != nil {
 		return nil, err

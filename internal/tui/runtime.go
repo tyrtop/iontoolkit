@@ -21,7 +21,7 @@ func (m *tuiModel) drawRuntime(l app.List) {
 
 	files, err := view.Load(ViewsDir(st))
 	if err != nil {
-		logging.L().Warn("views refused", "err", err)
+		logging.L().Warn("views rejected", "err", err)
 	}
 
 	for _, f := range files {

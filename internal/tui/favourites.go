@@ -97,7 +97,7 @@ func (m tuiModel) saveFavourite(slot int) (tea.Model, tea.Cmd) {
 		line = strings.TrimSpace(s.Line())
 	}
 	if line == "" {
-		m.status = "nothing on the line to save — a adds one by hand"
+		m.status = "no command on the line to save — a adds one by hand"
 		return m, nil
 	}
 	if err := m.runtime().SetFavourite(slot, line, m.activeModel()); err != nil {
@@ -158,7 +158,7 @@ func (m tuiModel) overlayFavourites(content string) string {
 
 	heading := ui.StyleCmd.Render("favourites") + ui.StyleDim.Render("   press 1-9 to add favourite")
 	if line == "" {
-		heading = ui.StyleCmd.Render("favourites") + ui.StyleWarn.Render("   nothing on the line to add")
+		heading = ui.StyleCmd.Render("favourites") + ui.StyleWarn.Render("   no command on the line to add")
 	}
 	lines := []string{heading}
 	for slot := 1; slot <= config.FavouriteSlots; slot++ {

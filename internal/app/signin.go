@@ -62,7 +62,7 @@ func WarmReport(results []TenantWarm, w io.Writer) error {
 
 	for _, r := range results {
 		if r.Skipped {
-			fmt.Fprintf(w, "  %-28s service account, nothing to sign in\n", r.Tenant.Name)
+			fmt.Fprintf(w, "  %-28s service account, no sign-in needed\n", r.Tenant.Name)
 			continue
 		}
 		browser++

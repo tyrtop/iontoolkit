@@ -157,7 +157,7 @@ func TestAnEmptyPageExportsNothing(t *testing.T) {
 	if cmd != nil {
 		t.Error("an empty page wrote something")
 	}
-	if !strings.Contains(next.status, "nothing to export") {
+	if !strings.Contains(next.status, "no text to export") {
 		t.Errorf("status = %q, want it to say there was nothing", next.status)
 	}
 	if entries, _ := os.ReadDir(next.store().ExportsDir()); len(entries) != 0 {

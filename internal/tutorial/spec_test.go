@@ -126,7 +126,7 @@ func TestAPageThatCouldNotWorkIsRefusedAtLoad(t *testing.T) {
 		{
 			"a box with keys of its own",
 			"pages:\n  - name: p\n    box: yes\n    text: [go]\n    keys: [enter]\n",
-			"holds every key",
+			"takes every key",
 		},
 		{
 			"a key with a space in it",

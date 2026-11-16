@@ -171,7 +171,7 @@ func TestARetrySwapsInANewSessionOnlyOnceItsRouterSpeaks(t *testing.T) {
 	}{
 		{name: "a dead session and a router that answers the redial", kill: true, speaks: true, dials: 2},
 		{name: "a dead session and a router that stays silent", kill: true, dials: 3, wantErr: "no response from device"},
-		{name: "a session that is still answering", speaks: true, dials: 1, wantErr: "acme-rtr-01 is still answering"},
+		{name: "a session that is still answering", speaks: true, dials: 1, wantErr: "acme-rtr-01 is still responding"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			d := &routers{speaks: []bool{true, tt.speaks}}

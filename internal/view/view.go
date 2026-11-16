@@ -55,12 +55,12 @@ func Load(path string) ([]File, error) {
 			continue
 		}
 		if env.Kind == "" {
-			bad = append(bad, fmt.Sprintf("%s says no kind; it is one of %s",
+			bad = append(bad, fmt.Sprintf("%s names no kind; it is one of %s",
 				filepath.Base(name), strings.Join(Kinds(), ", ")))
 			continue
 		}
 		if !known(env.Kind) {
-			bad = append(bad, fmt.Sprintf("%s is a %q, which iontk does not draw; the kinds are %s",
+			bad = append(bad, fmt.Sprintf("%s is a %q, which iontk does not render; the kinds are %s",
 				filepath.Base(name), env.Kind, strings.Join(Kinds(), ", ")))
 			continue
 		}
@@ -82,9 +82,9 @@ func CheckEnvelope(b []byte, want string) error {
 	}
 	switch {
 	case env.Kind == "":
-		return fmt.Errorf("a file under %s/ says what it is: kind: %s", DirName, want)
+		return fmt.Errorf("a file under %s/ has to name its kind: kind: %s", DirName, want)
 	case env.Kind != want:
-		return fmt.Errorf("this file is a %q and the screen it draws is a %q", env.Kind, want)
+		return fmt.Errorf("this file is a %q and the screen it renders is a %q", env.Kind, want)
 	}
 	return nil
 }

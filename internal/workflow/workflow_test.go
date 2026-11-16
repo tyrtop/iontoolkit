@@ -185,7 +185,7 @@ func TestRequireStaysInTheFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = w.Run(context.Background(), nil, Host{}, false)
-	if err == nil || !strings.Contains(err.Error(), "beside this script") {
+	if err == nil || !strings.Contains(err.Error(), "next to this script") {
 		t.Errorf("Run() = %v", err)
 	}
 }

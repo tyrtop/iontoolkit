@@ -253,7 +253,7 @@ func confirmRun(in io.Reader, w io.Writer, tty bool, hits []runtime.Hit) error {
 		return nil
 	}
 	if !tty {
-		return fmt.Errorf("%d elements match %q and stdin is not a terminal, so the confirmation cannot be answered; pass --no-validate to run anyway",
+		return fmt.Errorf("%d elements match %q and stdin is not a terminal, so the confirmation can't get a reply; pass --no-validate to run anyway",
 			len(hits), flagSearch)
 	}
 

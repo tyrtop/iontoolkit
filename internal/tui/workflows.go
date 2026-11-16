@@ -283,9 +283,9 @@ func (m tuiModel) viewCommandList() string {
 	list := m.listedCommands()
 	switch {
 	case len(all) == 0:
-		b.WriteString(ui.StyleDim.Render("  nothing here yet — add a folder under workflows/ in the config directory") + "\n")
+		b.WriteString(ui.StyleDim.Render("  no workflows yet — add a folder under workflows/ in the config directory") + "\n")
 	case len(list) == 0:
-		b.WriteString(ui.StyleDim.Render("  nothing matches the filter") + "\n")
+		b.WriteString(ui.StyleDim.Render("  zero matches for the filter") + "\n")
 	}
 	for i, c := range list {
 		name := fmt.Sprintf("%-22s", ui.Truncate(strings.TrimPrefix(c.Name, m.wf.prefix), 22))
@@ -347,7 +347,7 @@ func (m tuiModel) viewWorkflows() string {
 			b.WriteString(mark + ui.StyleDim.Render(fmt.Sprintf("%-*s", pad, a.Name)) + m.wf.inputs[i].View() + ui.StyleDim.Render(note) + "\n")
 		}
 		if len(m.wf.cmd.Args) == 0 {
-			b.WriteString(ui.StyleDim.Render("this asks for nothing") + "\n")
+			b.WriteString(ui.StyleDim.Render("this needs zero inputs") + "\n")
 		}
 		hint = "tab/↑↓ field · enter dry run · esc back"
 		if !m.wf.cmd.Writes {

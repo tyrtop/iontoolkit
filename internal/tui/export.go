@@ -19,7 +19,7 @@ const (
 func (m tuiModel) exportText(what, slug, ext, text string) (tuiModel, tea.Cmd) {
 	text = strings.TrimRight(text, "\n")
 	if strings.TrimSpace(text) == "" {
-		m.status = "nothing to export here"
+		m.status = "no text to export here"
 		return m, nil
 	}
 
@@ -49,7 +49,7 @@ func (m tuiModel) exportDataPage() (tea.Model, tea.Cmd) { return m.exportCommand
 func (m tuiModel) exportCommand(name string, args map[string]string) (tea.Model, tea.Cmd) {
 	var said []string
 	if err := m.runtime().Exec(&runtime.Call{Args: args, Out: func(l string) { said = append(said, l) }}, name); err != nil {
-		m.status = "nothing to export here: " + err.Error()
+		m.status = "no text to export here: " + err.Error()
 		return m, nil
 	}
 	m.status = strings.Join(said, " ")

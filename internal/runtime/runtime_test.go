@@ -148,7 +148,7 @@ func TestSelectionClearAndUndo(t *testing.T) {
 		t.Errorf("undo: %+v, status %q", rt.List(), rt.Status())
 	}
 	run(t, rt, "list.undo-clear")
-	if rt.Status() != "nothing to undo" {
+	if rt.Status() != "no cleared selection to undo" {
 		t.Errorf("second undo said %q", rt.Status())
 	}
 }
@@ -203,7 +203,7 @@ func TestSubscribersHearChanges(t *testing.T) {
 	ev, stop := rt.Subscribe()
 	run(t, rt, "list.clear")
 	got := <-ev
-	if got.Area != AreaList || got.Status != "nothing selected" {
+	if got.Area != AreaList || got.Status != "none selected" {
 		t.Errorf("event = %+v", got)
 	}
 	stop()

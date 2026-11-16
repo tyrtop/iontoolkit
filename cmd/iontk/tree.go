@@ -176,7 +176,7 @@ func readDashes(in io.Reader, declared []runtime.Arg, args map[string]string) er
 			lines = bufio.NewScanner(in)
 		}
 		if !lines.Scan() {
-			return fmt.Errorf("--%s - found nothing to read on standard input", a.Name)
+			return fmt.Errorf("--%s - found zero lines to read on standard input", a.Name)
 		}
 		args[a.Name] = strings.TrimRight(lines.Text(), "\r")
 	}

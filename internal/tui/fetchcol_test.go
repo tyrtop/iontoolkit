@@ -267,7 +267,7 @@ func TestTheNextChunkStartsAtTheCursor(t *testing.T) {
 func TestAFetchedColumnIsRefusedWhenItCannotBeDrawn(t *testing.T) {
 	for _, tt := range []struct{ name, yaml, want string }{
 		{"a path off the api", "kind: list\nendpoints:\n  - name: x\n    path: /api/x\ncolumns:\n  - name\n  - name: x\n    fetch: x\n    value: \"{{ .x }}\"\n", "/sdwan/"},
-		{"no value", "kind: list\nendpoints:\n  - name: x\n    path: /sdwan/v2.0/api/x\ncolumns:\n  - name\n  - name: x\n    fetch: x\n", "says no value"},
+		{"no value", "kind: list\nendpoints:\n  - name: x\n    path: /sdwan/v2.0/api/x\ncolumns:\n  - name\n  - name: x\n    fetch: x\n", "gives no value"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := listModelFrom(t, tt.yaml, 2)

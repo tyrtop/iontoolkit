@@ -439,7 +439,7 @@ func TestClearingTheSelection(t *testing.T) {
 	}
 
 	mm, _ = got.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModAlt}), "alt+c")
-	if again := mm.(tuiModel); !strings.Contains(again.status, "nothing selected") {
+	if again := mm.(tuiModel); !strings.Contains(again.status, "none selected") {
 		t.Errorf("status = %q, want it to say there was nothing to clear", again.status)
 	}
 }
@@ -480,7 +480,7 @@ func TestShowingTheSelectionNeedsASelection(t *testing.T) {
 	if got.showingSelected() {
 		t.Error("switched to an empty selection, which would be an empty list")
 	}
-	if !strings.Contains(got.status, "nothing selected") {
+	if !strings.Contains(got.status, "none selected") {
 		t.Errorf("status = %q, want an explanation", got.status)
 	}
 }
@@ -606,7 +606,7 @@ func TestUndoIsOnlyOfferedWhenThereIsSomethingToUndo(t *testing.T) {
 	m := searchEnterModel(t)
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModAlt}), "alt+z")
 	got := mm.(tuiModel)
-	if !strings.Contains(got.status, "nothing to undo") {
+	if !strings.Contains(got.status, "no cleared selection to undo") {
 		t.Errorf("status = %q, want it to say so", got.status)
 	}
 
@@ -615,7 +615,7 @@ func TestUndoIsOnlyOfferedWhenThereIsSomethingToUndo(t *testing.T) {
 	mm, _ = mm.(tuiModel).onPickKey(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModAlt}), "alt+z")
 	again := mm.(tuiModel)
 	mm, _ = again.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModAlt}), "alt+z")
-	if twice := mm.(tuiModel); !strings.Contains(twice.status, "nothing to undo") {
+	if twice := mm.(tuiModel); !strings.Contains(twice.status, "no cleared selection to undo") {
 		t.Errorf("status = %q, want the undo spent after one use", twice.status)
 	}
 }

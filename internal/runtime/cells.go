@@ -296,7 +296,7 @@ func bulkCells(ctx context.Context, r CellReader, col column.Spec, tsg string, i
 		cells[tsg+"/"+id] = Cell{Text: col.Template.Render(row)}
 	}
 	if named == 0 {
-		return nil, fmt.Errorf("%s answered %d row(s), none of them with a %s", col.Bulk, len(env.Items), col.Key)
+		return nil, fmt.Errorf("%s returned %d row(s), none of them with a %s", col.Bulk, len(env.Items), col.Key)
 	}
 	return cells, nil
 }
@@ -417,7 +417,7 @@ func (rt *Runtime) ApplyCells(res CellResult) CellsNext {
 		rt.note(res.Col + ": " + res.Err)
 	}
 	if res.Bulk != "" && res.Bulk != "used" {
-		rt.note(fmt.Sprintf("%s one call per element (%s): the query was refused — %s",
+		rt.note(fmt.Sprintf("%s one call per element (%s): the query was rejected — %s",
 			res.Col, rt.SweepETA(res.TSG, rt.CellsLeft(res.Col, res.TSG)), res.Bulk))
 	}
 	return CellsNext{Tick: len(res.Rest) > 0, Save: res.Cells}

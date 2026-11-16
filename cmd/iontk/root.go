@@ -113,7 +113,7 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
 		}
 		switch {
 		case flagSearch != "" && len(flagCommands) == 0:
-			was("--search alone", "iontk fleet search")
+			was("--search by itself", "iontk fleet search")
 			return runSearch(cmd.Context())
 		case flagSearch != "":
 			was("--search and --cmd", "iontk batch run --search")
@@ -126,7 +126,7 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
 			}
 			return runBatch(cmd.Context(), sel)
 		case flagElement != "":
-			was("--element alone", "iontk session open")
+			was("--element on its own", "iontk session open")
 			return runShell(cmd.Context(), flagElement)
 		case flagElementsPath != "":
 			return fmt.Errorf("--elements-path goes with iontk batch run")
@@ -155,8 +155,8 @@ func init() {
 	pf.IntVar(&app.Defaults.DialAttempts, "dial-attempts", app.Defaults.DialAttempts, "Times to try dialing an element before giving up")
 	pf.DurationVar(&app.Defaults.DialTimeout, "dial-timeout", app.Defaults.DialTimeout, "Time limit for one dial")
 	pf.IntVar(&app.Defaults.DialAttempts, "attempts", app.Defaults.DialAttempts, "Same as --dial-attempts")
-	_ = pf.MarkDeprecated("attempts", "use --dial-attempts; the retry now re-dials rather than re-running the session")
-	pf.StringVar(&app.Defaults.PagerOff, "pager-off", app.Defaults.PagerOff, "CLI command sent after login to turn paging off (empty sends nothing)")
+	_ = pf.MarkDeprecated("attempts", "use --dial-attempts; the retry now re-dials instead of re-running the session")
+	pf.StringVar(&app.Defaults.PagerOff, "pager-off", app.Defaults.PagerOff, "CLI command sent after login to turn paging off (empty sends none)")
 	pf.StringArrayVar(&app.Defaults.PagerPrompts, "pager-prompt", app.Defaults.PagerPrompts, "Pager prompt to answer with a space (repeatable; empty turns it off)")
 	pf.DurationVar(&app.Defaults.HTTPTimeout, "http-timeout", app.Defaults.HTTPTimeout, "Time limit for looking up an element")
 	pf.Float64Var(&app.Defaults.RPS, "rps", app.Defaults.RPS, "Maximum API requests per second")
@@ -166,7 +166,7 @@ func init() {
 	pf.BoolVar(&flagNoProgress, "no-progress", false, "Don't show the batch progress bar or the spinner")
 	pf.BoolVar(&app.Defaults.AllowWrites, "allow-writes", app.Defaults.AllowWrites, "Allow CLI commands that aren't read-only")
 	pf.StringVar(&flagTenant, "tenant", "", "Saved tenant to use, by `name` (overrides the environment)")
-	pf.BoolVar(&app.Debug, "debug", false, "Use a throwaway config with no saved tenants, and keep secrets in memory only")
+	pf.BoolVar(&app.Debug, "debug", false, "Use a temporary config with no saved tenants, and keep secrets in memory only")
 	pf.StringVar(&flagFixtures, "fixtures", "", "Run against fake tenants, elements and CLI answers from a YAML `file` instead of real hardware")
 	pf.BoolVar(&flagDemo, "demo", false, "Start on the fake fleet iontk ships, signed in and loaded (or fixtures.yaml from the config directory)")
 	pf.StringVar(&flagViews, "views", "", "Read screen files from `path`, a folder or one file of rich-data views, instead of views/")
@@ -182,7 +182,7 @@ func init() {
 	pf.StringVar(&flagOrient, "orientation", "", "Row order for table and csv: {ion|command}, by element or by command (default from settings, else ion)")
 	pf.StringVar(&flagOut, "out", "", "Write the output to `file` (\"-\" for standard output; default from settings)")
 
-	inspectCmd.Flags().BoolVar(&flagInspectRaw, "raw", false, "Print each response body as it arrived, keyed by URL")
+	inspectCmd.Flags().BoolVar(&flagInspectRaw, "raw", false, "Print each response body as received, indexed by URL")
 
 	rootCmd.AddCommand(runCmd, shellCmd, inspectCmd, loginCmd, versionCmd, genFlagDocsCmd)
 	addOwn(rootCmd, "batch run", newBatchRunCmd("run"))

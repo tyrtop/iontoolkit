@@ -40,7 +40,7 @@ func (rt *Runtime) ListPath(name string, v map[string]string) (string, error) {
 	calls := rt.listCalls
 	rt.mu.RUnlock()
 	if calls == nil {
-		return "", fmt.Errorf("the element list declares no endpoints")
+		return "", fmt.Errorf("the element list defines no endpoints")
 	}
 	e, err := calls.SDWAN(name)
 	if err != nil {
@@ -505,7 +505,7 @@ func fleetCommands() []Command {
 		},
 		{
 			Name: "fleet.load", Slow: true,
-			Help: "fill the list, each tenant from its cache while fresh, else the portal, a stale cache standing in when it refuses: refresh=yes asks the portal first, follow=yes goes on to read HA and the columns",
+			Help: "fill the list, each tenant from its cache while fresh, else the portal, falling back to a stale cache when the portal won't answer: refresh=yes goes to the portal first, follow=yes goes on to read HA and the columns",
 			Args: []Arg{{Name: "refresh", Bool: true, Help: "ask the portal first"},
 				{Name: "follow", Bool: true, Help: "read HA and the columns of what the portal sent"}},
 			Run: func(rt *Runtime, c *Call) error {

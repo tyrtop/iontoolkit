@@ -150,8 +150,8 @@ func TestAFileThatCouldNotBindIsRefusedWithTheReason(t *testing.T) {
 		{"a verb iontk has not got", "actions:\n  x:\n    - post: /sdwan/v2.0/api/x\n", "post is not a verb"},
 		{"a place there is none of", "actions:\n  x:\n    - goto: the-moon\n", "the-moon"},
 		{"a setting there is none of", "actions:\n  x:\n    - set:\n        colour: red\n", `sets "colour"`},
-		{"a step that says nothing", "actions:\n  x:\n    - {}\n", "says nothing"},
-		{"an action with no steps", "actions:\n  x: []\n", "does nothing"},
+		{"a step that says nothing", "actions:\n  x:\n    - {}\n", "has zero verbs"},
+		{"an action with no steps", "actions:\n  x: []\n", "has zero steps"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

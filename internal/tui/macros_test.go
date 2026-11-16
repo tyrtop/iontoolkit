@@ -137,7 +137,7 @@ func TestAMacroNeedsSomethingToRunOn(t *testing.T) {
 	if got.phase == phaseRunning || got.events != nil {
 		t.Error("the macro ran with nothing selected")
 	}
-	if !strings.Contains(got.status, "nothing selected") {
+	if !strings.Contains(got.status, "no elements selected") {
 		t.Errorf("status = %q, want it to say what is missing", got.status)
 	}
 }
@@ -265,7 +265,7 @@ func TestEnterInMacroModeRunsTheArmedMacro(t *testing.T) {
 	m.runtime().RemoveMacro("risky")
 	next, _ = m.onPickEnter()
 	gone := next.(tuiModel)
-	if gone.mode() == modeMacro || !strings.Contains(gone.status, "gone") {
+	if gone.mode() == modeMacro || !strings.Contains(gone.status, "no longer exists") {
 		t.Errorf("mode = %v, status = %q, want macro mode dropped", gone.mode(), gone.status)
 	}
 }
@@ -561,7 +561,7 @@ func TestDeletingAMacroCanBeUndone(t *testing.T) {
 	}
 
 	next, _ = m.onMacroKey(tea.KeyPressMsg(tea.Key{Code: 'u', Text: "u"}), "u")
-	if got := next.(tuiModel).status; !strings.Contains(got, "nothing to undo") {
+	if got := next.(tuiModel).status; !strings.Contains(got, "no removed macro to undo") {
 		t.Errorf("status = %q with nothing left to undo", got)
 	}
 }

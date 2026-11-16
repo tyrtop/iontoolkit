@@ -72,7 +72,7 @@ func parseMenu(b []byte, runs func(string) bool) ([]menuEntry, error) {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
 	if len(spec.Entries) == 0 {
-		return nil, fmt.Errorf("no entries: a menu with none in it draws nothing")
+		return nil, fmt.Errorf("no entries: a menu with none in it shows an empty page")
 	}
 
 	out := make([]menuEntry, 0, len(spec.Entries))
@@ -114,7 +114,7 @@ func parseMenu(b []byte, runs func(string) bool) ([]menuEntry, error) {
 		out = append(out, menuEntry{label: label, action: menuActions[at].action, when: when})
 	}
 	if !hasAction(out, actQuit) {
-		return nil, fmt.Errorf("no quit entry: add quit, so the menu says how to leave")
+		return nil, fmt.Errorf("no quit entry: add quit, so the menu shows how to leave")
 	}
 	return out, nil
 }
@@ -157,7 +157,7 @@ func hasAction(entries []menuEntry, want menuAction) bool {
 func menuSeed(entries []menuEntry) string {
 	var b strings.Builder
 	b.WriteString("# The main menu, in order. A name on its own is the entry as iontk words\n")
-	b.WriteString("# it; give it a label of your own to change what it says.\n\n")
+	b.WriteString("# it; give it a label of your own to change what it shows.\n\n")
 	b.WriteString("kind: " + view.KindMenu + "\nentries:\n")
 	for _, e := range entries {
 		name := e.command

@@ -46,7 +46,7 @@ func savable(st *config.Store, file string) (string, error) {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("%s is not a file iontk reads its configuration from", file)
+	return "", fmt.Errorf("%s is not a file iontk gets its configuration from", file)
 }
 
 func saveCommand() runtime.Command {
@@ -112,9 +112,9 @@ func checkView(b []byte) error {
 		_, err = dataview.ParseOne(b)
 	case view.KindMenu:
 	case "":
-		err = fmt.Errorf("a file under %s/ says what it is: kind: %s", view.DirName, strings.Join(view.Kinds(), ", "))
+		err = fmt.Errorf("a file under %s/ has to name its kind: kind: %s", view.DirName, strings.Join(view.Kinds(), ", "))
 	default:
-		err = fmt.Errorf("this file is a %q, which iontk does not draw; the kinds are %s", kind, strings.Join(view.Kinds(), ", "))
+		err = fmt.Errorf("this file is a %q, which iontk does not render; the kinds are %s", kind, strings.Join(view.Kinds(), ", "))
 	}
 	return err
 }

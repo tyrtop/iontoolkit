@@ -217,7 +217,7 @@ func (m tuiModel) nudgeRole(role string) (tea.Model, tea.Cmd) {
 
 func (m tuiModel) undoDraft() (tea.Model, tea.Cmd) {
 	if len(m.themeUndo) == 0 {
-		m.status = "nothing to undo"
+		m.status = "no edits to undo"
 		return m, nil
 	}
 	last := len(m.themeUndo) - 1
@@ -227,7 +227,7 @@ func (m tuiModel) undoDraft() (tea.Model, tea.Cmd) {
 	next, cmd := m.saveDraft()
 	nm := next.(tuiModel)
 	if nm.status == "" {
-		left := "nothing left to undo"
+		left := "no edits left to undo"
 		if n := len(nm.themeUndo); n > 0 {
 			left = fmt.Sprintf("%d more to undo", n)
 		}
@@ -263,7 +263,7 @@ func (m tuiModel) resetRole(role string) (tea.Model, tea.Cmd) {
 	m = m.remember(m.themeDraft)
 	base, ok := ui.BuiltinTheme(m.themeDraft.Name)
 	if !ok {
-		m.status = m.themeDraft.Name + " is not a built-in, so there is nothing to go back to"
+		m.status = m.themeDraft.Name + " is not a built-in, so there's no original to go back to"
 		return m, nil
 	}
 	if role == spinnerRole {
@@ -361,7 +361,7 @@ func (m tuiModel) themeEditContent() []string {
 		if role == animRow {
 			out = append(out, cursor+ui.StyleGhost.Render(ui.Label(role))+
 				ui.StyleGhost.Render("placeholder")+
-				ui.StyleDim.Render("    nothing animates yet"))
+				ui.StyleDim.Render("    no animation yet"))
 			continue
 		}
 
@@ -383,7 +383,7 @@ func (m tuiModel) themeEditContent() []string {
 			ui.StyleElement.Render(shown))
 	}
 	return append(out, "", ui.StyleDim.Render(
-		"enter pick · ←→ cycle · t type · s/r whole theme · S/R this row · ctrl+d built-in · esc save"))
+		"enter pick · ←→ cycle · t type · s/r full theme · S/R this row · ctrl+d built-in · esc save"))
 }
 
 func (m tuiModel) actionRow(row string) string {
@@ -396,7 +396,7 @@ func (m tuiModel) actionRow(row string) string {
 			ui.StyleDim.Render("           the same scheme, shifted")
 	}
 	if len(m.themeUndo) == 0 {
-		return ui.StyleGhost.Render(row) + ui.StyleDim.Render("        nothing to undo yet")
+		return ui.StyleGhost.Render(row) + ui.StyleDim.Render("        no edits to undo yet")
 	}
 	return ui.StyleWarn.Render(row) +
 		ui.StyleDim.Render(fmt.Sprintf("        u · %d step(s) back", len(m.themeUndo)))
@@ -405,7 +405,7 @@ func (m tuiModel) actionRow(row string) string {
 var roleHelp = map[string]string{
 	"ok":            "something worked, and the ✓",
 	"err":           "something failed, and the ✗",
-	"warn":          "worth noticing, not a failure",
+	"warn":          "something to notice, not a failure",
 	"cmd":           "headings and command text",
 	"element":       "an element, tenant or value",
 	"row":           "the row a list is on",

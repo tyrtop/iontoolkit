@@ -101,13 +101,13 @@ func LoginSilent(ctx context.Context, tsg string, opt Options) (*Token, error) {
 	}
 	key := refusalKey(opt.DataDir, tsg)
 	if _, refused := silentRefused.Load(key); refused {
-		opt.log().Info("silent sign-in skipped", "tsg", tsg, "reason", "already refused for this profile")
-		return nil, fmt.Errorf("%w: a silent sign-in was already refused for this profile", ErrNoSession)
+		opt.log().Info("silent sign-in skipped", "tsg", tsg, "reason", "already turned down for this profile")
+		return nil, fmt.Errorf("%w: a silent sign-in was already rejected for this profile", ErrNoSession)
 	}
 	tok, err := login(ctx, tsg, opt, true)
 	if err != nil && ctx.Err() == nil {
 		silentRefused.Store(key, struct{}{})
-		opt.log().Info("silent sign-in refused", "tsg", tsg, "err", err)
+		opt.log().Info("silent sign-in rejected", "tsg", tsg, "err", err)
 		return nil, fmt.Errorf("%w: %v", ErrNoSession, err)
 	}
 	return tok, err
@@ -132,7 +132,7 @@ func loginToken(ctx context.Context, tsg string, opt Options, silent bool) (*Tok
 	log.Info("launching chrome", "data_dir", opt.DataDir, "chrome", opt.Chrome)
 	code, err := codeFromBrowser(ctx, p.authorizeURL(opt.authorize(), tsg, silent), p.state, opt, silent)
 	if err != nil {
-		log.Warn("browser leg failed", "err", err)
+		log.Warn("browser part of the sign-in failed", "err", err)
 		return nil, err
 	}
 

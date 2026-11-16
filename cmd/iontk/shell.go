@@ -79,7 +79,7 @@ func runShell(ctx context.Context, eid string) error {
 		return err
 	}
 	if s.Hung() {
-		return fmt.Errorf("element %s stopped answering", eid)
+		return fmt.Errorf("element %s stopped responding", eid)
 	}
 	return s.Err()
 }

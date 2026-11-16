@@ -157,7 +157,7 @@ func parse(f Field, s string) (any, error) {
 	case TypeInt:
 		n, err := strconv.Atoi(s)
 		if err != nil {
-			return nil, fmt.Errorf("%s is a whole number, not %q", f.Label, s)
+			return nil, fmt.Errorf("%s is an integer, not %q", f.Label, s)
 		}
 		return float64(n), nil
 	case TypeList:

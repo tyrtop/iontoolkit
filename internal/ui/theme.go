@@ -149,7 +149,7 @@ var TabModeBlurb = map[string]string{
 	TabRotate: "a color per position in the bar",
 	TabByType: "one color for shells, one for data",
 	TabBoth:   "a rotation of its own per kind",
-	TabShared: "one rotation, counted within the kind",
+	TabShared: "one rotation, tallied within the kind",
 }
 
 func KnownTabMode(mode string) bool {
@@ -812,7 +812,7 @@ func SaveUserTheme(path string, t Theme) error {
 	if b, err := os.ReadFile(path); err == nil {
 		existing, perr := ParseThemes(b)
 		if perr != nil {
-			return fmt.Errorf("%s will not parse, so it was left alone: %w", filepath.Base(path), perr)
+			return fmt.Errorf("%s will not parse, so it was left as is: %w", filepath.Base(path), perr)
 		}
 		set.Themes = existing
 	} else if !os.IsNotExist(err) {
@@ -931,7 +931,7 @@ func DeleteUserTheme(path, name string) error {
 	}
 	existing, err := ParseThemes(b)
 	if err != nil {
-		return fmt.Errorf("%s will not parse, so it was left alone: %w", filepath.Base(file), err)
+		return fmt.Errorf("%s will not parse, so it was left as is: %w", filepath.Base(file), err)
 	}
 
 	i := indexOf(existing, name)

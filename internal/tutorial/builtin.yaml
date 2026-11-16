@@ -4,15 +4,15 @@ pages:
   - name: welcome
     box: yes
     text:
-      - placeholder - a box, drawn over whatever page you are on.
-      - A box says something; it does not ask you to do anything.
+      - placeholder - a box, shown over whatever page you are on.
+      - A box shows a message; it does not ask you to do anything.
       - ""
       - enter to accept it
 
   - name: the-menu
     go: menu
     text:
-      - placeholder - the bar, on the menu the tutorial just went to
+      - placeholder - the bar, on the menu the tutorial just moved to
       - enter to accept
 
   - name: open-the-list
@@ -24,7 +24,7 @@ pages:
 
   - name: the-list
     text:
-      - placeholder - the bar again, with nothing to do but read it
+      - placeholder - the bar again; all you do here is read it
       - enter to accept
 
   - name: open-the-filter
@@ -43,7 +43,7 @@ pages:
     show: no
     text:
       - "placeholder - show: no keeps this page in the file and out of the run"
-      - nothing accepts it, because it is never drawn
+      - no key accepts it, because it is never shown
 
   - name: tick-a-row
     text:
@@ -126,8 +126,8 @@ pages:
   - name: jump-to-the-list
     go: elements
     text:
-      - placeholder - from here on the tutorial does the walking
-      - the element list, without being asked for. enter to accept
+      - placeholder - from here on the tutorial goes to each page itself
+      - the element list, opened without you asking. enter to accept
 
   - name: jump-to-settings
     go: settings

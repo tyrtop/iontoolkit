@@ -1289,8 +1289,8 @@ func TestReattachingAfterAnExitOpensAFreshSession(t *testing.T) {
 
 	mm, cmd := m.reopenLastTab()
 	got := mm.(tuiModel)
-	if got.status == "nothing to reattach" {
-		t.Error(`status = "nothing to reattach", want alt+t to open a fresh session`)
+	if got.status == "no closed session to reattach" {
+		t.Error(`status = "no closed session to reattach", want alt+t to open a fresh session`)
 	}
 	if cmd == nil {
 		t.Error("reopenLastTab() cmd = nil, want it to dial the element again")
@@ -1315,8 +1315,8 @@ func TestReattachingToAFailedDetachedSessionOpensAFreshOne(t *testing.T) {
 
 	mm, cmd := m.reopenLastTab()
 	got := mm.(tuiModel)
-	if got.status == "nothing to reattach" {
-		t.Error(`status = "nothing to reattach", want a fresh session instead of a dead tab`)
+	if got.status == "no closed session to reattach" {
+		t.Error(`status = "no closed session to reattach", want a fresh session instead of a dead tab`)
 	}
 	if cmd == nil {
 		t.Error("reopenLastTab() cmd = nil, want it to dial the element again")
@@ -1382,7 +1382,7 @@ func TestAHungSessionSaysSoAndOffersAReconnect(t *testing.T) {
 	m := hungModel(t)
 
 	view := plain(sessionText(m))
-	if !strings.Contains(view, "stopped answering") {
+	if !strings.Contains(view, "stopped responding") {
 		t.Errorf("the pane does not say the connection is hung:\n%s", view)
 	}
 	if !strings.Contains(view, "alt+r") {
@@ -1573,7 +1573,7 @@ func TestAltROnALiveSessionSaysSo(t *testing.T) {
 	if cmd != nil || after.sessions().Count() != 1 {
 		t.Error("alt+r redialled a session that was still answering")
 	}
-	if !strings.Contains(after.status, "still answering") {
+	if !strings.Contains(after.status, "still responding") {
 		t.Errorf("status = %q, want it to say why nothing happened", after.status)
 	}
 	if strings.Contains(conn.sent(), "\x1b") {
