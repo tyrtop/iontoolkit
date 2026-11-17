@@ -375,7 +375,7 @@ Don't hide other errors. Raise them again.
 local _, res = ctx.run("batch.run", { elements = table.concat(ids, ","), cmd = "dump spoke-ha status" })
 for _, r in ipairs(res.Results or {}) do
   if r.error then
-    ctx.status(r.name .. " failed: " .. r.error)
+    ctx.status((r.name or r.element_id) .. " failed: " .. r.error)
   else
     ctx.status(r.name .. ": " .. r.commands[1].output)
   end

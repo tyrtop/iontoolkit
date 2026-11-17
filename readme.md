@@ -196,8 +196,12 @@ A workflow is a folder with a `workflow.yaml` and a `main.lua`. Longer jobs can 
 
       local _, res = ctx.run("batch.run", { elements = table.concat(ids, ","), cmd = "dump spoke-ha status" })
       for _, r in ipairs(res.Results or {}) do
-        local active = r.commands[1].output:match("Active%s*:%s*(%a+)")
-        ctx.status(r.name .. "  active " .. tostring(active))
+        if r.error then
+          ctx.status((r.name or r.element_id) .. "  failed: " .. r.error)
+        else
+          local active = r.commands[1].output:match("Active%s*:%s*(%a+)")
+          ctx.status(r.name .. "  active " .. tostring(active))
+        end
       end
 
       return { site = site.name, routers = #ids }
