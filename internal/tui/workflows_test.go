@@ -1,0 +1,246 @@
+package tui
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"tyrtop.com/iontk/internal/app"
+
+	"tyrtop.com/iontk/internal/sase/write"
+)
+
+const describeWorkflow = `
+title: Describe port 1
+description: sets interface 1's description on one element
+inputs:
+  - name: element
+    prompt: Element ID
+    required: true
+  - name: site
+    prompt: Site ID
+    required: true
+  - name: text
+    default: uplink to core
+`
+
+const describeMain = `
+return function(ctx)
+  ctx.run('write what=interface elements=' .. ctx.input.element .. ' match=1 description="' .. ctx.input.text .. '"')
+  ctx.status("port 1 → " .. ctx.input.text)
+end
+`
+
+func workflowTUI(t *testing.T) (tuiModel, string, string) {
+	t.Helper()
+	m, set := fixtureTUIWith(t, compareFixtureYAML)
+	dir := filepath.Join(t.TempDir(), "workflows", "describe")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(dir, "workflow.yaml"), []byte(describeWorkflow), 0o600)
+	os.WriteFile(filepath.Join(dir, "main.lua"), []byte(describeMain), 0o600)
+	app.WorkflowsFolder = filepath.Dir(dir)
+	app.WritesFile = filepath.Join(t.TempDir(), "writes.yaml")
+	verified := strings.Replace(write.BuiltinYAML(), "    title: Interface\n", "    title: Interface\n    verified: true\n", 1)
+	os.WriteFile(app.WritesFile, []byte(verified), 0o600)
+	t.Cleanup(func() {
+		app.WorkflowsFolder, app.WritesFile = "", ""
+		_ = os.Remove(filepath.Join(m.store().Root, write.LogName))
+	})
+	app.ReloadCommands(m.runtime())
+	app.ReloadWrites(m.runtime())
+	if w := m.runtime().Warnings(); len(w) > 0 {
+		t.Fatal(w)
+	}
+
+	el := set.Tenants[0].Elements[0]
+	return m, el.ID, siteOf(t, m, el.ID)
+}
+
+func siteOf(t *testing.T, m tuiModel, eid string) string {
+	t.Helper()
+	c := m.pool().Get(m.tenant().TSGID)
+	el, err := c.LookupElement(context.Background(), eid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return el.SiteID
+}
+
+func finishWorkflow(t *testing.T, m tuiModel) tuiModel {
+	t.Helper()
+	for msg := range m.wf.events {
+		next, _ := m.Update(msg)
+		m = next.(tuiModel)
+	}
+	if m.wf.step != wfDone {
+		t.Fatalf("the run did not finish, step %d", m.wf.step)
+	}
+	return m
+}
+
+func openDescribe(t *testing.T, m tuiModel, eid, site string) tuiModel {
+	t.Helper()
+	m.phase = phaseMenu
+	next, _ := m.openWorkflows()
+	m = next.(tuiModel)
+	if got := plain(m.viewWorkflows()); !strings.Contains(got, "describe") || !strings.Contains(got, "Describe port 1") {
+		t.Fatalf("the list does not offer the workflow:\n%s", got)
+	}
+	m, _ = typeKey(m, "enter")
+	if m.wf.step != wfForm {
+		t.Fatalf("enter did not open the inputs, step %d", m.wf.step)
+	}
+	m.wf.inputs[0].SetValue(eid)
+	m.wf.inputs[1].SetValue(site)
+	return m
+}
+
+func TestWorkflowsIsOnTheMainMenu(t *testing.T) {
+	m, _, _ := workflowTUI(t)
+	found := false
+	for _, e := range m.menuEntries() {
+		found = found || (e.label == "Workflows" && e.action == actWorkflows)
+	}
+	if !found {
+		t.Errorf("menu = %+v", m.menuEntries())
+	}
+}
+
+func TestAWorkflowDryRunsFirstAndDoesItOnD(t *testing.T) {
+	m, eid, site := workflowTUI(t)
+	m = openDescribe(t, m, eid, site)
+
+	m, _ = typeKey(m, "enter")
+	if m.wf.step != wfRunning || m.wf.doit {
+		t.Fatalf("enter did not start a dry run: step %d doit %v err %q", m.wf.step, m.wf.doit, m.wf.err)
+	}
+	m = finishWorkflow(t, m)
+	page := plain(m.viewWorkflows())
+	for _, want := range []string{"dry run: 1 change(s)", "→ uplink to core", "port 1 → uplink to core", "d do it"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("result lacks %q:\n%s", want, page)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(m.store().Root, write.LogName)); !os.IsNotExist(err) {
+		t.Error("a dry run wrote to writes.log")
+	}
+
+	m, _ = typeKey(m, "d")
+	if m.wf.step != wfRunning || !m.wf.doit {
+		t.Fatalf("d did not do it: %q", m.wf.err)
+	}
+	m = finishWorkflow(t, m)
+	if m.wf.err != "" || !strings.Contains(plain(m.viewWorkflows()), "1 sent, 0 failed") {
+		t.Errorf("after doing it:\n%s", plain(m.viewWorkflows()))
+	}
+
+	c := m.pool().Get(m.tenant().TSGID)
+	b, err := c.GetJSON(context.Background(), "/sdwan/v4.21/api/sites/"+site+"/elements/"+eid+"/interfaces")
+	if err != nil || !strings.Contains(string(b), `"description":"uplink to core"`) {
+		t.Errorf("interfaces after doing it = %s, %v", b, err)
+	}
+}
+
+func TestMissingInputsStopBeforeAnythingRuns(t *testing.T) {
+	m, _, _ := workflowTUI(t)
+	m = openDescribe(t, m, "", "")
+	m, cmd := typeKey(m, "enter")
+	if cmd != nil || m.wf.step != wfForm || !strings.Contains(m.wf.err, "element is required") {
+		t.Errorf("step %d, err %q", m.wf.step, m.wf.err)
+	}
+}
+
+func TestTheWorkflowListFiltersLikeTheMacroList(t *testing.T) {
+	m, _, _ := workflowTUI(t)
+	m.phase = phaseMenu
+	next, _ := m.openWorkflows()
+	m = next.(tuiModel)
+
+	m, _ = typeKey(m, "/")
+	for _, k := range []string{"n", "o", "p", "e"} {
+		m, _ = typeKey(m, k)
+	}
+	if got := plain(m.viewWorkflows()); !strings.Contains(got, "zero matches for the filter") {
+		t.Errorf("a filter matching nothing still lists:\n%s", got)
+	}
+	m, _ = typeKey(m, "esc")
+	if got := plain(m.viewWorkflows()); !strings.Contains(got, "Describe port 1") {
+		t.Errorf("esc did not clear the filter:\n%s", got)
+	}
+	if target, ok := m.editTarget(); !ok || !strings.HasSuffix(target.path, "workflow.yaml") {
+		t.Errorf("e would edit %+v, want the workflow's own workflow.yaml", target)
+	}
+}
+
+func TestAPasteLandsInTheFocusedWorkflowInputAndTheFilter(t *testing.T) {
+	m, eid, site := workflowTUI(t)
+	m = openDescribe(t, m, "", "")
+	next, _ := m.Update(tea.PasteMsg{Content: eid})
+	m = next.(tuiModel)
+	m, _ = typeKey(m, "tab")
+	next, _ = m.Update(tea.PasteMsg{Content: site})
+	m = next.(tuiModel)
+	if got := m.formValues(); got["element"] != eid || got["site"] != site {
+		t.Errorf("pasted values = %v, want element %s site %s", got, eid, site)
+	}
+
+	m.phase = phaseMenu
+	next, _ = m.openWorkflows()
+	m = next.(tuiModel)
+	m, _ = typeKey(m, "/")
+	next, _ = m.Update(tea.PasteMsg{Content: "nope"})
+	m = next.(tuiModel)
+	if got := plain(m.viewWorkflows()); !strings.Contains(got, "zero matches for the filter") {
+		t.Errorf("a pasted filter did not filter:\n%s", got)
+	}
+}
+
+func TestTheWorkflowFormLinesUpItsFieldsAndLeavesOutTheRunsFile(t *testing.T) {
+	m, eid, site := workflowTUI(t)
+	m.width, m.height = 100, 30
+	m = openDescribe(t, m, eid, site)
+	for _, a := range m.wf.cmd.Args {
+		if a.Name == app.EachInput {
+			t.Fatalf("the form asks for %s, a runs file, though it runs once", a.Name)
+		}
+	}
+	for i := range m.wf.inputs {
+		m.wf.inputs[i].SetValue("v")
+	}
+	out := plain(m.viewWorkflows())
+	if strings.Contains(out, "Run once for each row") {
+		t.Errorf("the runs file is on the form:\n%s", out)
+	}
+	col := -1
+	for _, a := range m.wf.cmd.Args {
+		for _, line := range strings.Split(out, "\n") {
+			if !strings.HasPrefix(strings.TrimPrefix(strings.TrimPrefix(line, "> "), "  "), a.Name+" ") {
+				continue
+			}
+			i := len(line) - len(strings.TrimLeft(line[2+len(a.Name):], " "))
+			if col >= 0 && i != col {
+				t.Errorf("%s's box starts at column %d, the others at %d:\n%s", a.Name, i, col, out)
+			}
+			col = i
+			if a.Required && !strings.Contains(line, "required") {
+				t.Errorf("%s is required and the form does not say so:\n%s", a.Name, line)
+			}
+		}
+	}
+	if col < 0 {
+		t.Fatalf("no field lines:\n%s", out)
+	}
+}
+
+func TestAWorkflowLineOfSeveralLinesIsShownAsSeveral(t *testing.T) {
+	m := tuiModel{}
+	mm, _ := m.onWorkflowLine(wfLineMsg("Active: true\nPeer Connected: true"))
+	if got := mm.(tuiModel).wf.lines; len(got) != 2 || got[1] != "Peer Connected: true" {
+		t.Errorf("lines = %q, want one entry per line of output", got)
+	}
+}

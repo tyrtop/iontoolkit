@@ -134,7 +134,7 @@ func TestFavouriteSlots(t *testing.T) {
 	}{
 		{"slot zero", 0, "uptime", "outside 1-9"},
 		{"past the last slot", 10, "uptime", "outside 1-9"},
-		{"nothing to save", 2, "   ", "nothing to save"},
+		{"nothing to save", 2, "   ", "no command to save"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := c.SetFavourite(tc.slot, tc.cmd, "")

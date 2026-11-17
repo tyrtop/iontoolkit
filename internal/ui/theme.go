@@ -149,7 +149,7 @@ var TabModeBlurb = map[string]string{
 	TabRotate: "a color per position in the bar",
 	TabByType: "one color for shells, one for data",
 	TabBoth:   "a rotation of its own per kind",
-	TabShared: "one rotation, counted within the kind",
+	TabShared: "one rotation, tallied within the kind",
 }
 
 func KnownTabMode(mode string) bool {
@@ -198,8 +198,6 @@ type themeSet struct {
 var hidden []string
 
 func HideThemes(names []string) { hidden = slices.Clone(names) }
-
-func HiddenThemes() []string { return slices.Clone(hidden) }
 
 func IsHidden(name string) bool {
 	for _, h := range hidden {
@@ -331,7 +329,7 @@ func ParseThemes(b []byte) ([]Theme, error) {
 	return set.Themes, nil
 }
 
-// lipgloss renders an unparseable color as nothing, not as wrong
+// lipgloss draws an invalid color as blank, with no error
 func (t Theme) validate() error {
 	if strings.TrimSpace(t.Name) == "" {
 		return fmt.Errorf("a theme needs a name")
@@ -537,6 +535,43 @@ func Apply(t Theme) {
 
 func CurrentTheme() Theme { return current }
 
+func StyleNames() []string {
+	return []string{"ok", "err", "warn", "cmd", "element", "hot", "row",
+		"divider", "spinner", "dim", "ghost", "bold", "plain"}
+}
+
+func StyleNamed(name string) (lipgloss.Style, bool) {
+	switch name {
+	case "ok":
+		return StyleOK, true
+	case "err":
+		return StyleErr, true
+	case "warn":
+		return StyleWarn, true
+	case "cmd":
+		return StyleCmd, true
+	case "element":
+		return StyleElement, true
+	case "hot":
+		return StyleHot, true
+	case "row":
+		return StyleRow, true
+	case "divider":
+		return StyleDivider, true
+	case "spinner":
+		return StyleSpinner, true
+	case "dim":
+		return StyleDim, true
+	case "ghost":
+		return StyleGhost, true
+	case "bold":
+		return StyleBold, true
+	case "plain":
+		return lipgloss.NewStyle(), true
+	}
+	return lipgloss.NewStyle(), false
+}
+
 func StyleTab(kind TabKind, ring, nth int, active bool) lipgloss.Style {
 	s := tabStyle(kind, ring, nth)
 	if active {
@@ -595,8 +630,6 @@ func terminalColor(spec string) color.Color {
 var profile colorprofile.Profile
 
 func SetProfile(p colorprofile.Profile) { profile = p }
-
-func Profile() colorprofile.Profile { return profile }
 
 func TrueColor() bool {
 	return profile == colorprofile.Unknown || profile >= colorprofile.TrueColor
@@ -779,7 +812,7 @@ func SaveUserTheme(path string, t Theme) error {
 	if b, err := os.ReadFile(path); err == nil {
 		existing, perr := ParseThemes(b)
 		if perr != nil {
-			return fmt.Errorf("%s will not parse, so it was left alone: %w", filepath.Base(path), perr)
+			return fmt.Errorf("%s will not parse, so it was left as is: %w", filepath.Base(path), perr)
 		}
 		set.Themes = existing
 	} else if !os.IsNotExist(err) {
@@ -858,6 +891,14 @@ func (t Theme) RoleStyle(role string) lipgloss.Style {
 const themeFileHeader = "# Written by iontk's theme editor. One scheme to a file; a scheme here\n" +
 	"# replaces the built-in of the same name, and deleting the file puts it back.\n"
 
+func ThemeYAML(t Theme) (string, error) {
+	b, err := yaml.Marshal(t)
+	if err != nil {
+		return "", fmt.Errorf("encode %s: %w", t.Name, err)
+	}
+	return themeFileHeader + string(b), nil
+}
+
 func saveThemeFile(dir string, t Theme) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("make %s: %w", dir, err)
@@ -890,7 +931,7 @@ func DeleteUserTheme(path, name string) error {
 	}
 	existing, err := ParseThemes(b)
 	if err != nil {
-		return fmt.Errorf("%s will not parse, so it was left alone: %w", filepath.Base(file), err)
+		return fmt.Errorf("%s will not parse, so it was left as is: %w", filepath.Base(file), err)
 	}
 
 	i := indexOf(existing, name)
@@ -936,6 +977,19 @@ func RemoveOverrides(path string) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+func UserThemePath(path, name string) (string, bool) {
+	if path == "" {
+		return "", false
+	}
+	if file, ok := userThemeSource(path, name); ok {
+		return file, true
+	}
+	if pathIsFile(path) {
+		return path, true
+	}
+	return filepath.Join(path, ThemeFileName(name)), true
 }
 
 func IsUserTheme(path, name string) bool {

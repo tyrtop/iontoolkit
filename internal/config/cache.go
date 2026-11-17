@@ -13,14 +13,17 @@ import (
 const CacheFresh = 15 * time.Minute
 
 type ElementCache struct {
-	TSGID     string            `json:"tsg_id"`
-	FetchedAt time.Time         `json:"fetched_at"`
-	Elements  []api.Element     `json:"elements"`
-	Sites     map[string]string `json:"sites,omitempty"`
-	HA        map[string]string `json:"ha,omitempty"`
+	TSGID     string                       `json:"tsg_id"`
+	FetchedAt time.Time                    `json:"fetched_at"`
+	Elements  []api.Element                `json:"elements"`
+	Sites     map[string]string            `json:"sites,omitempty"`
+	HA        map[string]string            `json:"ha,omitempty"`
+	Cells     map[string]map[string]string `json:"cells,omitempty"`
 }
 
 func (s *Store) SaveHA(tsg string, states map[string]string) error {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	c, err := s.Cache(tsg)
 	if err != nil {
 		return err
@@ -34,7 +37,29 @@ func (s *Store) SaveHA(tsg string, states map[string]string) error {
 	for eid, w := range states {
 		c.HA[eid] = w
 	}
-	return s.SaveCache(c)
+	return s.saveCache(c)
+}
+
+func (s *Store) SaveCells(tsg, col string, cells map[string]string) error {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	c, err := s.Cache(tsg)
+	if err != nil {
+		return err
+	}
+	if c == nil {
+		return nil
+	}
+	if c.Cells == nil {
+		c.Cells = map[string]map[string]string{}
+	}
+	if c.Cells[col] == nil {
+		c.Cells[col] = map[string]string{}
+	}
+	for eid, text := range cells {
+		c.Cells[col][eid] = text
+	}
+	return s.saveCache(c)
 }
 
 func (s *Store) cacheDir() string { return filepath.Join(s.Root, "cache") }
@@ -59,6 +84,36 @@ func (s *Store) Cache(tsg string) (*ElementCache, error) {
 }
 
 func (s *Store) SaveCache(c *ElementCache) error {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	old, err := s.Cache(c.TSGID)
+	if err != nil || old == nil {
+		return s.saveCache(c)
+	}
+	merged := *c
+	merged.HA = old.HA
+	for eid, w := range c.HA {
+		if merged.HA == nil {
+			merged.HA = map[string]string{}
+		}
+		merged.HA[eid] = w
+	}
+	merged.Cells = old.Cells
+	for col, cells := range c.Cells {
+		if merged.Cells == nil {
+			merged.Cells = map[string]map[string]string{}
+		}
+		if merged.Cells[col] == nil {
+			merged.Cells[col] = map[string]string{}
+		}
+		for eid, text := range cells {
+			merged.Cells[col][eid] = text
+		}
+	}
+	return s.saveCache(&merged)
+}
+
+func (s *Store) saveCache(c *ElementCache) error {
 	b, err := json.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("encode cache: %w", err)

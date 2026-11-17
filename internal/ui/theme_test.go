@@ -691,3 +691,24 @@ func TestRemoveOverridesLeavesTheUsersOwnSchemes(t *testing.T) {
 		t.Error("a scheme of the user's own was removed")
 	}
 }
+
+func TestEveryNameAFileMayDrawInResolves(t *testing.T) {
+	UseTheme("classic")
+	for _, name := range StyleNames() {
+		if _, ok := StyleNamed(name); !ok {
+			t.Errorf("StyleNames offers %q and StyleNamed does not answer for it", name)
+		}
+	}
+	if _, ok := StyleNamed("puce"); ok {
+		t.Error("an unknown name resolved, so a misspelled role would draw nothing and say nothing")
+	}
+	for _, role := range RoleNames() {
+		switch role {
+		case "background", "other", "border", "spinner_color":
+			continue
+		}
+		if _, ok := StyleNamed(role); !ok {
+			t.Errorf("the theme has a %q role that a file cannot name", role)
+		}
+	}
+}

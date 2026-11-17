@@ -1,13 +1,14 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"tyrtop.com/iontk/internal/app"
 	"tyrtop.com/iontk/internal/ioncmd"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/ioncli"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -53,7 +54,7 @@ func (m tuiModel) closeSlash() tuiModel {
 
 func (m tuiModel) catalog() []string {
 	all := ioncmd.Embedded()
-	if app.Defaults.AllowWrites || m.cfg.AllowWrites {
+	if m.runtime().WritesAllowed() {
 		return all
 	}
 	return ioncmd.ReadOnly(all, ioncli.IsReadOnly)
@@ -171,7 +172,7 @@ func (m tuiModel) activateSlash() (tea.Model, tea.Cmd) {
 			m.slashInput.Blur()
 			return m, nil
 		case "login":
-			s := m.sessions.Active()
+			s := m.frontSession()
 			if s == nil {
 				return m.closeSlash(), nil
 			}
@@ -208,12 +209,11 @@ func (m tuiModel) activateSlash() (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) insertCommand(text string) (tea.Model, tea.Cmd) {
-	if !app.Defaults.AllowWrites && !m.cfg.AllowWrites && !ioncli.IsReadOnly(text) {
+	switch err := m.runtime().InsertLine(text); {
+	case errors.Is(err, runtime.ErrLoggingIn):
+		m.status = err.Error()
+	case err != nil:
 		m.status = "not read-only: " + text
-		return m.closeSlash(), nil
-	}
-	if s := m.sessions.Active(); s != nil && s.Err() == nil {
-		s.Insert(text + " ")
 	}
 	return m.closeSlash(), nil
 }
@@ -310,7 +310,7 @@ func (m tuiModel) viewSlash() string {
 	case slashDebug:
 		b.WriteString(ui.StyleCmd.Render("/debug") + "\n\n")
 		cols, rows := m.paneSize()
-		s := m.sessions.Active()
+		s := m.frontSession()
 		if s == nil {
 			b.WriteString(ui.StyleDim.Render("  no active session") + "\n")
 		} else {

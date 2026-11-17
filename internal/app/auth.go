@@ -38,7 +38,9 @@ func BrowserSource(f Flags, httpClient *http.Client, st *config.Store) *saseauth
 	save := func(rt string) error {
 		return st.Secrets.Set(config.RefreshTokenKey(f.TSGID), rt)
 	}
-	return saseauth.NewSource(f.TSGID, stored, opt, save)
+	src := saseauth.NewSource(f.TSGID, stored, opt, save)
+	src.UseStored(func() (string, error) { return st.Secrets.Get(config.RefreshTokenKey(f.TSGID)) })
+	return src
 }
 
 var seeds sync.Map
@@ -84,6 +86,9 @@ func seed(st *config.Store, f *fixture.Set) error {
 		cfg.LastTenant = tenants[0].Name
 	}
 	for _, t := range tenants {
+		if err := st.DropCache(t.TSGID); err != nil {
+			return fmt.Errorf("seed fixture tenant %s: %w", t.Name, err)
+		}
 		if err := st.Secrets.Set(config.ClientSecretKey(t.TSGID), "fixture"); err != nil {
 			return fmt.Errorf("seed fixture tenant %s: %w", t.Name, err)
 		}

@@ -3,14 +3,15 @@ package dataview
 import (
 	"strings"
 	"testing"
+	"tyrtop.com/iontk/internal/endpoint"
 
 	"tyrtop.com/iontk/internal/sase/ioncli"
 )
 
 const dumpInterfaceStatus4 = `Interface	: 4
 Device		: e382
-ID		: 1724777596590008596
-MAC Address	: 04:47:2a:18:0e:05
+ID		: 1000000000000000596
+MAC Address	: 02:00:00:00:00:05
 State		: down
 Last Change	: 2026-07-18 13:35:26.686 (2190h12m13s ago)
 Status		: Not connected
@@ -23,7 +24,7 @@ func TestCLIHelpersReadDeviceOutput(t *testing.T) {
 		want string
 	}{
 		{"a key and its value", `{{ kv .out "State" }}`, "down"},
-		{"a key holding a space", `{{ kv .out "MAC Address" }}`, "04:47:2a:18:0e:05"},
+		{"a key holding a space", `{{ kv .out "MAC Address" }}`, "02:00:00:00:00:05"},
 		{"a key that is a prefix of another", `{{ kv .out "Status" }}`, "Not connected"},
 		{"a key the firmware did not print", `{{ kv .out "Speed" }}`, ""},
 		{"case does not matter", `{{ kv .out "state" }}`, "down"},
@@ -117,8 +118,11 @@ func TestRenderCompareMarksEachRow(t *testing.T) {
 	set, err := Parse([]byte(`
 views:
   - name: Check
+    endpoints:
+      - name: el
+        path: /sdwan/v3.2/api/elements/{element_id}
     fetch:
-      el: /sdwan/v3.2/api/elements/{{ .element_id }}
+      el: el
     sections:
       - title: Device
         rows:
@@ -126,7 +130,7 @@ views:
             value: "{{ .el.name }}"
     compare:
       fetch:
-        el: /sdwan/v3.2/api/elements/{{ .element_id }}
+        el: el
       commands:
         dev: dump device status
       rows:
@@ -179,10 +183,15 @@ views:
 }
 
 func TestRenderCompareReportsAFailedFetch(t *testing.T) {
+	calls, err := endpoint.Build("Check", "", nil, []endpoint.Endpoint{{Name: "el", Path: "/sdwan/v3.2/api/elements/{element_id}"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	v := View{
-		Name: "Check",
+		Name:  "Check",
+		calls: calls,
 		Compare: &Compare{
-			Fetch:    map[string]string{"el": "/sdwan/v3.2/api/elements/{{ .element_id }}"},
+			Fetch:    map[string]string{"el": "el"},
 			Commands: map[string]string{"dev": "dump device status"},
 			Rows: []CompareRow{{
 				Label:  "Serial",
@@ -221,7 +230,7 @@ func TestLoadRejectsABadCompareBlock(t *testing.T) {
 		{
 			name: "no rows",
 			yaml: `views: [{name: X, sections: [{title: T, rows: [{label: L, value: V}]}], compare: {commands: {a: "dump device status"}}}]`,
-			want: "compares nothing",
+			want: "compares zero rows",
 		},
 		{
 			name: "nothing asked of the device",
@@ -235,7 +244,7 @@ func TestLoadRejectsABadCompareBlock(t *testing.T) {
 		},
 		{
 			name: "a fetch outside the api",
-			yaml: `views: [{name: X, sections: [{title: T, rows: [{label: L, value: V}]}], compare: {fetch: {a: /iam/v1/tokens}, commands: {a: help}, rows: [{label: L, portal: P, device: D}]}}]`,
+			yaml: `views: [{name: X, sections: [{title: T, rows: [{label: L, value: V}]}], endpoints: [{name: a, path: /iam/v1/tokens}], compare: {fetch: {a: a}, commands: {a: help}, rows: [{label: L, portal: P, device: D}]}}]`,
 			want: "does not start with /sdwan/",
 		},
 	}

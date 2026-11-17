@@ -8,14 +8,14 @@ import (
 	"testing"
 )
 
-// The shape here is the one the portal actually returns, nested children and all.
+// as the portal actually returns it, nested children and all
 const tenancyBody = `{"items":[
-  {"id":"1643707006","display_name":"CIS root","vertical":"Telecommunications","children":[
-     {"id":"1750385018","display_name":"Reseller","children":[
-        {"id":"1984021017","display_name":"Tractor Supply Co. 1984021017","parent_id":"1750385018"}
+  {"id":"1600000006","display_name":"Core root","vertical":"Telecommunications","children":[
+     {"id":"1700000018","display_name":"Reseller","children":[
+        {"id":"1900000017","display_name":"Trident Supply Co. 1900000017","parent_id":"1700000018"}
      ]}
   ]},
-  {"id":"1538107912","display_name":"NIAGARA BOTTLING, LLC-145595"}
+  {"id":"1500000012","display_name":"NORWOOD BOTTLING, LLC-100001"}
 ],"count":2}`
 
 func tenancyServer(t *testing.T, status int, body string) (*httptest.Server, *string) {
@@ -45,10 +45,10 @@ func TestListTenantsFlattensTheHierarchy(t *testing.T) {
 	}
 
 	want := []struct{ name, id string }{
-		{"CIS root", "1643707006"},
-		{"NIAGARA BOTTLING, LLC-145595", "1538107912"},
-		{"Reseller", "1750385018"},
-		{"Tractor Supply Co. 1984021017", "1984021017"},
+		{"Core root", "1600000006"},
+		{"NORWOOD BOTTLING, LLC-100001", "1500000012"},
+		{"Reseller", "1700000018"},
+		{"Trident Supply Co. 1900000017", "1900000017"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d tenants, want %d: %+v", len(got), len(want), got)
@@ -63,13 +63,13 @@ func TestListTenantsFlattensTheHierarchy(t *testing.T) {
 	for _, tn := range got {
 		byID[tn.ID] = tn
 	}
-	if p := byID["1984021017"].ParentID; p != "1750385018" {
+	if p := byID["1900000017"].ParentID; p != "1700000018" {
 		t.Errorf("ParentID = %q, want the nesting preserved", p)
 	}
-	if d := byID["1984021017"].Depth; d != 2 {
+	if d := byID["1900000017"].Depth; d != 2 {
 		t.Errorf("Depth = %d, want 2 for a grandchild", d)
 	}
-	if d := byID["CIS root"].Depth; d != 0 {
+	if d := byID["Core root"].Depth; d != 0 {
 		t.Errorf("root Depth = %d, want 0", d)
 	}
 }
@@ -127,7 +127,7 @@ func TestListTenantsEdgeCases(t *testing.T) {
 }
 
 func TestListTenantsDefaultsToTheRealEndpoint(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, TenancyURL+"?hierarchy=true", nil)
+	req, err := http.NewRequest(http.MethodGet, (Options{}).url("tenant_service_groups"), nil)
 	if err != nil {
 		t.Fatalf("the default endpoint is not a usable URL: %v", err)
 	}

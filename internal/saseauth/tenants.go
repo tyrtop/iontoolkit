@@ -10,8 +10,6 @@ import (
 	"strings"
 )
 
-const TenancyURL = "https://api.apps.paloaltonetworks.com/tenancy/v1/tenant_service_groups"
-
 type Tenant struct {
 	ID       string
 	Name     string
@@ -45,11 +43,12 @@ func flatten(nodes []tsgNode, parent string, depth int, out *[]Tenant, seen map[
 	}
 }
 
-func ListTenants(ctx context.Context, client *http.Client, baseURL, accessToken string) ([]Tenant, error) {
-	if baseURL == "" {
-		baseURL = TenancyURL
+func ListTenants(ctx context.Context, client *http.Client, host, accessToken string) ([]Tenant, error) {
+	u, err := endpoints.URLAt("tenant_service_groups", host, nil)
+	if err != nil {
+		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"?hierarchy=true", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build tenant request: %w", err)
 	}
@@ -95,12 +94,12 @@ type Discovery struct {
 	RefreshToken string
 }
 
-func Discover(ctx context.Context, opt Options, tenancyURL string) (Discovery, error) {
+func Discover(ctx context.Context, opt Options) (Discovery, error) {
 	tok, err := login(ctx, "", opt, false)
 	if err != nil {
 		return Discovery{}, err
 	}
-	tenants, err := ListTenants(ctx, opt.httpClient(), tenancyURL, tok.AccessToken)
+	tenants, err := ListTenants(ctx, opt.httpClient(), opt.Host, tok.AccessToken)
 	if err != nil {
 		return Discovery{}, err
 	}

@@ -78,7 +78,7 @@ func (m tuiModel) viewZonePick() string {
 	b.WriteString(m.zonePick.view(m.width, suggestRows))
 	b.WriteString("\n")
 
-	line := ui.StyleDim.Render("fuzzy search · every stamp names its zone")
+	line := ui.StyleDim.Render("fuzzy search · every timestamp names its zone")
 	if spec, ok := m.zonePick.current(); ok {
 		if stamp, err := clock.StampIn(spec, time.Now()); err == nil {
 			line = ui.StyleDim.Render("now  ") + ui.StyleElement.Render(stamp)

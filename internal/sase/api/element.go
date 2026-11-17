@@ -15,7 +15,7 @@ type Element struct {
 	Role         string   `json:"role"`
 	AllowedRoles []string `json:"allowed_roles"`
 	Tags         []string `json:"tags"`
-	// null on a spoke that is in a cluster -- read ClusterID() instead
+	// null on a spoke that is in a cluster
 	Cluster      string   `json:"cluster_id"`
 	SpokeHA      *SpokeHA `json:"spoke_ha_config"`
 	AdminSuspend string   `json:"admin_suspend_state"`

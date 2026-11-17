@@ -37,8 +37,13 @@ func (e Element) apiInterfaces() []api.Interface {
 		switch p {
 		case 1, 2:
 			in.UsedFor = "public"
+			in.IPv4Config = &api.IPv4Config{Type: "dhcp"}
 		case 3:
 			in.UsedFor = "lan"
+			in.IPv4Config = &api.IPv4Config{
+				Type:         "static",
+				StaticConfig: &api.IPv4StaticConfig{Address: portAddress(p)},
+			}
 		default:
 			in.UsedFor = "none"
 		}
@@ -56,6 +61,10 @@ func (e Element) apiInterfaces() []api.Interface {
 		AdminUp: true,
 		MTU:     1500,
 		Scope:   "local",
+		IPv4Config: &api.IPv4Config{
+			Type:         "static",
+			StaticConfig: &api.IPv4StaticConfig{Address: vlanAddress},
+		},
 	})
 	return out
 }
@@ -77,7 +86,7 @@ func (e Element) apiInterfaceStatus(iid string) *api.InterfaceStatus {
 		}
 		if e.Connected {
 			st.OperationalState = "up"
-			st.IPv4Addresses = []string{"10.99.1.1/24"}
+			st.IPv4Addresses = []string{vlanAddress}
 		}
 		return &st
 	}
@@ -98,13 +107,19 @@ func (e Element) apiInterfaceStatus(iid string) *api.InterfaceStatus {
 		}
 		if e.Connected && p <= 3 {
 			st.OperationalState = "up"
-			st.IPv4Addresses = []string{fmt.Sprintf("10.%d.%d.1/24", p, p*7%256)}
+			st.IPv4Addresses = []string{portAddress(p)}
 			st.Port = &api.PortState{Connected: true, Speed: 1000, FullDuplex: true}
 			st.Routes = []api.Route{{Destination: "0.0.0.0/0", Via: fmt.Sprintf("10.%d.%d.254", p, p*7%256)}}
 		}
 		return &st
 	}
 	return nil
+}
+
+const vlanAddress = "10.99.1.1/24"
+
+func portAddress(p int) string {
+	return fmt.Sprintf("10.%d.%d.1/24", p, p*7%256)
 }
 
 func (e Element) circuitID(n int) string {

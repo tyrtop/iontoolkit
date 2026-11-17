@@ -1,0 +1,16 @@
+kind: menu
+entries:
+  - elements
+  - name: service-accounts
+    when: '{{ eq .auth "tenant" }}'
+  - name: sign-in
+    label: Browser Tenants
+    when: '{{ and (ne .auth "tenant") .signed_in }}'
+  - name: refresh-token
+    when: '{{ and (ne .auth "tenant") .signed_in }}'
+  - name: sign-in
+    when: '{{ and (ne .auth "tenant") (not .signed_in) }}'
+  - macros
+  - workflows
+  - settings
+  - quit

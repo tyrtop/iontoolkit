@@ -38,8 +38,7 @@ var Defaults = RootFlags{
 	DialTimeout:    10 * time.Second,
 	RPS:            10,
 	PagerPrompts:   ioncli.DefaultPagers,
-	// works on an ion 1200-s running 6.3.4, where "terminal length 0", "no paging"
-	// and "set cli pager off" are all rejected
+	// ion 1200-s on 6.3.4 rejects "terminal length 0", "no paging", "set cli pager off"
 	PagerOff: "set paging off",
 }
 
@@ -108,32 +107,6 @@ func (f Flags) ValidateCreds() error {
 		return nil
 	}
 	return fmt.Errorf("set SCM_CLIENT_ID, SCM_CLIENT_SECRET, and SCM_TSG_ID, or SCM_TOKEN to override")
-}
-
-func (f Flags) Validate() error {
-	if err := f.ValidateCreds(); err != nil {
-		return err
-	}
-	return f.ValidateRun()
-}
-
-func (f Flags) ValidateRun() error {
-	if f.RefreshMargin <= 0 {
-		return fmt.Errorf("refresh margin must be greater than 0")
-	}
-	if len(f.Elements) == 0 {
-		return fmt.Errorf("an element is required")
-	}
-	if len(f.Elements) > 1 && len(f.Commands) == 0 {
-		return fmt.Errorf("shell requires exactly one element; use \"iontk run\" for multiple")
-	}
-	if f.RPS <= 0 {
-		return fmt.Errorf("rps must be greater than 0")
-	}
-	if f.Burst < 1 {
-		return fmt.Errorf("burst must be at least 1")
-	}
-	return nil
 }
 
 func (f Flags) Options() sase.Options {

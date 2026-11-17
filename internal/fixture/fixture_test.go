@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+	"tyrtop.com/iontk/internal/config"
 )
 
 const demo = `
@@ -150,5 +152,144 @@ func TestSitesResolveFromElementSiteNames(t *testing.T) {
 		if byID[el.SiteID] == "" {
 			t.Errorf("%s has site id %q, which no site answers — the list would show a raw id", el.Name, el.SiteID)
 		}
+	}
+}
+
+func TestATenantCanAskForAFleetInsteadOfListingIt(t *testing.T) {
+	set, err := Parse([]byte("tenants:\n  - name: Globex\n    fleet: 100\n"), "fleet.yaml")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	els := set.Tenants[0].Elements
+	if len(els) != 100 {
+		t.Fatalf("%d elements, want the hundred asked for", len(els))
+	}
+
+	sites, ids, ha, off := map[string]bool{}, map[string]bool{}, 0, 0
+	for _, el := range els {
+		if el.Name == "" || el.ID == "" || el.Model == "" || el.Site == "" {
+			t.Fatalf("element came out half built: %+v", el)
+		}
+		if ids[el.ID] {
+			t.Errorf("two elements share id %s", el.ID)
+		}
+		ids[el.ID] = true
+		sites[el.Site] = true
+		if el.HA {
+			ha++
+		}
+		if !el.Connected {
+			off++
+		}
+	}
+	if len(sites) != 50 {
+		t.Errorf("%d sites, want two elements each", len(sites))
+	}
+	if ha == 0 || ha == len(els) {
+		t.Errorf("%d of %d clustered, want some of each", ha, len(els))
+	}
+	if off == 0 {
+		t.Error("every element is connected, so the offline colour never shows")
+	}
+
+	again, err := Parse([]byte("tenants:\n  - name: Globex\n    fleet: 100\n"), "fleet.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Tenants[0].Elements[7].ID != els[7].ID {
+		t.Error("the ids move between runs, so a cached list would never match")
+	}
+}
+
+func TestSlowMakesADialAndACommandTakeTime(t *testing.T) {
+	set, err := Parse([]byte("slow: 300ms\ntenants:\n  - name: Acme Co\n    elements:\n      - name: rtr-01\n"), "slow.yaml")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	el := &set.Tenants[0].Elements[0]
+	if got := el.wait(1); got < slowFloor {
+		t.Errorf("a dial waits %s, want at least the floor", got)
+	}
+	if got := el.wait(3); got >= el.wait(1) {
+		t.Errorf("a command waits %s and a dial %s, want the command quicker", got, el.wait(1))
+	}
+
+	fast, err := Parse([]byte("tenants:\n  - name: Acme Co\n    elements:\n      - name: rtr-01\n"), "fast.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fast.Tenants[0].Elements[0].wait(1); got != 0 {
+		t.Errorf("a fleet that says nothing waits %s, want no wait at all", got)
+	}
+
+	if _, err := Parse([]byte("slow: soon\ntenants:\n  - name: A\n    elements:\n      - name: r\n"), "bad.yaml"); err == nil {
+		t.Error("slow: soon was taken as a length of time")
+	}
+}
+
+func TestEveryElementWaitsALittleDifferently(t *testing.T) {
+	set, err := Parse([]byte("slow: 1s\ntenants:\n  - name: Globex\n    fleet: 20\n"), "spread.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[time.Duration]bool{}
+	low, high := time.Hour, time.Duration(0)
+	els := set.Tenants[0].Elements
+	for i, el := range els {
+		d := el.wait(1)
+		seen[d] = true
+		low, high = min(low, d), max(high, d)
+		if i == 0 {
+			continue
+		}
+		if gap := abs(d - els[i-1].wait(1)); gap < time.Second {
+			t.Errorf("%s and %s wait %s apart, want a second between any two in a row",
+				els[i-1].Name, el.Name, gap)
+		}
+	}
+	if len(seen) < slowSteps {
+		t.Errorf("%d different waits over 20 elements, want one per step", len(seen))
+	}
+	base := max(time.Second, slowJitter+slowFloor)
+	if low < base-slowJitter || high > base+slowJitter {
+		t.Errorf("waits run %s to %s, want %s give or take a second", low, high, base)
+	}
+}
+
+func abs(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
+func TestEveryFakeTenantIsItsOwnServiceAccount(t *testing.T) {
+	set, err := Tutorial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := set.SavedTenants()
+	if len(saved) != 2 {
+		t.Fatalf("%d service accounts, want one per tenant", len(saved))
+	}
+
+	seen := map[string]bool{}
+	for _, ct := range saved {
+		if ct.Auth != config.AuthServiceAccount || !ct.Added {
+			t.Errorf("%s is %+v, want an added service account", ct.Name, ct)
+		}
+		if seen[ct.ClientID] {
+			t.Errorf("%s shares a client id with another account: %s", ct.Name, ct.ClientID)
+		}
+		seen[ct.ClientID] = true
+		if !strings.Contains(ct.ClientID, ct.TSGID) {
+			t.Errorf("%s has client id %q, want its own tsg in it", ct.Name, ct.ClientID)
+		}
+	}
+	if got := saved[0].ClientID; got != "acme-co@999000999.iam.panserviceaccount.com" {
+		t.Errorf("Acme Co's client id is %q", got)
+	}
+	if got := saved[1].ClientID; got != "globex@999000222.iam.panserviceaccount.com" {
+		t.Errorf("Globex's client id is %q", got)
 	}
 }

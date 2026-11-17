@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 	"github.com/coder/websocket"
 )
@@ -39,7 +41,10 @@ type Session struct {
 	text   chan string
 	auto   *autologin
 	notify func(string)
+	ctx    context.Context
 	cancel context.CancelFunc
+	taps   []*tap
+	quiet  bool
 
 	mu       sync.Mutex
 	err      error
@@ -49,6 +54,7 @@ type Session struct {
 	gotData  bool
 	line     []rune
 	lastSeen time.Time
+	changed  chan struct{}
 
 	pingEvery time.Duration
 	pongWait  time.Duration
@@ -67,13 +73,19 @@ func SetLivenessForTest(ping, pong time.Duration) (restore func()) {
 	return func() { pingEvery, pongWait = oldPing, oldPong }
 }
 
+func SetHandshakeForTest(d time.Duration) (restore func()) {
+	old := handshakeDeadline
+	handshakeDeadline = d
+	return func() { handshakeDeadline = old }
+}
+
 func Open(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds Credentials, notify func(string)) (*Session, error) {
 	conn, err := d.DialToolkit(ctx, eid, cols, rows)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 
 	s := &Session{
 		ElementID: eid,
@@ -87,6 +99,7 @@ func Open(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds
 		auto:      newAutologin(creds),
 		notify:    notify,
 		lastSeen:  time.Now(),
+		ctx:       ctx,
 		cancel:    cancel,
 		pingEvery: pingEvery,
 		pongWait:  pongWait,
@@ -102,6 +115,7 @@ func Open(ctx context.Context, d Dialer, eid, name string, cols, rows int, creds
 }
 
 func (s *Session) pumpOutput(ctx context.Context) {
+	defer s.stopTaps()
 	for {
 		_, data, err := s.conn.Read(ctx)
 		if err != nil {
@@ -117,20 +131,27 @@ func (s *Session) pumpOutput(ctx context.Context) {
 		}
 		s.emuMu.Lock()
 		_, err = s.emu.Write(data)
-		s.emuMu.Unlock()
 		if err != nil {
+			s.emuMu.Unlock()
 			s.fail(err)
 			return
 		}
 		s.mu.Lock()
 		s.gotData = true
 		s.lastSeen = time.Now()
+		taps := s.taps
 		s.mu.Unlock()
+		s.emuMu.Unlock()
+		for _, t := range taps {
+			if !t.send(ctx, data) {
+				return
+			}
+		}
 
 		s.mu.Lock()
-		auto := s.auto
+		send, ok := s.auto.feed(data)
 		s.mu.Unlock()
-		if send, ok := auto.feed(data); ok {
+		if ok {
 			s.SendText(send)
 		}
 		s.markDirty()
@@ -229,15 +250,37 @@ func (s *Session) markHung() {
 		s.hung = true
 	}
 	s.mu.Unlock()
+	s.stopTaps()
 	s.markDirty()
 }
 
-// the SASE side accepts a toolkit websocket for an element that is not there,
-// and that session sits mute until the handshake deadline fails it
+func (s *Session) stopTaps() {
+	s.mu.Lock()
+	taps := s.taps
+	s.taps, s.quiet = nil, true
+	s.mu.Unlock()
+	for _, t := range taps {
+		t.stop()
+	}
+}
+
+// SASE accepts a websocket for a missing element, then stays mute
 func (s *Session) Answered() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.gotData
+}
+
+func (s *Session) LoggedIn() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gotData && s.auto.done()
+}
+
+func (s *Session) LoggingIn() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.auto.done()
 }
 
 func (s *Session) Hung() bool {
@@ -246,7 +289,22 @@ func (s *Session) Hung() bool {
 	return s.hung
 }
 
+func (s *Session) Changed() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.changed == nil {
+		s.changed = make(chan struct{})
+	}
+	return s.changed
+}
+
 func (s *Session) markDirty() {
+	s.mu.Lock()
+	if s.changed != nil {
+		close(s.changed)
+		s.changed = nil
+	}
+	s.mu.Unlock()
 	if s.notify != nil {
 		s.notify(s.ElementID)
 	}
@@ -281,6 +339,7 @@ func (s *Session) fail(err error) {
 		s.err = err
 	}
 	s.mu.Unlock()
+	s.stopTaps()
 	s.markDirty()
 }
 
@@ -330,15 +389,78 @@ func (s *Session) LineEmpty() bool {
 	return len(s.line) == 0
 }
 
+// the device echoes recalled or completed commands we never typed
 func (s *Session) Line() string {
+	if line := s.screenLine(); line != "" {
+		return line
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return string(s.line)
+	return strings.TrimSpace(string(s.line))
+}
+
+func (s *Session) screenLine() string {
+	s.emuMu.Lock()
+	defer s.emuMu.Unlock()
+
+	pos := s.emu.CursorPosition()
+	if pos.Y < 0 || pos.X <= 0 {
+		return ""
+	}
+	rows := strings.Split(strings.TrimRight(s.emu.Render(), "\n"), "\n")
+	if pos.Y >= len(rows) {
+		return ""
+	}
+	return strings.TrimSpace(afterPrompt(ansi.Strip(ansi.Truncate(rows[pos.Y], pos.X, "")), s.Name))
+}
+
+func afterPrompt(row, name string) string {
+	if name != "" {
+		if _, rest, ok := strings.Cut(row, name+"#"); ok {
+			return rest
+		}
+	}
+	if i := strings.LastIndexAny(row, "#>$"); i >= 0 {
+		return row[i+1:]
+	}
+	return row
 }
 
 func (s *Session) Insert(text string) {
 	s.note(0, text)
 	s.SendText(text)
+}
+
+func (s *Session) Tap() <-chan []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tapLocked().ch
+}
+
+func (s *Session) tapLocked() *tap {
+	t := newTap()
+	if s.closed || s.quiet {
+		t.stop()
+		return t
+	}
+	s.taps = append(s.taps, t)
+	return t
+}
+
+func (s *Session) untap(t *tap) {
+	s.mu.Lock()
+	for i, x := range s.taps {
+		if x == t {
+			s.taps = append(s.taps[:i:i], s.taps[i+1:]...)
+			break
+		}
+	}
+	s.mu.Unlock()
+	t.stop()
+}
+
+func (s *Session) WriteRaw(p []byte) error {
+	return s.conn.Write(s.ctx, websocket.MessageText, p)
 }
 
 func (s *Session) SendText(text string) {
@@ -374,8 +496,7 @@ func (s *Session) Close() {
 	s.cancel()
 	_ = s.conn.Close(websocket.StatusNormalClosure, "")
 
-	// Unblocks pumpInput without calling Emulator.Close, whose unsynchronized
-	// closed flag races its own Read in x/vt v0.1.0.
+	// Emulator.Close's closed flag races its own Read in x/vt v0.1.0
 	if pw, ok := s.emu.InputPipe().(*io.PipeWriter); ok {
 		_ = pw.CloseWithError(io.EOF)
 	}

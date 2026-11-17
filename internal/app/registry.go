@@ -1,0 +1,660 @@
+package app
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/endpoint"
+	"tyrtop.com/iontk/internal/runtime"
+	"tyrtop.com/iontk/internal/sase/api"
+	"tyrtop.com/iontk/internal/sase/write"
+	"tyrtop.com/iontk/internal/script"
+	"tyrtop.com/iontk/internal/workflow"
+)
+
+var (
+	WorkflowsFolder string
+	WritesFile      string
+	WorkflowPaths   []string
+)
+
+const WorkflowPrefix = "workflow."
+
+func registerCommands(rt *runtime.Runtime) {
+	rt.Register(writeCommand())
+	rt.Register(writeRecordsCommand())
+	for _, c := range authCommands() {
+		rt.Register(c)
+	}
+	for _, c := range resetCommands() {
+		rt.Register(c)
+	}
+	rt.Register(reloadCommand())
+	rt.Register(saveCommand())
+	rt.Register(endpointsCommand())
+}
+
+func ReloadCommands(rt *runtime.Runtime) {
+	rt.Forget(WorkflowPrefix)
+	rt.Forget(ActionPrefix)
+	rt.ClearWarnings()
+	all, err := LoadWorkflows(rt.Store(), WorkflowsFolder)
+	if err != nil {
+		rt.Warn(err.Error())
+	}
+	for _, p := range WorkflowPaths {
+		w, err := workflow.LoadOne(p)
+		if err != nil {
+			rt.Warn(err.Error())
+			continue
+		}
+		all = append(all, w)
+	}
+	for _, w := range all {
+		rt.Register(workflowCommand(w))
+	}
+	actions, err := LoadActions(rt.Store())
+	if err != nil {
+		rt.Warn(ActionsRefused + err.Error())
+	}
+	for _, name := range actions.Names() {
+		rt.Register(actionCommand(actions, name))
+	}
+}
+
+func guardFor(rt *runtime.Runtime, t runtime.Tenant) write.Guard {
+	name := t.Name
+	if name == "" {
+		name = t.TSG
+	}
+	return WriteGuard(rt.Store(), rt.Config(), name)
+}
+
+const EachInput = "inputs"
+
+func workflowCommand(w workflow.Workflow) runtime.Command {
+	args := make([]runtime.Arg, 0, len(w.Inputs)+2)
+	each := EachInput
+	for _, in := range w.Inputs {
+		args = append(args, runtime.Arg{Name: in.Name, Help: in.Prompt, Required: in.Required, Default: in.Default})
+		if in.Name == EachInput {
+			each = ""
+		}
+	}
+	if !w.Declares(workflow.TenantInput) {
+		args = append(args, runtime.Arg{Name: workflow.TenantInput, Many: true,
+			Help: "Tenant to run against, by name or TSG ID (needed when more than one is loaded); give it more than once to run once per tenant"})
+	}
+	if each != "" {
+		args = append(args, runtime.Arg{Name: each,
+			Help: "Run once for each row of a CSV, YAML or JSON `file` (flags fill in what a row is missing)"})
+	}
+	return runtime.Command{
+		Name: WorkflowPrefix + w.Name, Help: w.Title, Long: w.Description, Slow: true,
+		Source: filepath.Join(w.Dir, workflow.ManifestName),
+		Args:   args, Writes: true, Each: each,
+		Run: func(rt *runtime.Runtime, c *runtime.Call) error {
+			if tenants := strings.Split(c.Arg(workflow.TenantInput), "\n"); len(tenants) > 1 && !w.Declares(workflow.TenantInput) {
+				if each != "" && c.Arg(each) != "" {
+					return fmt.Errorf("--%s can't be given with more than one %s; put a %s column in the file instead",
+						each, workflow.TenantInput, workflow.TenantInput)
+				}
+				runs := make([]map[string]string, len(tenants))
+				for i, t := range tenants {
+					runs[i] = map[string]string{workflow.TenantInput: t}
+				}
+				return runRows(rt, c, w, each, runs)
+			}
+			if each != "" && c.Arg(each) != "" {
+				return runEach(rt, c, w, each)
+			}
+			return runWorkflow(rt, c, w, c.Args)
+		},
+	}
+}
+
+type placed struct {
+	input   map[string]string
+	tenants map[string]config.Tenant
+}
+
+func place(rt *runtime.Runtime, w workflow.Workflow, given map[string]string) (placed, error) {
+	p := placed{input: map[string]string{}, tenants: map[string]config.Tenant{}}
+	for k, v := range given {
+		if k != workflow.TenantInput || w.Declares(k) {
+			p.input[k] = v
+		}
+	}
+	names := []string{workflow.TenantInput}
+	for _, e := range w.Calls() {
+		if e.In != "" && !slices.Contains(names, e.In) {
+			names = append(names, e.In)
+		}
+	}
+	for _, n := range names {
+		v := strings.TrimSpace(given[n])
+		switch {
+		case v != "":
+			t, err := rt.FindTenant(v)
+			if err != nil {
+				return p, fmt.Errorf("%s: %w", n, err)
+			}
+			p.tenants[n] = t
+		case n != workflow.TenantInput:
+			return p, fmt.Errorf("%s names the tenant some of the calls go to, and is empty", n)
+		default:
+			if fleet := rt.FleetTenants(); len(fleet) > 1 {
+				return p, fmt.Errorf("%d tenants are loaded (%s): say which with tenant", len(fleet), runtime.TenantNames(fleet))
+			}
+		}
+	}
+	return p, nil
+}
+
+func runWorkflow(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, given map[string]string) error {
+	rt.BeginRuns(1)
+	p, err := place(rt, w, given)
+	if err != nil {
+		return err
+	}
+	return runPlaced(rt, c, w, p, 0)
+}
+
+func runPlaced(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p placed, at int) error {
+	started := time.Now()
+	run, ok := p.tenants[workflow.TenantInput]
+	if !ok {
+		run, _ = rt.Tenant()
+	}
+	if run.Name != "" {
+		c.Say("tenant %s", run.Name)
+	}
+	var res workflow.Result
+	var err error
+	if steps := w.StepFlows(); len(steps) > 0 {
+		res, err = runSteps(rt, c, w, steps, p, run)
+	} else {
+		var pick *pickUp
+		if c.Resume {
+			pick = walk(rt, c, w, p, run)
+			if pick.failed != nil {
+				return fmt.Errorf("resume: the dry run that lists the writes failed: %w", pick.failed)
+			}
+			pick.locate()
+			pick.report(c)
+		}
+		res, err = runOne(rt, c, w, p, run, pick)
+	}
+	c.Result = res
+	record := runtime.Run{Workflow: w.Name, Tenant: run.Name, TSG: run.TSGID, Inputs: res.Inputs, DoIt: c.DoIt,
+		Started: started, Finished: time.Now(), Status: append([]string{}, res.Status...), Writes: res.Writes, Data: res.Data,
+		Waiting: res.Waiting}
+	if record.Inputs == nil {
+		record.Inputs = p.input
+	}
+	if err != nil && res.Waiting == "" {
+		record.Error = err.Error()
+	}
+	rt.EndRun(at, record)
+	if !c.DoIt && len(res.Writes) > 0 {
+		c.Say("dry run: %d write(s), none sent — add --doit to send", len(res.Writes))
+	}
+	return err
+}
+
+func runOne(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p placed, run config.Tenant, pick *pickUp) (workflow.Result, error) {
+	send := func(call *runtime.Call, e endpoint.Endpoint, to config.Tenant, where string) error {
+		return callEndpoint(rt, call, WorkflowPrefix+w.Name, e, to, where)
+	}
+	if pick != nil {
+		send = pick.send
+	}
+	host := endpointHost(rt, c, w, p, run, send)
+	host.Export = func(text, slug, ext string) (string, error) { return rt.Export(slug, ext, text) }
+	host.Keep, host.Kept = keeper(rt, run)
+	host.OnStatus = func(line string) { c.Say("%s", line) }
+	host.ExitOnWait, host.Resume = c.ExitOnWait, c.Resume
+	return w.Run(c.Ctx, p.input, host, c.DoIt)
+}
+
+func runSteps(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, steps []workflow.Workflow, p placed, run config.Tenant) (workflow.Result, error) {
+	all := workflow.Result{DoIt: c.DoIt}
+	in, err := w.CheckInputs(p.input)
+	if err != nil {
+		return all, err
+	}
+	all.Inputs = in
+	p = placed{input: in, tenants: p.tenants}
+	from := 0
+	var pick *pickUp
+	if c.Resume {
+		if from, pick, err = findStep(rt, c, steps, p, run); err != nil {
+			return all, err
+		}
+	}
+	for i := from; i < len(steps); i++ {
+		c.Say("step %d of %d: %s", i+1, len(steps), steps[i].Name)
+		res, err := runOne(rt, c, steps[i], placed{input: steps[i].Takes(in), tenants: p.tenants}, run, pick)
+		pick = nil
+		all.Status = append(all.Status, res.Status...)
+		all.Writes = append(all.Writes, res.Writes...)
+		all.Data, all.Waiting = res.Data, res.Waiting
+		if err != nil {
+			return all, err
+		}
+	}
+	return all, nil
+}
+
+func keeper(rt *runtime.Runtime, t config.Tenant) (func(name, text string) (string, error), func(name string) (string, string, error)) {
+	where := func(name string) (string, error) {
+		st := rt.Store()
+		if st == nil {
+			return "", fmt.Errorf("no config directory to keep it in")
+		}
+		if name == "" || strings.HasPrefix(name, ".") || strings.ContainsAny(name, `/\:`) {
+			return "", fmt.Errorf("%q is not a name to keep something under", name)
+		}
+		who := t.TSGID
+		if who == "" {
+			who = "tenant"
+		}
+		return filepath.Join(st.Root, "kept", who, name+".json"), nil
+	}
+	keep := func(name, text string) (string, error) {
+		path, err := where(name)
+		if err != nil {
+			return "", err
+		}
+		if _, err := os.Stat(path); err == nil {
+			return "", fmt.Errorf("%s is already there, and is not written over", path)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return "", err
+		}
+		return path, os.WriteFile(path, []byte(text), 0o600)
+	}
+	kept := func(name string) (string, string, error) {
+		path, err := where(name)
+		if err != nil {
+			return "", "", err
+		}
+		b, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			return "", path, nil
+		}
+		return string(b), path, err
+	}
+	return keep, kept
+}
+
+type sender func(call *runtime.Call, e endpoint.Endpoint, to config.Tenant, where string) error
+
+func endpointHost(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, p placed, run config.Tenant, send sender) workflow.Host {
+	exec := scriptExec(rt, c, true, run)
+	return workflow.Host{
+		Exec: func(sc script.Call) ([]string, any, error) {
+			name := strings.TrimPrefix(sc.Name, EndpointPrefix)
+			e, ok := w.Endpoint(name)
+			if sc.Line != "" || !strings.HasPrefix(sc.Name, EndpointPrefix) || !ok {
+				return exec(sc)
+			}
+			to, where := run, ""
+			if in := w.In(name); in != "" {
+				t := p.tenants[in]
+				to = t
+				if t.TSGID != run.TSGID {
+					where = " in " + t.Name
+				}
+			}
+			var said []string
+			call := &runtime.Call{Ctx: c.Ctx, Args: sc.Args, DoIt: c.DoIt, Out: func(l string) {
+				said = append(said, l)
+				c.Say("%s", l)
+			}}
+			err := send(call, e, to, where)
+			return said, call.Result, err
+		},
+	}
+}
+
+func scriptExec(rt *runtime.Runtime, c *runtime.Call, echo bool, in config.Tenant) func(script.Call) ([]string, any, error) {
+	return func(sc script.Call) ([]string, any, error) {
+		name, args, rest := sc.Name, sc.Args, []string(nil)
+		if sc.Line != "" {
+			cmd, a, r, err := rt.Parse(sc.Line)
+			if err != nil {
+				return nil, nil, err
+			}
+			name, args, rest = cmd.Name, a, r
+		}
+		if cmd, ok := rt.Command(name); ok && cmd.FrontOnly {
+			return nil, nil, fmt.Errorf("%s is not open to scripts", name)
+		}
+		var said []string
+		call := &runtime.Call{Ctx: c.Ctx, Args: args, Rest: rest, DoIt: c.DoIt, Tenant: in, Out: func(l string) {
+			said = append(said, l)
+			if echo {
+				c.Say("%s", l)
+			}
+		}}
+		err := rt.Exec(call, name)
+		return said, call.Result, err
+	}
+}
+
+func runEach(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each string) error {
+	runs, err := workflow.ReadRuns(c.Arg(each))
+	if err != nil {
+		return err
+	}
+	return runRows(rt, c, w, each, runs)
+}
+
+func runRows(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each string, runs []map[string]string) error {
+	tags := runTags(w, runs)
+	var mu sync.Mutex
+	say := func(tag, line string) {
+		mu.Lock()
+		defer mu.Unlock()
+		c.Say("%s | %s", tag, line)
+	}
+	inputs := make([]placed, len(runs))
+	seen := map[string]int{}
+	for i, run := range runs {
+		input := map[string]string{}
+		for k, v := range c.Args {
+			if k != each {
+				input[k] = v
+			}
+		}
+		for k, v := range run {
+			if strings.TrimSpace(v) != "" {
+				input[k] = v
+			}
+		}
+		p, err := place(rt, w, input)
+		if err != nil {
+			return fmt.Errorf("run %d: %w; no run was started", i+1, err)
+		}
+		in, err := w.CheckInputs(p.input)
+		if err != nil {
+			return fmt.Errorf("run %d: %w; no run was started", i+1, err)
+		}
+		inputs[i] = p
+		if len(w.Inputs) == 0 || !c.DoIt {
+			continue
+		}
+		v := in[w.Inputs[0].Name]
+		key := p.tenants[workflow.TenantInput].TSGID + "\x00" + v
+		if at, dup := seen[key]; dup && v != "" {
+			return fmt.Errorf("runs %d and %d both have %s %s, and two runs at once would act on the same one",
+				at, i+1, w.Inputs[0].Name, v)
+		}
+		seen[key] = i + 1
+	}
+	at := max(1, Defaults.Concurrency)
+	c.Say("%d run(s), up to %d at a time", len(runs), at)
+	rt.BeginRuns(len(runs))
+	slots := make(chan struct{}, at)
+	errs := make([]error, len(runs))
+	var wg sync.WaitGroup
+	for i, run := range runs {
+		input := inputs[i]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case slots <- struct{}{}:
+			case <-c.Ctx.Done():
+				errs[i] = c.Ctx.Err()
+				return
+			}
+			defer func() { <-slots }()
+			say(tags[i], workflow.Describe(run))
+			one := &runtime.Call{Ctx: c.Ctx, DoIt: c.DoIt, ExitOnWait: c.ExitOnWait, Resume: c.Resume,
+				Out: func(l string) { say(tags[i], l) }}
+			errs[i] = runPlaced(rt, one, w, input, i)
+			switch {
+			case errors.As(errs[i], new(*script.Waiting)):
+				say(tags[i], errs[i].Error())
+			case errs[i] != nil:
+				say(tags[i], "failed: "+errs[i].Error())
+			}
+		}()
+	}
+	wg.Wait()
+	var failed, waiting []string
+	for i, err := range errs {
+		switch {
+		case errors.As(err, new(*script.Waiting)):
+			waiting = append(waiting, tags[i])
+		case err != nil:
+			failed = append(failed, tags[i])
+		}
+	}
+	c.Say("")
+	if len(waiting) > 0 {
+		c.Say("%d of %d runs are waiting: %s", len(waiting), len(runs), strings.Join(waiting, ", "))
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d of %d runs failed: %s", len(failed), len(runs), strings.Join(failed, ", "))
+	}
+	if len(waiting) > 0 {
+		return &script.Waiting{What: fmt.Sprintf("%d of %d runs", len(waiting), len(runs))}
+	}
+	c.Say("%d run(s) done", len(runs))
+	return nil
+}
+
+func runTags(w workflow.Workflow, runs []map[string]string) []string {
+	first := ""
+	if len(w.Inputs) > 0 {
+		first = w.Inputs[0].Name
+	}
+	tags := make([]string, len(runs))
+	seen := map[string]int{}
+	for i, run := range runs {
+		tag := strings.TrimSpace(run[first])
+		if tag == "" {
+			tag = strings.TrimSpace(run[workflow.TenantInput])
+		}
+		if tag == "" {
+			tag = fmt.Sprintf("run %d", i+1)
+		}
+		if seen[tag]++; seen[tag] > 1 {
+			tag = fmt.Sprintf("%s#%d", tag, seen[tag])
+		}
+		tags[i] = tag
+	}
+	return tags
+}
+
+type WriteRun struct {
+	Spec    write.Spec
+	Plans   []write.ElementPlans
+	Sent    int
+	Fail    int
+	Blocked string
+}
+
+func (r *WriteRun) PlannedWrites() []script.Write {
+	var out []script.Write
+	for _, ep := range r.Plans {
+		for _, p := range ep.Plans {
+			if !p.Empty() {
+				out = append(out, script.Write{Method: p.Method, Path: p.Path, Body: p.After})
+			}
+		}
+	}
+	return out
+}
+
+func writeCommand() runtime.Command {
+	return runtime.Command{
+		Name: "write", Slow: true,
+		Help: "change records in the portal on each element: what=interface elements=ID,ID match=1 field=value…",
+		Args: []runtime.Arg{
+			{Name: "what", Required: true, Help: "which kind of record, a name in writes.yaml"},
+			{Name: "elements", Required: true, Help: "element IDs, comma separated"},
+			{Name: "match", Required: true, Help: `the records to change: a name, field=value, or "*"; several with ;`},
+		},
+		Writes: true,
+		Run:    runWrite,
+	}
+}
+
+func writeSpec(rt *runtime.Runtime, what string) (write.Spec, error) {
+	specs, problem := rt.Writes()
+	if problem != "" {
+		return write.Spec{}, errors.New(problem)
+	}
+	if specs == nil {
+		return write.Spec{}, fmt.Errorf("no writes are loaded")
+	}
+	spec, ok := specs.Spec(what)
+	if !ok {
+		return write.Spec{}, fmt.Errorf("writes.yaml has none called %q; there is %s", what, strings.Join(specs.Names(), ", "))
+	}
+	return spec, nil
+}
+
+type writeGroup struct {
+	portal runtime.Portal
+	tenant runtime.Tenant
+	els    []api.Element
+	plans  []write.ElementPlans
+}
+
+func writeTargets(rt *runtime.Runtime, c *runtime.Call, arg string) ([]*writeGroup, error) {
+	rows := rt.ElementsArg(c, arg)
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("no elements")
+	}
+	var groups []*writeGroup
+	at := map[string]*writeGroup{}
+	for _, r := range rows {
+		g := at[r.TSG]
+		if g == nil {
+			p, t, err := rt.PortalFor(c.Ctx, r.TSG)
+			if err != nil {
+				return nil, err
+			}
+			g = &writeGroup{portal: p, tenant: t}
+			at[r.TSG] = g
+			groups = append(groups, g)
+		}
+		g.els = append(g.els, r.Element)
+	}
+	return groups, nil
+}
+
+func writeRecordsCommand() runtime.Command {
+	return runtime.Command{
+		Name: "write.records", Slow: true,
+		Help: "the records of one kind an element has, as writes.yaml describes them: what=interface element=ID",
+		Args: []runtime.Arg{
+			{Name: "what", Required: true, Help: "which kind of record, a name in writes.yaml"},
+			{Name: "element", Required: true, Help: "the element's ID"},
+		},
+		Run: func(rt *runtime.Runtime, c *runtime.Call) error {
+			spec, err := writeSpec(rt, c.Arg("what"))
+			if err != nil {
+				return err
+			}
+			groups, err := writeTargets(rt, c, "element")
+			if err != nil {
+				return err
+			}
+			el := groups[0].els[0]
+			recs, err := spec.Records(c.Ctx, groups[0].portal, write.ElementVars(el))
+			if err != nil {
+				return err
+			}
+			c.Result = recs
+			for _, r := range recs {
+				c.Say("%s", spec.LabelOf(write.ElementVars(el), r))
+			}
+			return nil
+		},
+	}
+}
+
+func runWrite(rt *runtime.Runtime, c *runtime.Call) error {
+	spec, err := writeSpec(rt, c.Arg("what"))
+	if err != nil {
+		return err
+	}
+	set := map[string]string{}
+	for _, w := range c.Rest {
+		k, v, ok := strings.Cut(w, "=")
+		if !ok || strings.TrimSpace(k) == "" {
+			return fmt.Errorf("write: %q is not field=value", w)
+		}
+		set[strings.TrimSpace(k)] = v
+	}
+	if err := spec.CheckSet(set); err != nil {
+		return err
+	}
+
+	groups, err := writeTargets(rt, c, "elements")
+	if err != nil {
+		return err
+	}
+	var blocked error
+	for _, g := range groups {
+		if err := guardFor(rt, g.tenant).Ready(spec); err != nil && blocked == nil {
+			blocked = err
+		}
+	}
+	if c.DoIt && blocked != nil {
+		return blocked
+	}
+
+	var all []write.ElementPlans
+	for _, g := range groups {
+		g.plans = write.PlanElements(c.Ctx, g.portal, spec, g.els, runtime.SplitList(c.Arg("match"), ";"), set)
+		all = append(all, g.plans...)
+	}
+	run := &WriteRun{Spec: spec, Plans: all}
+	if blocked != nil {
+		run.Blocked = blocked.Error()
+	}
+	c.Result = run
+	for _, l := range write.PlanLines(all) {
+		c.Say("%s", l)
+	}
+	switch changes := write.Changes(all); {
+	case changes == 0:
+		c.Say("zero changes to make")
+		return write.Unplanned(all)
+	case !c.DoIt:
+		c.Say("")
+		c.Say("dry run: %d change(s), none sent — add --doit to send", changes)
+		return write.Unplanned(all)
+	}
+
+	c.Say("")
+	var errs []error
+	for _, g := range groups {
+		sent, failed, err := guardFor(rt, g.tenant).ApplyAll(c.Ctx, g.portal, spec, g.plans, func(element string, p write.Plan, err error) {
+			if err != nil {
+				c.Say("failed  %s %s: %s", element, p.Label, err)
+				return
+			}
+			c.Say("sent    %s %s", element, p.Label)
+		})
+		run.Sent, run.Fail = run.Sent+sent, run.Fail+failed
+		errs = append(errs, err)
+	}
+	c.Say("")
+	c.Say("%d sent, %d failed", run.Sent, run.Fail)
+	return errors.Join(errs...)
+}

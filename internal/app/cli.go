@@ -12,10 +12,13 @@ import (
 	"tyrtop.com/iontk/internal/clock"
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/logging"
+	"tyrtop.com/iontk/internal/tutorial"
 	"tyrtop.com/iontk/internal/ui"
 )
 
 var ThemesFile string
+
+var LaunchedFake string
 
 func ThemesPath(st *config.Store) string {
 	if ThemesFile != "" {
@@ -104,7 +107,10 @@ func ResolveCredentials(st *config.Store, name string) (Credentials, error) {
 	if err != nil {
 		return Credentials{}, err
 	}
+	return resolveCredentials(st, cfg, name, env)
+}
 
+func resolveCredentials(st *config.Store, cfg *config.Config, name string, env Flags) (Credentials, error) {
 	if name != "" {
 		t, ok := cfg.Tenant(name)
 		if !ok {
@@ -159,16 +165,6 @@ var (
 	LogLevel string
 )
 
-func LogsPath(st *config.Store) string {
-	if LogFile != "" {
-		return LogFile
-	}
-	if st == nil {
-		return ""
-	}
-	return st.LogsDir()
-}
-
 func LogLevelAsked() string {
 	if LogLevel != "" {
 		return LogLevel
@@ -195,4 +191,16 @@ func StartLogging(st *config.Store, stderr io.Writer) error {
 		return fmt.Errorf("logging: %w", err)
 	}
 	return lvlErr
+}
+
+var TutorialFile string
+
+func TutorialsPath(st *config.Store) string {
+	if TutorialFile != "" {
+		return TutorialFile
+	}
+	if st == nil {
+		return ""
+	}
+	return filepath.Join(st.Root, tutorial.DirName)
 }

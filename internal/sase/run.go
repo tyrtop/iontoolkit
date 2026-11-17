@@ -40,14 +40,6 @@ func credentialDead(c Client) bool {
 	return ok && cd.RefreshStopped()
 }
 
-func Targets(client Client, elements []string) []Target {
-	out := make([]Target, 0, len(elements))
-	for _, eid := range elements {
-		out = append(out, Target{ElementID: eid, Client: client})
-	}
-	return out
-}
-
 func RunStream(ctx context.Context, o Options, targets []Target) <-chan Event {
 	out := make(chan Event, 2*len(targets))
 
@@ -78,7 +70,7 @@ func RunStream(ctx context.Context, o Options, targets []Target) <-chan Event {
 					res, err = runElement(ctx, t.Client, o, t)
 				}
 				if err != nil {
-					res = Result{ElementID: t.ElementID, Error: err.Error()}
+					res.ElementID, res.Error = t.ElementID, err.Error()
 				}
 				out <- Event{
 					Index:   i,
@@ -94,14 +86,4 @@ func RunStream(ctx context.Context, o Options, targets []Target) <-chan Event {
 	}()
 
 	return out
-}
-
-func Run(ctx context.Context, client Client, o Options, elements []string) []Result {
-	results := make([]Result, len(elements))
-	for ev := range RunStream(ctx, o, Targets(client, elements)) {
-		if ev.Done {
-			results[ev.Index] = ev.Result
-		}
-	}
-	return results
 }

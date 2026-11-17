@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/output"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase"
 	"tyrtop.com/iontk/internal/ui"
 )
@@ -16,6 +17,7 @@ import (
 func newResultsTable() table.Model {
 	t := table.New(
 		table.WithColumns([]table.Column{
+			{Title: "", Width: 2},
 			{Title: "", Width: 2},
 			{Title: "element", Width: 26},
 			{Title: "model", Width: 11},
@@ -36,6 +38,7 @@ func (m *tuiModel) moveResultCursor(delta int) {
 	n := max(0, min(m.resTable.Cursor()+delta, len(rows)-1))
 	if at := m.resTable.Cursor(); n >= at {
 		m.resTable.MoveDown(n - at)
+		m.rebuildResultRows()
 		return
 	}
 
@@ -46,6 +49,7 @@ func (m *tuiModel) moveResultCursor(delta int) {
 	fresh.SetHeight(m.resTableHeight())
 	fresh.MoveDown(n)
 	m.resTable = fresh
+	m.rebuildResultRows()
 }
 
 func (m tuiModel) resOutputRoom() int {
@@ -83,7 +87,7 @@ func newResultsFilter() textinput.Model {
 
 func (m tuiModel) completedCount() int {
 	n := 0
-	for _, r := range m.results {
+	for _, r := range m.batch().Results {
 		if r.ElementID != "" {
 			n++
 		}
@@ -94,25 +98,13 @@ func (m tuiModel) completedCount() int {
 func (m *tuiModel) applyResultFilter() {
 	was := m.cursorResultID()
 
-	q := strings.ToLower(strings.TrimSpace(m.resFilter.Value()))
-	m.resMatches = m.resMatches[:0]
+	m.runtime().SetResultsFilter(m.resFilter.Value())
+	m.resMatches = m.runtime().ResultMatches()
 
 	var names []string
-	for i, r := range m.results {
-		if r.ElementID == "" {
-			continue
-		}
-		name := r.Name
-		if name == "" {
-			name = r.ElementID
-		}
-		names = append(names, name)
-
-		if q == "" ||
-			strings.Contains(strings.ToLower(name), q) ||
-			strings.Contains(strings.ToLower(r.ElementID), q) ||
-			strings.Contains(strings.ToLower(r.Model), q) {
-			m.resMatches = append(m.resMatches, i)
+	for _, r := range m.batch().Results {
+		if r.ElementID != "" {
+			names = append(names, runtime.ResultName(r))
 		}
 	}
 	m.resFilter.SetSuggestions(names)
@@ -122,7 +114,7 @@ func (m *tuiModel) applyResultFilter() {
 
 func (m tuiModel) cursorResultID() string {
 	if idx, ok := m.currentResult(); ok {
-		return m.results[idx].ElementID
+		return m.batch().Results[idx].ElementID
 	}
 	return ""
 }
@@ -130,7 +122,7 @@ func (m tuiModel) cursorResultID() string {
 func (m *tuiModel) keepResultCursorOn(eid string) {
 	if eid != "" {
 		for row, i := range m.resMatches {
-			if m.results[i].ElementID == eid {
+			if m.batch().Results[i].ElementID == eid {
 				m.resTable.SetCursor(row)
 				return
 			}
@@ -143,21 +135,29 @@ func (m *tuiModel) keepResultCursorOn(eid string) {
 
 func (m *tuiModel) rebuildResultRows() {
 	rows := make([]table.Row, 0, len(m.resMatches))
-	for _, i := range m.resMatches {
-		r := m.results[i]
+	at := m.resTable.Cursor()
+	for n, i := range m.resMatches {
+		r := m.batch().Results[i]
+		here := n == at
+
 		mark := ui.MarkCheck.String()
 		if r.Error != "" {
 			mark = ui.MarkCross.String()
+		}
+		caret := ""
+		if here {
+			caret, mark = ">", ui.Plain(mark)
 		}
 		name := r.Name
 		if name == "" {
 			name = r.ElementID
 		}
 		took := "-"
-		if i < len(m.elapsed) && m.elapsed[i] > 0 {
-			took = short(m.elapsed[i])
+		if i < len(m.batch().Elapsed) && m.batch().Elapsed[i] > 0 {
+			took = short(m.batch().Elapsed[i])
 		}
 		rows = append(rows, table.Row{
+			caret,
 			mark,
 			ui.Truncate(name, 26),
 			ui.Truncate(r.Model, 11),
@@ -166,7 +166,7 @@ func (m *tuiModel) rebuildResultRows() {
 		})
 	}
 	m.resTable.SetRows(rows)
-	m.resTable.SetWidth(min(m.width, 70))
+	m.resTable.SetWidth(min(m.width, 72))
 	m.resTable.SetHeight(m.resTableHeight())
 }
 
@@ -186,27 +186,48 @@ func (m tuiModel) currentResult() (int, bool) {
 	return m.resMatches[c], true
 }
 
-func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "esc", "q":
-		if key == "q" && m.resFilterOn {
-			break
-		}
-		switch {
-		case m.resOpen:
-			m.resOpen = false
-			m.resScroll, m.resLine = 0, 0
-			m.rebuildResultRows()
-		case m.resFilterOn || m.resFilter.Value() != "":
-			m.resFilterOn = false
-			m.resFilter.SetValue("")
-			m.resFilter.Blur()
-			m.applyResultFilter()
-		default:
-			m.phase = phasePicking
-		}
-		return m, nil
+func (m tuiModel) resultsBack() (tea.Model, tea.Cmd) {
+	switch {
+	case m.resOpen:
+		m.resOpen = false
+		m.resScroll, m.resLine = 0, 0
+		m.rebuildResultRows()
+	case m.resFilterOn || m.resFilter.Value() != "":
+		m.resFilterOn = false
+		m.resFilter.SetValue("")
+		m.resFilter.Blur()
+		m.applyResultFilter()
+	default:
+		m.phase = phasePicking
+	}
+	return m, nil
+}
 
+func (m tuiModel) toggleResult() (tea.Model, tea.Cmd) {
+	if _, ok := m.currentResult(); ok {
+		m.resOpen = !m.resOpen
+		m.resScroll, m.resLine = 0, 0
+		m.rebuildResultRows()
+	}
+	return m, nil
+}
+
+func (m tuiModel) openResultsFilter() (tea.Model, tea.Cmd) {
+	if m.resFilterOn {
+		return m, nil
+	}
+	m.resFilter.SetValue("")
+	m.resFilterOn = true
+	m.resOpen = false
+	m.applyResultFilter()
+	return m, m.resFilter.Focus()
+}
+
+func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.Cmd) {
+	if next, cmd, ran := m.bindingOn(scrResults, key); ran {
+		return next, cmd
+	}
+	switch key {
 	case "up", "down", "k", "j", "home", "end":
 		if key == "k" || key == "j" {
 			if m.resFilterOn {
@@ -237,7 +258,7 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		}
 		return m, nil
 
-	case "pgup", "pgdown":
+	case "pgup", "pgdown", "space", " ":
 		step := max(1, m.resOutputRoom()-1)
 		if !m.resOpen {
 			step = max(1, m.resTable.Height()-1)
@@ -250,31 +271,6 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		}
 		m.moveResultCursor(step)
 		return m, nil
-
-	case "enter":
-		if _, ok := m.currentResult(); ok {
-			m.resOpen = !m.resOpen
-			m.resScroll, m.resLine = 0, 0
-			m.rebuildResultRows()
-		}
-		return m, nil
-
-	case "alt+y":
-		return m.copyResults()
-
-	case "f", "o", "s":
-		if !m.resFilterOn {
-			return m.onResultsOutputKey(key)
-		}
-
-	case "/":
-		if !m.resFilterOn {
-			m.resFilter.SetValue("")
-			m.resFilterOn = true
-			m.resOpen = false
-			m.applyResultFilter()
-			return m, m.resFilter.Focus()
-		}
 	}
 
 	if m.resFilterOn {
@@ -290,9 +286,7 @@ func (m tuiModel) onResultsKey(msg tea.KeyPressMsg, key string) (tea.Model, tea.
 		return m, cmd
 	}
 
-	var cmd tea.Cmd
-	m.resTable, cmd = m.resTable.Update(msg)
-	return m, cmd
+	return m, nil
 }
 
 func (m tuiModel) onResultsOutputKey(key string) (tea.Model, tea.Cmd) {
@@ -304,13 +298,11 @@ func (m tuiModel) onResultsOutputKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	switch key {
-	case "f":
-		m.cfg.BatchFormat = output.NextFormat(m.batchFormat())
-	case "o":
-		m.cfg.BatchOrient = output.NextOrientation(m.batchOrient())
+	name := "batch_format"
+	if key == "o" {
+		name = "batch_orient"
 	}
-	if err := m.store.SaveConfig(m.cfg); err != nil {
+	if err := m.runtime().Set(name, "next"); err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
@@ -327,7 +319,7 @@ func (m tuiModel) onResultsOutputKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) resultDetail(idx int) []string {
-	r := m.results[idx]
+	r := m.batch().Results[idx]
 	var lines []string
 
 	if r.Error != "" {
@@ -354,9 +346,9 @@ func (m tuiModel) viewResults() string {
 
 	done := m.completedCount()
 	header := ui.StyleCmd.Render("results") +
-		ui.StyleDim.Render(fmt.Sprintf("   %d/%d done", done, len(m.ran)))
-	if m.failed > 0 {
-		header += ui.StyleErr.Render(fmt.Sprintf("  %d failed", m.failed))
+		ui.StyleDim.Render(fmt.Sprintf("   %d/%d done", done, len(m.batch().IDs)))
+	if m.batch().Failed > 0 {
+		header += ui.StyleErr.Render(fmt.Sprintf("  %d failed", m.batch().Failed))
 	}
 	tag := m.batchFormat()
 	if output.Tabular(m.batchFormat()) {
@@ -376,13 +368,13 @@ func (m tuiModel) viewResults() string {
 	}
 
 	if len(m.resMatches) == 0 {
-		b.WriteString(ui.StyleDim.Render("  nothing completed yet") + "\n")
+		b.WriteString(ui.StyleDim.Render("  none completed yet") + "\n")
 	} else {
 		b.WriteString(m.resTable.View() + "\n")
 	}
 
 	if idx, ok := m.currentResult(); ok && m.resOpen {
-		r := m.results[idx]
+		r := m.batch().Results[idx]
 		name := r.Name
 		if name == "" {
 			name = r.ElementID
@@ -415,9 +407,9 @@ func (m tuiModel) viewResults() string {
 	}
 
 	status := m.status
-	hint := "↑↓/jk move · / filter · enter open · f/o format · s save · " + copyKeyHint + " run as json · esc/q back"
+	hint := "↑↓/jk move · / filter · enter open · f/o format · s save · " + exportKeyHint + " run as json · esc/q back"
 	if m.resOpen {
-		hint = "↑↓/jk scroll · pgup/pgdn page · home/end ends · " + copyKeyHint + " output · esc/q close"
+		hint = "↑↓/jk scroll · pgup/pgdn page · home/end ends · " + exportKeyHint + " output · esc/q close"
 		if idx, ok := m.currentResult(); ok {
 			where := fmt.Sprintf("line %d of %d", m.resLine+1, len(m.resultDetail(idx)))
 			if status != "" {
@@ -430,12 +422,7 @@ func (m tuiModel) viewResults() string {
 }
 
 func (m tuiModel) seedResultsForTest(rs []sase.Result, el []time.Duration) tuiModel {
-	m.ran = make([]string, len(rs))
-	for i, r := range rs {
-		m.ran[i] = r.ElementID
-	}
-	m.results = rs
-	m.elapsed = el
+	m.runtime().LoadBatch(nil, rs, el)
 	m.phase = phaseResults
 	m.applyResultFilter()
 	return m

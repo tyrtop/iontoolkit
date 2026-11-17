@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,13 +23,10 @@ func (s *stubSource) Token(ctx context.Context) (string, time.Duration, error) {
 	return fmt.Sprintf("token-%d", n), s.ttl, nil
 }
 
-func activateServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{}`))
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+func activateClient(src TokenSource) *Client {
+	c := NewClient(&http.Client{Transport: routes{"/api/profile": func() (int, string) { return http.StatusOK, `{}` }}}, nil, "", false, 100, 100)
+	c.src = src
+	return c
 }
 
 func TestTokenGood(t *testing.T) {
@@ -63,9 +59,8 @@ func TestTokenGood(t *testing.T) {
 }
 
 func TestEnsureTokenIsFreeWhenTheTokenIsGood(t *testing.T) {
-	srv := activateServer(t)
 	src := &stubSource{ttl: 15 * time.Minute}
-	c := &Client{client: srv.Client(), src: src, profileBase: srv.URL}
+	c := activateClient(src)
 	c.setToken("t")
 	c.setExpiry(15 * time.Minute)
 
@@ -78,9 +73,8 @@ func TestEnsureTokenIsFreeWhenTheTokenIsGood(t *testing.T) {
 }
 
 func TestEnsureTokenMintsWhenTheTokenIsSpent(t *testing.T) {
-	srv := activateServer(t)
 	src := &stubSource{ttl: 15 * time.Minute}
-	c := &Client{client: srv.Client(), src: src, profileBase: srv.URL}
+	c := activateClient(src)
 	c.setToken("stale")
 	c.setExpiry(10 * time.Second)
 
@@ -99,9 +93,8 @@ func TestEnsureTokenMintsWhenTheTokenIsSpent(t *testing.T) {
 }
 
 func TestEnsureTokenReportsACredentialThatCannotBeRenewed(t *testing.T) {
-	srv := activateServer(t)
 	src := &stubSource{err: fmt.Errorf("token: status 400: invalid_grant")}
-	c := &Client{client: srv.Client(), src: src, profileBase: srv.URL}
+	c := activateClient(src)
 	c.setToken("stale")
 	c.setExpiry(10 * time.Second)
 
@@ -122,9 +115,8 @@ func TestEnsureTokenOnAStaticTokenDoesNothing(t *testing.T) {
 }
 
 func TestEnsureTokenMintsOnceUnderConcurrentCallers(t *testing.T) {
-	srv := activateServer(t)
 	src := &stubSource{ttl: 15 * time.Minute}
-	c := &Client{client: srv.Client(), src: src, profileBase: srv.URL}
+	c := activateClient(src)
 	c.setToken("stale")
 	c.setExpiry(10 * time.Second)
 

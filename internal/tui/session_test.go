@@ -7,7 +7,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"tyrtop.com/iontk/internal/runtime"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"github.com/coder/websocket"
 	"tyrtop.com/iontk/internal/app"
@@ -19,10 +21,10 @@ import (
 )
 
 func TestSessionGeometryAsksBigByDefault(t *testing.T) {
-	m := tuiModel{cfg: &config.Config{}}
+	m := withStore(tuiModel{}, nil, &config.Config{})
 	cols, rows := m.sessionGeometry()
-	if cols != defaultSessionCols || rows != defaultSessionRows {
-		t.Errorf("default geometry = %dx%d, want %dx%d", cols, rows, defaultSessionCols, defaultSessionRows)
+	if cols != runtime.DefaultSessionCols || rows != runtime.DefaultSessionRows {
+		t.Errorf("default geometry = %dx%d, want %dx%d", cols, rows, runtime.DefaultSessionCols, runtime.DefaultSessionRows)
 	}
 
 	m.width, m.height = 100, 30
@@ -36,14 +38,14 @@ func TestSessionGeometryAsksBigByDefault(t *testing.T) {
 }
 
 func TestSessionGeometryHonorsConfig(t *testing.T) {
-	m := tuiModel{cfg: &config.Config{SessionCols: 320, SessionRows: 80}}
+	m := withStore(tuiModel{}, nil, &config.Config{SessionCols: 320, SessionRows: 80})
 	if cols, rows := m.sessionGeometry(); cols != 320 || rows != 80 {
 		t.Errorf("geometry = %dx%d, want 320x80", cols, rows)
 	}
 }
 
 func TestPaneSizeClampsOnTinyTerminals(t *testing.T) {
-	m := tuiModel{cfg: &config.Config{}, width: 2, height: 1}
+	m := withStore(tuiModel{width: 2, height: 1}, nil, &config.Config{})
 	cols, rows := m.paneSize()
 	if cols < 20 || rows < 3 {
 		t.Errorf("paneSize = %dx%d, want clamped to a drawable minimum", cols, rows)
@@ -76,8 +78,8 @@ func TestEnterWithNoSelectionOpensASession(t *testing.T) {
 	if got.phase != phaseSession {
 		t.Fatalf("phase = %v, want phaseSession", got.phase)
 	}
-	if got.connecting != "S0100-RTR-01" {
-		t.Errorf("connecting = %q, want the highlighted element name", got.connecting)
+	if got := dialingName(got); got != "S0100-RTR-01" {
+		t.Errorf("connecting to %q, want the highlighted element name", got)
 	}
 	if cmd == nil {
 		t.Error("want a dial command")
@@ -86,7 +88,6 @@ func TestEnterWithNoSelectionOpensASession(t *testing.T) {
 
 func TestEnterWithoutClientReportsRatherThanPanics(t *testing.T) {
 	m := pickModel(t)
-	m.client = nil
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	got := mm.(tuiModel)
@@ -150,44 +151,45 @@ func TestTabBarAlwaysHasElementsTab(t *testing.T) {
 	if m.currentTab() != 0 {
 		t.Errorf("currentTab() = %d in the picker, want 0", m.currentTab())
 	}
-	if m.tabCount() != 1 {
-		t.Errorf("tabCount() = %d with no sessions, want 1", m.tabCount())
+	if tabCountOf(m) != 1 {
+		t.Errorf("tabCount() = %d with no sessions, want 1", tabCountOf(m))
 	}
 }
 
 func TestSelectTabWrapsThroughElements(t *testing.T) {
 	m := pickModel(t)
 
-	m2 := m.selectTab(1)
+	m2 := selectTabOf(m, 1)
 	if m2.phase != phasePicking {
 		t.Errorf("with no sessions, every tab is the elements tab; phase = %v", m2.phase)
 	}
 
-	m3 := m.selectTab(-1)
+	m3 := selectTabOf(m, -1)
 	if m3.phase != phasePicking {
 		t.Errorf("negative index should wrap, phase = %v", m3.phase)
 	}
 }
 
 func TestNilManagerBehavesAsEmpty(t *testing.T) {
-	m := tuiModel{cfg: &config.Config{}}
-	if m.tabCount() != 1 {
-		t.Errorf("tabCount() = %d with a nil manager, want 1", m.tabCount())
+	m := withStore(tuiModel{}, nil, &config.Config{})
+	if tabCountOf(m) != 1 {
+		t.Errorf("tabCount() = %d with a nil manager, want 1", tabCountOf(m))
 	}
 	if got := plain(m.tabBar()); !strings.Contains(got, "elements") {
 		t.Errorf("tabBar = %q", got)
 	}
-	m.sessions.CloseAll()
-	m.sessions.Next()
+	m.sessions().CloseAll()
+	m.sessions().Next()
 }
 
 func TestRenderSessionConnecting(t *testing.T) {
 	m := pickModel(t)
 	m.phase = phaseSession
-	m.connecting = "S0100-RTR-01"
-	t.Log("\n" + m.viewSession())
+	m.runtime().MarkDialing("1", "S0100-RTR-01")
+	m.frontDial = "1"
+	t.Log("\n" + sessionText(m))
 
-	if got := plain(m.viewSession()); !strings.Contains(got, "connecting to S0100-RTR-01") {
+	if got := plain(sessionText(m)); !strings.Contains(got, "connecting to S0100-RTR-01") {
 		t.Errorf("view = %q", got)
 	}
 }
@@ -242,7 +244,7 @@ func TestSlashMenuFiltersAndNavigates(t *testing.T) {
 
 func TestSlashCommandsOffersWritesWhenAllowed(t *testing.T) {
 	m := pickModel(t)
-	m.cfg.AllowWrites = true
+	m.cfg().AllowWrites = true
 
 	all := m.catalog()
 	found := false
@@ -288,27 +290,60 @@ func TestSpinnerOnlyTicksWhereVisible(t *testing.T) {
 	}
 	for phase, want := range cases {
 		m.phase = phase
-		m.connecting = ""
-		m.cacheState = cacheUpdated
+		m.runtime().DialDone("1")
+		m.frontDial = ""
+		m.setCacheState(cacheUpdated)
 		if got := m.wantsSpinner(); got != want {
 			t.Errorf("phase %d wantsSpinner = %v, want %v", phase, got, want)
 		}
 	}
 
 	m.phase = phasePicking
-	m.cacheState = cacheUpdating
+	m.setCacheState(cacheUpdating)
 	if !m.wantsSpinner() {
 		t.Error("the element list does not tick while refreshing, so its marker would sit still")
 	}
-	m.cacheState = cacheCached
+	m.setCacheState(cacheCached)
 	if m.wantsSpinner() {
 		t.Error("the element list keeps ticking when idle")
 	}
+	m.runtime().MarkHAOut("1")
+	if !m.wantsSpinner() {
+		t.Error("the element list stops ticking while HA is read, so its refreshing HA line sits on one frame")
+	}
+	m.runtime().ResetHALive()
 
 	m.phase = phaseSession
-	m.connecting = "S0100-RTR-01"
+	m.runtime().MarkDialing("1", "S0100-RTR-01")
+	m.frontDial = "1"
 	if !m.wantsSpinner() {
 		t.Error("a connecting session should animate")
+	}
+}
+
+func TestAnHASweepRestartsASpinnerThatHadStopped(t *testing.T) {
+	m := pickModel(t)
+	m.setCacheState(cacheUpdated)
+	haEvent := runtimeMsg{rt: m.rt, events: []runtime.Event{{Area: runtime.AreaHA}}}
+
+	next, cmd := m.Update(spinner.TickMsg{})
+	m = next.(tuiModel)
+	if cmd != nil {
+		t.Fatal("the spinner kept ticking on an idle list")
+	}
+
+	m.runtime().MarkHAOut("1")
+	next, cmd = m.Update(haEvent)
+	m = next.(tuiModel)
+	if cmd == nil {
+		t.Fatal("an HA sweep that starts on an idle list leaves its refreshing HA glyph on one frame")
+	}
+	if _, ok := cmd().(spinner.TickMsg); !ok {
+		t.Fatal("the HA event did not restart the spinner")
+	}
+
+	if _, cmd = m.Update(haEvent); cmd != nil {
+		t.Error("a second event restarted a spinner that was already turning, which doubles its speed")
 	}
 }
 
@@ -336,7 +371,7 @@ func TestRenderSlashViews(t *testing.T) {
 
 func TestShellModeEnterOpensOneTabPerSelection(t *testing.T) {
 	m := pickModel(t)
-	m.mode = modeShell
+	m.setMode(modeShell)
 	setTestClient(&m, liveClient())
 
 	for i := 0; i < 2; i++ {
@@ -345,8 +380,8 @@ func TestShellModeEnterOpensOneTabPerSelection(t *testing.T) {
 		mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
 		m = mm.(tuiModel)
 	}
-	if len(m.selected) != 2 {
-		t.Fatalf("selected %d, want 2", len(m.selected))
+	if m.selectedCount() != 2 {
+		t.Fatalf("selected %d, want 2", m.selectedCount())
 	}
 	if got := len(m.pickTargets()); got != 2 {
 		t.Errorf("pickTargets() = %d, want 2", got)
@@ -360,8 +395,8 @@ func TestShellModeEnterOpensOneTabPerSelection(t *testing.T) {
 	if got.phase != phasePicking {
 		t.Errorf("phase = %v, want to stay on the element list", got.phase)
 	}
-	if len(got.dialing) != 2 {
-		t.Errorf("dialing = %v, want both elements marked as connecting", got.dialing)
+	if len(got.runtime().Dials()) != 2 {
+		t.Errorf("dialing = %v, want both elements marked as connecting", got.runtime().Dials())
 	}
 	if !got.connectingAny() {
 		t.Error("connectingAny() = false, want the spinner ticking while dials are in flight")
@@ -370,15 +405,15 @@ func TestShellModeEnterOpensOneTabPerSelection(t *testing.T) {
 
 func TestModeCycle(t *testing.T) {
 	m := pickModel(t)
-	if m.mode != modeShell {
-		t.Fatalf("default mode = %v, want shell", m.mode)
+	if m.mode() != modeShell {
+		t.Fatalf("default mode = %v, want shell", m.mode())
 	}
 
-	want := append(pickModes[1:], pickModes[0])
+	want := []string{modeBatch, modeData, modeShell}
 	cur := tea.Model(m)
 	for i, expect := range want {
 		cur, _ = cur.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModAlt}))
-		if got := cur.(tuiModel).mode; got != expect {
+		if got := cur.(tuiModel).mode(); got != expect {
 			t.Fatalf("alt+m %d times gave %v, want %v", i+1, got, expect)
 		}
 	}
@@ -401,9 +436,9 @@ func TestFirstLoginAsksForCredentialsThenProceeds(t *testing.T) {
 	cfg := &config.Config{Tenants: []config.Tenant{{Name: "t", TSGID: "1"}}}
 
 	m := newTUIModel(context.Background(), st, cfg)
-	m.tenant, m.hasTenant = cfg.Tenants[0], true
+	m.runtime().UseTenant(cfg.Tenants[0])
 	m.phase = phasePicking
-	m.mode = modeShell
+	m.setMode(modeShell)
 	setTestClient(&m, liveClient())
 	m.setElements([]elementRow{{Element: api.Element{ID: "1", Name: "S0100-RTR-01"}, TSG: "1", Tenant: "Acme Co"}})
 
@@ -416,7 +451,7 @@ func TestFirstLoginAsksForCredentialsThenProceeds(t *testing.T) {
 		t.Fatalf("form has %d fields, want user and password", len(f.form))
 	}
 
-	f = typeString(t, f, "cisops")
+	f = typeString(t, f, "ops")
 	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	f = mm.(tuiModel)
 	f = typeString(t, f, "pw")
@@ -426,14 +461,14 @@ func TestFirstLoginAsksForCredentialsThenProceeds(t *testing.T) {
 	if done.phase != phaseSession {
 		t.Errorf("phase = %v, want the shell to open after saving credentials", done.phase)
 	}
-	if got, err := st.Secrets.Get(config.IONPassKey("1", "cisops")); err != nil || got != "pw" {
+	if got, err := st.Secrets.Get(config.IONPassKey("1", "ops")); err != nil || got != "pw" {
 		t.Errorf("password not stored: %q %v", got, err)
 	}
 
 	m2 := newTUIModel(context.Background(), st, cfg)
-	m2.tenant, m2.hasTenant = done.tenant, true
-	m2.ionUser = "cisops"
-	if app.NeedsIONPassword(st, m2.tenant, m2.ionUser) {
+	m2.runtime().UseTenant(done.tenant())
+	m2.runtime().SetIONUser("ops")
+	if app.NeedsIONPassword(st, m2.tenant(), m2.ionUser()) {
 		t.Error("second login should not ask again")
 	}
 }
@@ -461,12 +496,12 @@ func TestUserMenuSelectsRunAsUser(t *testing.T) {
 	st := config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json"))
 	cfg := &config.Config{Tenants: []config.Tenant{{
 		Name: "t", TSGID: "1",
-		Users: []config.IONUser{{Name: "readonly", Default: true}, {Name: "cisops"}},
+		Users: []config.IONUser{{Name: "readonly", Default: true}, {Name: "ops"}},
 	}}}
 
 	m := newTUIModel(context.Background(), st, cfg)
-	m.tenant, m.hasTenant = cfg.Tenants[0], true
-	m.ionUser = "readonly"
+	m.runtime().UseTenant(cfg.Tenants[0])
+	m.runtime().SetIONUser("readonly")
 	m.phase = phaseUsers
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
@@ -474,8 +509,8 @@ func TestUserMenuSelectsRunAsUser(t *testing.T) {
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	got := mm.(tuiModel)
 
-	if got.ionUser != "cisops" {
-		t.Errorf("ionUser = %q, want cisops", got.ionUser)
+	if got.ionUser() != "ops" {
+		t.Errorf("ionUser = %q, want ops", got.ionUser())
 	}
 	if got.phase != phaseUsers {
 		t.Errorf("phase = %v, want to stay in the panel for repeated switches", got.phase)
@@ -499,7 +534,7 @@ func TestUserMenuShowsWhetherAPasswordIsSaved(t *testing.T) {
 	}
 
 	m := newTUIModel(context.Background(), st, cfg)
-	m.tenant, m.hasTenant = cfg.Tenants[0], true
+	m.runtime().UseTenant(cfg.Tenants[0])
 	m.phase = phaseUsers
 
 	got := plain(m.viewUsers())
@@ -512,18 +547,18 @@ func TestSessionCredentialsComeFromTheStore(t *testing.T) {
 	root := t.TempDir()
 	st := config.OpenAt(root, config.NewFileSecrets(root+"/secrets.json"))
 	cfg := &config.Config{Tenants: []config.Tenant{{
-		Name: "t", TSGID: "1", Users: []config.IONUser{{Name: "cisops", Default: true}},
+		Name: "t", TSGID: "1", Users: []config.IONUser{{Name: "ops", Default: true}},
 	}}}
-	if err := st.Secrets.Set(config.IONPassKey("1", "cisops"), "s3cret"); err != nil {
+	if err := st.Secrets.Set(config.IONPassKey("1", "ops"), "s3cret"); err != nil {
 		t.Fatal(err)
 	}
 
 	m := newTUIModel(context.Background(), st, cfg)
-	m.tenant, m.hasTenant = cfg.Tenants[0], true
-	m.ionUser = "cisops"
+	m.runtime().UseTenant(cfg.Tenants[0])
+	m.runtime().SetIONUser("ops")
 
 	creds := m.credsFor("1")
-	if creds.User != "cisops" || creds.Pass != "s3cret" {
+	if creds.User != "ops" || creds.Pass != "s3cret" {
 		t.Errorf("sessionCreds = %+v, want the stored pair", creds)
 	}
 }
@@ -539,28 +574,28 @@ func TestReopenWorksFromTheElementsList(t *testing.T) {
 	}
 
 	m := newTUIModel(context.Background(), st, cfg)
-	m.tenant, m.hasTenant = cfg.Tenants[0], true
-	m.ionUser = "u"
+	m.runtime().UseTenant(cfg.Tenants[0])
+	m.runtime().SetIONUser("u")
 	setTestClient(&m, liveClient())
 	m.phase = phasePicking
 	m.setElements([]elementRow{{Element: api.Element{ID: "1", Name: "S0100-RTR-01"}, TSG: "1", Tenant: "Acme Co"}})
 
-	live, err := m.sessions.Open(context.Background(), stubDialer{}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
+	live, err := m.sessions().Open(context.Background(), stubDialer{}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.sessions.Count() != 1 {
-		t.Fatalf("Count() = %d, want 1", m.sessions.Count())
+	if m.sessions().Count() != 1 {
+		t.Fatalf("Count() = %d, want 1", m.sessions().Count())
 	}
 
 	m.phase = phaseSession
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'w', Mod: tea.ModAlt}))
 	closed := mm.(tuiModel)
-	if closed.sessions.Count() != 0 {
-		t.Fatalf("alt+w left %d visible sessions", closed.sessions.Count())
+	if closed.sessions().Count() != 0 {
+		t.Fatalf("alt+w left %d visible sessions", closed.sessions().Count())
 	}
-	if closed.sessions.DetachedCount() != 1 {
-		t.Fatalf("DetachedCount() = %d, want 1 — alt+w should detach, not close", closed.sessions.DetachedCount())
+	if closed.sessions().DetachedCount() != 1 {
+		t.Fatalf("DetachedCount() = %d, want 1 — alt+w should detach, not close", closed.sessions().DetachedCount())
 	}
 	if live.Closed() {
 		t.Error("detaching closed the session; it must stay alive in the background")
@@ -574,13 +609,13 @@ func TestReopenWorksFromTheElementsList(t *testing.T) {
 	if reopened.phase != phaseSession {
 		t.Errorf("alt+t from the elements list gave phase %v, want phaseSession", reopened.phase)
 	}
-	if reopened.sessions.Count() != 1 {
-		t.Fatalf("Count() = %d after reattach, want 1", reopened.sessions.Count())
+	if reopened.sessions().Count() != 1 {
+		t.Fatalf("Count() = %d after reattach, want 1", reopened.sessions().Count())
 	}
-	if reopened.connecting != "" {
-		t.Errorf("connecting = %q; reattaching a live session must not redial", reopened.connecting)
+	if opening := reopened.runtime().Opening(); len(opening) != 0 {
+		t.Errorf("opening %v; reattaching a live session must not redial", opening)
 	}
-	if reopened.sessions.Active() != live {
+	if reopened.sessions().Active() != live {
 		t.Error("reattach produced a different session; the original should have stayed alive")
 	}
 }
@@ -603,21 +638,21 @@ func TestReopenFocusesAnAlreadyOpenTab(t *testing.T) {
 	setTestClient(&m, liveClient())
 
 	for _, eid := range []string{"1", "2"} {
-		if _, err := m.sessions.Open(context.Background(), stubDialer{}, eid, "e"+eid, 200, 50, ionterm.Credentials{}); err != nil {
+		if _, err := m.sessions().Open(context.Background(), stubDialer{}, eid, "e"+eid, 200, 50, ionterm.Credentials{}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	m.sessions.Select(0)
-	m.sessions.CloseActive()
+	m.sessions().Select(0)
+	m.sessions().CloseActive()
 
-	if _, err := m.sessions.Open(context.Background(), stubDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), stubDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
 	mm, _ := m.reopenLastTab()
 	got := mm.(tuiModel)
-	if got.sessions.Count() != 2 {
-		t.Errorf("Count() = %d, want 2 — reopen must not duplicate", got.sessions.Count())
+	if got.sessions().Count() != 2 {
+		t.Errorf("Count() = %d, want 2 — reopen must not duplicate", got.sessions().Count())
 	}
 	if got.phase != phaseSession {
 		t.Errorf("phase = %v, want phaseSession", got.phase)
@@ -716,7 +751,7 @@ func TestSlashCommandsSendsToTheSession(t *testing.T) {
 	m.phase = phaseSession
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -774,7 +809,7 @@ func TestSlashOneLinePalette(t *testing.T) {
 	m.phase = phaseSession
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -812,7 +847,7 @@ func TestSlashOneLinePalette(t *testing.T) {
 			if !strings.HasSuffix(sent, " ") {
 				t.Errorf("sent %q — want a trailing space so arguments can follow", sent)
 			}
-			if sess := after.sessions.Active(); sess != nil && sess.LineEmpty() {
+			if sess := after.sessions().Active(); sess != nil && sess.LineEmpty() {
 				t.Error("line buffer still reports empty after inserting a command")
 			}
 			return
@@ -868,7 +903,7 @@ func TestSlashFullyTypedCommandIsSentVerbatim(t *testing.T) {
 	m.phase = phaseSession
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -899,7 +934,7 @@ func TestSlashTypedWriteCommandIsBlocked(t *testing.T) {
 	m.phase = phaseSession
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -919,18 +954,18 @@ func TestSlashTypedWriteCommandIsBlocked(t *testing.T) {
 
 func TestElementsListAlwaysDialsFresh(t *testing.T) {
 	m := pickModel(t)
-	m.mode = modeShell
+	m.setMode(modeShell)
 	setTestClient(&m, liveClient())
 
-	first, err := m.sessions.Open(context.Background(), stubDialer{}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
+	first, err := m.sessions().Open(context.Background(), stubDialer{}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	m.phase = phaseSession
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'w', Mod: tea.ModAlt}))
 	m = mm.(tuiModel)
-	if m.sessions.DetachedCount() != 1 {
-		t.Fatalf("DetachedCount() = %d, want 1", m.sessions.DetachedCount())
+	if m.sessions().DetachedCount() != 1 {
+		t.Fatalf("DetachedCount() = %d, want 1", m.sessions().DetachedCount())
 	}
 
 	m.phase = phasePicking
@@ -940,11 +975,11 @@ func TestElementsListAlwaysDialsFresh(t *testing.T) {
 	if cmd == nil {
 		t.Error("selecting from the elements list should dial, not reattach")
 	}
-	if picked.connecting == "" {
+	if dialingName(picked) == "" {
 		t.Error("want a connecting state for a fresh dial")
 	}
-	if picked.sessions.DetachedCount() != 1 {
-		t.Errorf("DetachedCount() = %d — the elements list must not consume the detached session", picked.sessions.DetachedCount())
+	if picked.sessions().DetachedCount() != 1 {
+		t.Errorf("DetachedCount() = %d — the elements list must not consume the detached session", picked.sessions().DetachedCount())
 	}
 	if first.Closed() {
 		t.Error("the detached session should still be alive")
@@ -954,18 +989,18 @@ func TestElementsListAlwaysDialsFresh(t *testing.T) {
 func TestReattachSkipsDeadSessions(t *testing.T) {
 	m := pickModel(t)
 
-	dead, err := m.sessions.Open(context.Background(), stubDialer{}, "1", "dead", 200, 50, ionterm.Credentials{})
+	dead, err := m.sessions().Open(context.Background(), stubDialer{}, "1", "dead", 200, 50, ionterm.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.sessions.Detach()
+	m.sessions().Detach()
 	dead.Close()
 
-	if _, ok := m.sessions.Reattach(); ok {
+	if _, ok := m.sessions().Reattach(); ok {
 		t.Error("Reattach returned a closed session")
 	}
-	if m.sessions.DetachedCount() != 0 {
-		t.Errorf("DetachedCount() = %d, want the dead session dropped", m.sessions.DetachedCount())
+	if m.sessions().DetachedCount() != 0 {
+		t.Errorf("DetachedCount() = %d, want the dead session dropped", m.sessions().DetachedCount())
 	}
 }
 
@@ -1129,7 +1164,7 @@ func TestInsertedCommandEndsWithASpace(t *testing.T) {
 	m.phase = phaseSession
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1143,8 +1178,8 @@ func TestInsertedCommandEndsWithASpace(t *testing.T) {
 			if got != "dump device status " {
 				t.Errorf("sent %q, want exactly the command plus one space", got)
 			}
-			if sess := mm.(tuiModel).sessions.Active(); sess != nil && sess.Line() != "dump device status " {
-				t.Errorf("line buffer = %q, want it to match what was sent", sess.Line())
+			if sess := mm.(tuiModel).sessions().Active(); sess != nil && sess.Line() != "dump device status" {
+				t.Errorf("Line() = %q, want the command without the space it was sent with", sess.Line())
 			}
 			return
 		}
@@ -1183,7 +1218,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 func waitForSessionEnd(t *testing.T, m tuiModel, eid string) {
 	t.Helper()
 	waitFor(t, "session "+eid+" to end", func() bool {
-		s := m.sessions.Find(eid)
+		s := m.sessions().Find(eid)
 		return s != nil && s.Ended()
 	})
 }
@@ -1194,7 +1229,7 @@ func TestExitingAShellClosesItsTab(t *testing.T) {
 	m.phase = phaseSession
 	m.status = "something stale"
 
-	if _, err := m.sessions.Open(context.Background(), exitDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), exitDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 	waitForSessionEnd(t, m, "1")
@@ -1202,7 +1237,7 @@ func TestExitingAShellClosesItsTab(t *testing.T) {
 	mm, _ := m.Update(sessionDirtyMsg("1"))
 	got := mm.(tuiModel)
 
-	if n := got.sessions.Count(); n != 0 {
+	if n := got.sessions().Count(); n != 0 {
 		t.Errorf("Count() = %d, want the exited shell's tab closed", n)
 	}
 	if got.phase != phasePicking {
@@ -1218,10 +1253,10 @@ func TestExitingOneOfSeveralShellsLeavesTheOthers(t *testing.T) {
 	setTestClient(&m, liveClient())
 	m.phase = phaseSession
 
-	if _, err := m.sessions.Open(context.Background(), stubDialer{}, "2", "e2", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), stubDialer{}, "2", "e2", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.sessions.Open(context.Background(), exitDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), exitDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 	waitForSessionEnd(t, m, "1")
@@ -1229,10 +1264,10 @@ func TestExitingOneOfSeveralShellsLeavesTheOthers(t *testing.T) {
 	mm, _ := m.Update(sessionDirtyMsg("1"))
 	got := mm.(tuiModel)
 
-	if n := got.sessions.Count(); n != 1 {
+	if n := got.sessions().Count(); n != 1 {
 		t.Fatalf("Count() = %d, want the other shell left open", n)
 	}
-	if got.sessions.Active() == nil {
+	if got.sessions().Active() == nil {
 		t.Error("Active() = nil, want the surviving tab in front")
 	}
 	if got.phase != phaseSession {
@@ -1245,7 +1280,7 @@ func TestReattachingAfterAnExitOpensAFreshSession(t *testing.T) {
 	setTestClient(&m, liveClient())
 	m.phase = phaseSession
 
-	if _, err := m.sessions.Open(context.Background(), exitDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), exitDialer{}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 	waitForSessionEnd(t, m, "1")
@@ -1254,8 +1289,8 @@ func TestReattachingAfterAnExitOpensAFreshSession(t *testing.T) {
 
 	mm, cmd := m.reopenLastTab()
 	got := mm.(tuiModel)
-	if got.status == "nothing to reattach" {
-		t.Error(`status = "nothing to reattach", want alt+t to open a fresh session`)
+	if got.status == "no closed session to reattach" {
+		t.Error(`status = "no closed session to reattach", want alt+t to open a fresh session`)
 	}
 	if cmd == nil {
 		t.Error("reopenLastTab() cmd = nil, want it to dial the element again")
@@ -1269,24 +1304,24 @@ func TestReattachingToAFailedDetachedSessionOpensAFreshOne(t *testing.T) {
 	m := pickModel(t)
 	setTestClient(&m, liveClient())
 
-	s, err := m.sessions.Open(context.Background(), stubDialer{}, "1", "e1", 200, 50, ionterm.Credentials{})
+	s, err := m.sessions().Open(context.Background(), stubDialer{}, "1", "e1", 200, 50, ionterm.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := m.sessions.Detach(); !ok {
+	if _, ok := m.sessions().Detach(); !ok {
 		t.Fatal("Detach() ok = false")
 	}
 	s.Close()
 
 	mm, cmd := m.reopenLastTab()
 	got := mm.(tuiModel)
-	if got.status == "nothing to reattach" {
-		t.Error(`status = "nothing to reattach", want a fresh session instead of a dead tab`)
+	if got.status == "no closed session to reattach" {
+		t.Error(`status = "no closed session to reattach", want a fresh session instead of a dead tab`)
 	}
 	if cmd == nil {
 		t.Error("reopenLastTab() cmd = nil, want it to dial the element again")
 	}
-	if n := got.sessions.DetachedCount(); n != 0 {
+	if n := got.sessions().DetachedCount(); n != 0 {
 		t.Errorf("DetachedCount() = %d, want the unusable session dropped", n)
 	}
 }
@@ -1333,11 +1368,11 @@ func hungModel(t *testing.T) tuiModel {
 	m := pickModel(t)
 	setTestClient(&m, liveClient())
 	m.phase = phaseSession
-	if _, err := m.sessions.Open(context.Background(), hungDialer{newHungConn()}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), hungDialer{newHungConn()}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "the hang to be noticed", func() bool {
-		s := m.sessions.Find("1")
+		s := m.sessions().Find("1")
 		return s != nil && s.Hung()
 	})
 	return m
@@ -1346,8 +1381,8 @@ func hungModel(t *testing.T) tuiModel {
 func TestAHungSessionSaysSoAndOffersAReconnect(t *testing.T) {
 	m := hungModel(t)
 
-	view := plain(m.viewSession())
-	if !strings.Contains(view, "stopped answering") {
+	view := plain(sessionText(m))
+	if !strings.Contains(view, "stopped responding") {
 		t.Errorf("the pane does not say the connection is hung:\n%s", view)
 	}
 	if !strings.Contains(view, "alt+r") {
@@ -1360,17 +1395,17 @@ func TestKeystrokesAreNotSentToAHungSession(t *testing.T) {
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"}))
 	got := mm.(tuiModel)
-	if got.sessions.Count() != 1 {
-		t.Errorf("Count() = %d, want the tab left alone", got.sessions.Count())
+	if got.sessions().Count() != 1 {
+		t.Errorf("Count() = %d, want the tab left alone", got.sessions().Count())
 	}
-	if !got.sessions.Find("1").Hung() {
+	if !got.sessions().Find("1").Hung() {
 		t.Error("the session stopped reporting as hung after a keypress")
 	}
 }
 
 func TestAltROnAHungSessionOpensAFreshOne(t *testing.T) {
 	m := hungModel(t)
-	hung := m.sessions.Find("1")
+	hung := m.sessions().Find("1")
 
 	mm, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
 	got := mm.(tuiModel)
@@ -1378,7 +1413,7 @@ func TestAltROnAHungSessionOpensAFreshOne(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("alt+r produced no command, want it to dial the element again")
 	}
-	if s := got.sessions.Find("1"); s != hung {
+	if s := got.sessions().Find("1"); s != hung {
 		t.Error("the hung tab went before its replacement was up")
 	}
 	if got.redialing != "1" {
@@ -1387,7 +1422,7 @@ func TestAltROnAHungSessionOpensAFreshOne(t *testing.T) {
 	if !strings.Contains(got.status, "redialling") {
 		t.Errorf("status = %q, want it to say a dial is running", got.status)
 	}
-	pane := plain(got.viewSession())
+	pane := plain(sessionText(got))
 	if !strings.Contains(pane, "redialling e1") || strings.Contains(pane, "alt+r retry") {
 		t.Errorf("the pane still offers the key it is already running:\n%s", pane)
 	}
@@ -1403,9 +1438,6 @@ func TestAltROnAHungSessionOpensAFreshOne(t *testing.T) {
 	if after.redialing != "" {
 		t.Errorf("redialing = %q once the session opened, want it cleared", after.redialing)
 	}
-	if s := after.sessions.Find("1"); s == hung {
-		t.Error("the hung tab survived the swap")
-	}
 }
 
 func TestAltRIsIgnoredWhileASessionIsHealthy(t *testing.T) {
@@ -1413,16 +1445,16 @@ func TestAltRIsIgnoredWhileASessionIsHealthy(t *testing.T) {
 	setTestClient(&m, liveClient())
 	m.phase = phaseSession
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "e1", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
 	got := mm.(tuiModel)
-	if got.sessions.Count() != 1 {
-		t.Fatalf("Count() = %d, want the session untouched", got.sessions.Count())
+	if got.sessions().Count() != 1 {
+		t.Fatalf("Count() = %d, want the session untouched", got.sessions().Count())
 	}
-	if got.sessions.Find("1") == nil {
+	if got.sessions().Find("1") == nil {
 		t.Error("the healthy session was replaced by alt+r")
 	}
 }
@@ -1430,38 +1462,38 @@ func TestAltRIsIgnoredWhileASessionIsHealthy(t *testing.T) {
 func TestAltRRedialsAFailedSession(t *testing.T) {
 	m, set := fixtureTUI(t)
 	m.phase = phaseSession
-	t.Cleanup(m.sessions.CloseAll)
+	t.Cleanup(m.sessions().CloseAll)
 
 	el := set.Tenants[0].Elements[0]
-	next, cmd := m.openSession(el.ID, el.Name, m.tenant.TSGID)
+	next, cmd := m.openSession(el.ID, el.Name, m.tenant().TSGID)
 	m = next.(tuiModel)
 	runCmd(t, cmd)
-	waitForTUI(t, func() bool { return m.sessions.Find(el.ID) != nil })
+	waitForTUI(t, func() bool { return m.sessions().Find(el.ID) != nil })
 
-	s := m.sessions.Find(el.ID)
+	s := m.sessions().Find(el.ID)
 	waitForTUI(t, func() bool { return strings.Contains(s.Render(), el.Name+"#") })
 
 	s.SendText("exit\r")
 	waitForTUI(t, func() bool { return s.Ended() || s.Err() != nil })
-	m.sessions.Select(m.sessions.IndexOf(el.ID))
+	m.sessions().Select(m.sessions().IndexOf(el.ID))
 
 	next, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
 	m = next.(tuiModel)
 	if cmd == nil {
 		t.Fatal("alt+r on a dead session queued nothing")
 	}
-	if m.sessions.Find(el.ID) != s {
+	if m.sessions().Find(el.ID) != s {
 		t.Error("the dead tab went before its replacement was up")
 	}
-	if got := plain(m.viewSession()); !strings.Contains(got, "redial") {
+	if got := plain(sessionText(m)); !strings.Contains(got, "redial") {
 		t.Errorf("nothing on screen says a redial is running:\n%s", got)
 	}
 
 	m = deliverSessionOpened(t, m, cmd)
-	if m.sessions.Count() != 1 {
-		t.Fatalf("%d tabs after the redial, want the dead one replaced", m.sessions.Count())
+	if m.sessions().Count() != 1 {
+		t.Fatalf("%d tabs after the redial, want the dead one replaced", m.sessions().Count())
 	}
-	again := m.sessions.Find(el.ID)
+	again := m.sessions().Find(el.ID)
 	if again == nil || again == s {
 		t.Fatal("the live session did not take the dead tab's place")
 	}
@@ -1503,10 +1535,10 @@ func deliverSessionOpened(t *testing.T, m tuiModel, cmd tea.Cmd) tuiModel {
 func TestAFailedRedialKeepsTheTab(t *testing.T) {
 	m := pickModel(t)
 	m.phase = phaseSession
-	t.Cleanup(m.sessions.CloseAll)
+	t.Cleanup(m.sessions().CloseAll)
 
 	conn := newRecConn()
-	s, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
+	s, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1518,8 +1550,8 @@ func TestAFailedRedialKeepsTheTab(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("a redial started with no client to dial with")
 	}
-	if after.sessions.Count() != 1 {
-		t.Errorf("%d tabs after a redial that could not start, want the dead one kept", after.sessions.Count())
+	if after.sessions().Count() != 1 {
+		t.Errorf("%d tabs after a redial that could not start, want the dead one kept", after.sessions().Count())
 	}
 	if !strings.Contains(after.status, "could not reach") {
 		t.Errorf("status = %q, want it to say why nothing happened", after.status)
@@ -1529,22 +1561,178 @@ func TestAFailedRedialKeepsTheTab(t *testing.T) {
 func TestAltROnALiveSessionSaysSo(t *testing.T) {
 	m := pickModel(t)
 	m.phase = phaseSession
-	t.Cleanup(m.sessions.CloseAll)
+	t.Cleanup(m.sessions().CloseAll)
 
 	conn := newRecConn()
-	if _, err := m.sessions.Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
+	if _, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{}); err != nil {
 		t.Fatal(err)
 	}
 
 	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
 	after := next.(tuiModel)
-	if cmd != nil || after.sessions.Count() != 1 {
+	if cmd != nil || after.sessions().Count() != 1 {
 		t.Error("alt+r redialled a session that was still answering")
 	}
-	if !strings.Contains(after.status, "still answering") {
+	if !strings.Contains(after.status, "still responding") {
 		t.Errorf("status = %q, want it to say why nothing happened", after.status)
 	}
 	if strings.Contains(conn.sent(), "\x1b") {
 		t.Errorf("alt+r reached the device as an escape sequence: %q", conn.sent())
+	}
+}
+
+func TestASecondIONGetsItsOwnTabWhileItConnects(t *testing.T) {
+	m := pickModel(t)
+	setTestClient(&m, liveClient())
+	m.phase = phaseSession
+	t.Cleanup(m.sessions().CloseAll)
+
+	conn := newRecConn()
+	first, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.feed("S0100-RTR-01# first-ion-screen")
+	waitForTUI(t, first.Answered)
+
+	next, cmd := m.openSession("2", "S0100-RTR-02", m.tenant().TSGID)
+	m = next.(tuiModel)
+	if cmd == nil {
+		t.Fatal("opening a second ION queued nothing")
+	}
+	view := plain(sessionText(m))
+	if strings.Contains(view, "first-ion-screen") {
+		t.Errorf("the first ION's screen shows while the second one connects:\n%s", view)
+	}
+	if strings.Count(view, "connecting to S0100-RTR-02") != 1 {
+		t.Errorf("want the connect bar alone to say the second ION is connecting:\n%s", view)
+	}
+	if tabs := plain(m.tabBar()); !strings.Contains(tabs, "S0100-RTR-02") {
+		t.Errorf("tab bar = %q, want a tab for the ION being opened", tabs)
+	}
+
+	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"}))
+	m = next.(tuiModel)
+	if !first.LineEmpty() {
+		t.Error("a key typed while the second ION connected went to the first")
+	}
+
+	if _, err := m.sessions().Open(context.Background(), recDialer{newRecConn()}, "2", "S0100-RTR-02", 200, 50, ionterm.Credentials{}); err != nil {
+		t.Fatal(err)
+	}
+	next, _ = m.Update(sessionOpenedMsg("2"))
+	m = next.(tuiModel)
+	if view := plain(sessionText(m)); strings.Contains(view, "connecting to") {
+		t.Errorf("still connecting once the second ION's session opened:\n%s", view)
+	}
+}
+
+func TestAnIONStillDialingKeepsItsTabWhicheverWayYouLeaveIt(t *testing.T) {
+	for _, leave := range []tea.Key{
+		{Code: ']', Mod: tea.ModCtrl},
+		{Code: tea.KeyLeft, Mod: tea.ModAlt},
+		{Code: tea.KeyRight, Mod: tea.ModAlt},
+	} {
+		t.Run(leave.String(), func(t *testing.T) {
+			m := pickModel(t)
+			setTestClient(&m, liveClient())
+			t.Cleanup(m.sessions().CloseAll)
+			before := len(strings.Split(m.viewPicking(), "\n"))
+
+			next, cmd := m.openSession("2", "S0100-RTR-02", m.tenant().TSGID)
+			m = next.(tuiModel)
+			if cmd == nil {
+				t.Fatal("opening an ION queued nothing")
+			}
+			next, _ = m.Update(tea.KeyPressMsg(leave))
+			m = next.(tuiModel)
+			if m.phase != phasePicking {
+				t.Fatalf("phase = %v, want the element list", m.phase)
+			}
+
+			view := m.viewPicking()
+			if top := plain(strings.SplitN(view, "\n", 2)[0]); !strings.Contains(top, "S0100-RTR-02") {
+				t.Errorf("the element list's top line = %q, want the tab of the ION still dialing", top)
+			}
+			if after := len(strings.Split(view, "\n")); after != before {
+				t.Errorf("the list is %d lines with the dialing tab and %d without, want the same height", after, before)
+			}
+
+			next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight, Mod: tea.ModAlt}))
+			m = next.(tuiModel)
+			if got := plain(sessionText(m)); m.phase != phaseSession || !strings.Contains(got, "connecting to S0100-RTR-02") {
+				t.Errorf("alt+right from the list did not come back to the dialing ION:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestDetachedShellsKeepTheTabBarOnceTheLastTabCloses(t *testing.T) {
+	m := pickModel(t)
+	t.Cleanup(m.sessions().CloseAll)
+	m.width, m.height = 120, 40
+	m.rebuildRows()
+	before := len(strings.Split(m.viewPicking(), "\n"))
+
+	for _, eid := range []string{"1", "2"} {
+		if _, err := m.sessions().Open(context.Background(), recDialer{newRecConn()}, eid, "S0100-RTR-0"+eid, 200, 50, ionterm.Credentials{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.phase = phaseSession
+	for _, k := range []tea.Key{{Code: 'w', Mod: tea.ModAlt}, {Code: 'k', Mod: tea.ModAlt}} {
+		next, _ := m.Update(tea.KeyPressMsg(k))
+		m = next.(tuiModel)
+	}
+	next, _ := m.Update(sessionDirtyMsg(""))
+	m = next.(tuiModel)
+	if m.phase != phasePicking || m.sessions().Count() != 0 || m.sessions().DetachedCount() != 1 {
+		t.Fatalf("phase %v, %d open, %d detached; want the element list with one shell detached",
+			m.phase, m.sessions().Count(), m.sessions().DetachedCount())
+	}
+
+	m.status = ""
+	view := m.viewPicking()
+	if top := plain(strings.SplitN(view, "\n", 2)[0]); !strings.Contains(top, "+1 detached") {
+		t.Errorf("the element list's top line = %q, want the detached shell counted", top)
+	}
+	if after := len(strings.Split(view, "\n")); after != before {
+		t.Errorf("the list is %d lines with the tab bar and %d without, want the same height", after, before)
+	}
+}
+
+func TestAltWAndAltKActOnATabStillDialing(t *testing.T) {
+	for _, tt := range []struct {
+		key      rune
+		detached int
+	}{
+		{'w', 1},
+		{'k', 0},
+	} {
+		t.Run("alt+"+string(tt.key), func(t *testing.T) {
+			m := pickModel(t)
+			setTestClient(&m, liveClient())
+			t.Cleanup(m.sessions().CloseAll)
+			conn := newRecConn()
+			first, err := m.sessions().Open(context.Background(), recDialer{conn}, "1", "S0100-RTR-01", 200, 50, ionterm.Credentials{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			next, _ := m.openSession("2", "S0100-RTR-02", m.tenant().TSGID)
+			m = next.(tuiModel)
+			next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tt.key, Mod: tea.ModAlt}))
+			m = next.(tuiModel)
+
+			if tabs := plain(m.tabBar()); strings.Contains(tabs, "S0100-RTR-02") {
+				t.Errorf("tab bar = %q, want the dialing tab gone", tabs)
+			}
+			if n := m.runtime().DetachedCount(); n != tt.detached {
+				t.Errorf("%d detached, want %d", n, tt.detached)
+			}
+			if m.sessions().Find("1") != first || first.Closed() {
+				t.Error("the key went to the shell behind the dialing tab")
+			}
+		})
 	}
 }

@@ -109,7 +109,7 @@ func (c *CommandStore) SetFavourite(slot int, command, model string) error {
 	case slot < 1 || slot > FavouriteSlots:
 		return fmt.Errorf("slot %d is outside 1-%d", slot, FavouriteSlots)
 	case command == "":
-		return fmt.Errorf("slot %d: nothing to save", slot)
+		return fmt.Errorf("slot %d: no command to save", slot)
 	}
 	for i := range c.Favourites {
 		if c.Favourites[i].Slot == slot {

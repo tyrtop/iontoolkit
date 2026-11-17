@@ -46,7 +46,7 @@ func TestRepaintsCollapse(t *testing.T) {
 	screen := emu.String()
 	t.Log("\n" + screen)
 
-	if n := strings.Count(screen, "S5032-RTR-01#"); n > 2 {
+	if n := strings.Count(screen, "S7020-RTR-01#"); n > 2 {
 		t.Errorf("repaints did not collapse: %d prompt occurrences on screen", n)
 	}
 	if n := strings.Count(screen, "dump interface status 4"); n > 1 {
@@ -73,7 +73,7 @@ func TestNoEscapeBytesLeak(t *testing.T) {
 func TestOutputAndTabAlignment(t *testing.T) {
 	screen := replay(t, 69, 24).String()
 
-	for _, want := range []string{"Interface", "DPDK Controlled", "04:47:2a:18:0e:05", "Not connected"} {
+	for _, want := range []string{"Interface", "DPDK Controlled", "02:00:00:00:00:05", "Not connected"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("output missing %q", want)
 		}

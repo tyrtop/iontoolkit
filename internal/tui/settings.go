@@ -2,9 +2,9 @@ package tui
 
 import (
 	"fmt"
-	"os"
+	"strconv"
 	"strings"
-	"time"
+	"tyrtop.com/iontk/internal/runtime"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -14,8 +14,6 @@ import (
 	"tyrtop.com/iontk/internal/ioncmd"
 	"tyrtop.com/iontk/internal/logging"
 	"tyrtop.com/iontk/internal/output"
-	"tyrtop.com/iontk/internal/sase/api"
-	"tyrtop.com/iontk/internal/saseauth"
 	"tyrtop.com/iontk/internal/ui"
 )
 
@@ -38,7 +36,17 @@ var generalRowLabels = map[int]string{
 	zoneRow: "Times", refreshRow: "Elements",
 }
 
-var setSections = []string{"General", "Theme", "Batch", "Tenants", "Users", "Session", "Debug", "Reset"}
+var setSections = []string{"General", "Theme", "Batch", "Tenants", "Users", "Session", "Tutorial", "Keys", "Debug", "Reset"}
+
+const (
+	testingRow = iota
+	logsRow
+	debugRows
+)
+
+var debugRowLabels = map[int]string{
+	testingRow: "Testing Mode", logsRow: "Download Logs",
+}
 
 const (
 	secGeneral = iota
@@ -47,9 +55,18 @@ const (
 	secTenants
 	secUsers
 	secSession
+	secTutorial
+	secKeys
 	secDebug
 	secReset
 )
+
+func (m tuiModel) enteredSection() tuiModel {
+	if m.setSection == secTutorial {
+		return m.readFlows()
+	}
+	return m
+}
 
 func (m tuiModel) sectionRows() int {
 	switch m.setSection {
@@ -63,16 +80,20 @@ func (m tuiModel) sectionRows() int {
 	case secBatch:
 		return 4
 	case secTenants:
-		return len(m.cfg.Tenants)
+		return len(m.cfg().Tenants)
 	case secUsers:
-		if !m.hasTenant {
+		if !m.hasTenant() {
 			return 0
 		}
-		return len(m.tenant.Users) + 1
+		return len(m.tenant().Users) + 1
 	case secSession:
-		return 2
+		return detachedRow + 1
+	case secTutorial:
+		return len(m.flows)
+	case secKeys:
+		return 1
 	case secDebug:
-		return 0
+		return debugRows
 	case secReset:
 		return 2
 	}
@@ -124,6 +145,7 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 		if m.setFocus == focusNav {
 			m.setSection = max(0, m.setSection-1)
 			m.setCursor = 0
+			return m.enteredSection(), nil
 		} else {
 			m.setCursor = max(0, m.setCursor-1)
 		}
@@ -133,6 +155,7 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 		if m.setFocus == focusNav {
 			m.setSection = min(len(setSections)-1, m.setSection+1)
 			m.setCursor = 0
+			return m.enteredSection(), nil
 		} else {
 			m.setCursor = min(max(0, m.sectionRows()-1), m.setCursor+1)
 		}
@@ -156,6 +179,18 @@ func (m tuiModel) onSettingsKey(key string) (tea.Model, tea.Cmd) {
 		return m.onUsersSectionKey(key)
 	case secSession:
 		return m.onSessionGeoKey(key)
+	case secTutorial:
+		if key == "enter" {
+			return m.startFlow(m.setCursor)
+		}
+		return m, nil
+	case secKeys:
+		if key == "enter" {
+			return m.openEdit()
+		}
+		return m, nil
+	case secDebug:
+		return m.onDebugKey(key)
 	case secReset:
 		return m.onResetKey(key, armed)
 	}
@@ -186,38 +221,17 @@ const (
 )
 
 func (m tuiModel) factoryReset() (tea.Model, tea.Cmd) {
-	m.sessions.CloseAll()
-
-	if err := app.RemoveThemes(m.store); err != nil {
-		m.status = err.Error()
-		return m, nil
-	}
-	ui.HideThemes(nil)
-	if err := ui.LoadThemes(app.ThemesPath(m.store)); err != nil {
-		m.status = err.Error()
-	}
-
-	if err := m.store.Reset(); err != nil {
-		m.status = err.Error()
-		return m, nil
-	}
-
-	m.cfg = &config.Config{}
-	m.tenant, m.hasTenant, m.ionUser = config.Tenant{}, false, ""
-	m.authMode = authBrowser
-	m.pool = newClientPool()
-	m.client = nil
-	m.setElements(nil)
-	m.sites = nil
-	m.selected, m.lastCleared = map[string]bool{}, nil
-	m.discovered, m.tenantIssues, m.runAs = nil, nil, nil
-	m.ident, m.profile, m.tokenTTL = saseauth.Identity{}, api.Profile{}, 0
-	m.tokenDead = ""
-	m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
+	var said []string
+	err := m.runtime().Exec(&runtime.Call{Out: func(l string) { said = append(said, l) }}, "reset")
 	m.setSection, m.setFocus, m.setCursor = secGeneral, focusNav, 0
 	m.menuCursor = 0
 	m.phase = phaseMenu
-	m.status = "reset — nothing is saved any more"
+	m.status = strings.Join(said, " ")
+	if err != nil {
+		m.status = err.Error()
+	}
+	m.tut = tutorialRun{}
+	m = m.fitTutorial().raiseTutorialAsk()
 	return m, nil
 }
 
@@ -239,41 +253,26 @@ func (m tuiModel) onGeneralKey(key string) (tea.Model, tea.Cmd) {
 	case jumpRow:
 		return m.cyclePageStep()
 	case guardRow:
-		m.cfg.AllowWrites = !m.cfg.AllowWrites
-		if err := m.store.SaveConfig(m.cfg); err != nil {
-			m.status = err.Error()
-		}
+		return m.setOption("allow_writes", ""), nil
 	}
 	return m, nil
 }
 
 func (m tuiModel) onTenantsKey(key string) (tea.Model, tea.Cmd) {
-	if m.setCursor >= len(m.cfg.Tenants) {
+	if m.setCursor >= len(m.cfg().Tenants) {
 		return m, nil
 	}
-	t := m.cfg.Tenants[m.setCursor]
+	t := m.cfg().Tenants[m.setCursor]
 
 	switch key {
 	case " ", "space":
 		added := !t.Added
-		t.Added = added
-		m.cfg.Upsert(t)
-		if err := m.store.SaveConfig(m.cfg); err != nil {
+		if err := m.runtime().IncludeTenant(t.Name, added); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
-		if m.tenant.Name == t.Name {
-			m.tenant.Added = added
-		}
 		if !added {
-			kept := make([]elementRow, 0, len(m.all))
-			for _, r := range m.all {
-				if r.TSG != t.TSGID {
-					kept = append(kept, r)
-				}
-			}
-			m.setElements(kept)
-			m.cacheCount = len(m.all)
+			m.setElements(m.rows())
 		}
 		return m, nil
 	case "a":
@@ -281,39 +280,31 @@ func (m tuiModel) onTenantsKey(key string) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.openEditTenantForm(t)
 	case "s":
-		m.tenant, m.hasTenant = t, true
-		m.ionUser = t.DefaultUser()
-		m.cfg.LastTenant = t.Name
-		if err := m.store.SaveConfig(m.cfg); err != nil {
+		if err := m.runtime().SwitchTenant(t); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
-		m.all, m.matches, m.selected = nil, nil, map[string]bool{}
-		m.cacheState, m.cacheCount, m.cacheAt = cacheNone, 0, time.Time{}
+		m.forgetRows()
 		m.status = "switched to " + t.Name
 	case "u":
 		return m.openUserFormFor(t)
 	case "x":
-		if err := forgetTenant(m.store, m.cfg, t); err != nil {
+		if err := m.runtime().RemoveTenant(t.Name); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
-		if m.tenant.Name == t.Name {
-			m.tenant, m.hasTenant = app.ResolveTenant(m.cfg, "")
-			m.ionUser = m.tenant.DefaultUser()
-		}
-		m.setCursor = max(0, min(m.setCursor, len(m.cfg.Tenants)-1))
+		m.setCursor = max(0, min(m.setCursor, len(m.cfg().Tenants)-1))
 	}
 	return m, nil
 }
 
 func (m tuiModel) onUsersSectionKey(key string) (tea.Model, tea.Cmd) {
-	users := m.tenant.Users
+	users := m.tenant().Users
 
 	if m.setCursor == 0 {
 		if key == "enter" {
 			if m.tenantIndex() >= 0 {
-				return m.openUserFormFor(m.tenant)
+				return m.openUserFormFor(m.tenant())
 			}
 			m.status = "no tenant selected"
 		}
@@ -331,38 +322,41 @@ func (m tuiModel) onUsersSectionKey(key string) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.openEditUserForm(name)
 	case "r":
-		m.ionUser = name
-		m.status = "running as " + name
-	case "d":
-		t := m.tenant
-		t.AddUser(name, true)
-		m.cfg.Upsert(t)
-		if err := m.store.SaveConfig(m.cfg); err != nil {
+		if err := m.runtime().RunAsUser(m.tenant().Name, name); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
-		m.tenant, m.ionUser = t, name
-	case "x":
-		t := m.tenant
-		if t.RemoveUser(name) {
-			_ = m.store.Secrets.Delete(config.IONPassKey(t.TSGID, name))
-			m.cfg.Upsert(t)
-			if err := m.store.SaveConfig(m.cfg); err != nil {
-				m.status = err.Error()
-				return m, nil
-			}
-			m.tenant = t
-			if m.ionUser == name {
-				m.ionUser = t.DefaultUser()
-			}
-			m.setCursor = max(0, min(m.setCursor, len(t.Users)))
+		m.status = "running as " + name
+	case "d":
+		if err := m.runtime().SetDefaultUser(m.tenant().Name, name); err != nil {
+			m.status = err.Error()
+			return m, nil
 		}
+	case "x":
+		left, err := m.runtime().RemoveUser(m.tenant().Name, name)
+		if err != nil {
+			m.status = err.Error()
+			return m, nil
+		}
+		m.setCursor = max(0, min(m.setCursor, len(left.Users)))
 	}
 	return m, nil
 }
 
+const detachedRow = 2
+
 func (m tuiModel) onSessionGeoKey(key string) (tea.Model, tea.Cmd) {
 	cols, rows := m.sessionGeometry()
+
+	if m.setCursor == detachedRow {
+		switch key {
+		case "enter", "space", " ", "+", "=":
+			return m.setOption("detached_for", "next"), nil
+		case "-", "_":
+			return m.setOption("detached_for", "prev"), nil
+		}
+		return m, nil
+	}
 
 	if key == "enter" {
 		return m.openGeometryForm(m.setCursor, cols, rows)
@@ -378,16 +372,14 @@ func (m tuiModel) onSessionGeoKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.setCursor == 0 {
-		cols = min(400, max(40, cols+step))
-	} else {
-		rows = min(200, max(10, rows+step))
+	name, n := "session_cols", cols+step
+	if m.setCursor != 0 {
+		name, n = "session_rows", rows+step
 	}
-	m.cfg.SessionCols, m.cfg.SessionRows = cols, rows
-	if err := m.store.SaveConfig(m.cfg); err != nil {
-		m.status = err.Error()
+	if o, ok := m.runtime().Option(name); ok {
+		n = o.Clamp(n)
 	}
-	return m, nil
+	return m.setOption(name, strconv.Itoa(n)), nil
 }
 
 func (m tuiModel) sectionContent() []string {
@@ -396,12 +388,12 @@ func (m tuiModel) sectionContent() []string {
 	switch m.setSection {
 	case secBatch:
 		dest := ui.StyleDim.Render("stdout")
-		if m.cfg.BatchToFile {
+		if m.cfg().BatchToFile {
 			dest = ui.StyleElement.Render("file")
 		}
 		folder := ui.StyleWarn.Render("not set")
-		if m.cfg.BatchDir != "" {
-			folder = ui.StyleDim.Render(ui.Truncate(m.cfg.BatchDir, 44))
+		if m.cfg().BatchDir != "" {
+			folder = ui.StyleDim.Render(ui.Truncate(m.cfg().BatchDir, 44))
 		}
 		order := ui.StyleElement.Render(output.OrientationLabel(m.batchOrient())) +
 			ui.StyleDim.Render("  "+output.OrientationHelp(m.batchOrient()))
@@ -416,29 +408,29 @@ func (m tuiModel) sectionContent() []string {
 			ui.Label("Output")+dest,
 			ui.Label("Folder")+folder,
 		)
-		if m.cfg.BatchToFile && m.cfg.BatchDir == "" {
+		if m.cfg().BatchToFile && m.cfg().BatchDir == "" {
 			out = append(out, "", ui.StyleWarn.Render("set a folder, or output falls back to stdout"))
 		}
 
 	case secGeneral:
 		guard := ui.StyleOK.Render("read-only enforced")
-		if m.cfg.AllowWrites {
+		if m.cfg().AllowWrites {
 			guard = ui.StyleWarn.Render("writes allowed")
 		}
 		out = append(out,
 			ui.Label("Commands")+guard,
-			ui.Label("Mode")+ui.StyleElement.Render(m.defaultMode().String())+
+			ui.Label("Mode")+ui.StyleElement.Render(m.defaultMode())+
 				ui.StyleDim.Render("  what the element list opens in"),
 			ui.Label("Jump")+ui.StyleElement.Render(fmt.Sprintf("%d rows", m.pageStep()))+
 				ui.StyleDim.Render("  how far alt+↑/↓ moves in the element list"),
 			ui.Label("Times")+m.zoneLine(),
 			ui.Label("Elements")+m.cacheLine(),
-			ui.Label("Views")+m.viewsLine(),
+			ui.Label("Screens")+m.screensLine(),
 			"",
 			ui.Label("Secrets")+m.secretsLine(),
 		)
-		if config.Plaintext(m.store.Secrets) {
-			if fp, ok := m.store.Secrets.(interface{ Path() string }); ok {
+		if config.Plaintext(m.store().Secrets) {
+			if fp, ok := m.store().Secrets.(interface{ Path() string }); ok {
 				out = append(out, ui.Label("")+ui.StyleDim.Render(shortenPath(fp.Path(), 52)))
 			}
 			out = append(out, ui.Label("")+ui.StyleWarn.Render("ION passwords are readable by anything that can read that file"))
@@ -448,12 +440,12 @@ func (m tuiModel) sectionContent() []string {
 		out = append(out, m.themeContent()...)
 
 	case secTenants:
-		if len(m.cfg.Tenants) == 0 {
+		if len(m.cfg().Tenants) == 0 {
 			out = append(out, ui.StyleDim.Render("no tenants — add one from the main menu"))
 		}
-		for _, t := range m.cfg.Tenants {
+		for _, t := range m.cfg().Tenants {
 			tag := ""
-			if t.Name == m.tenant.Name {
+			if t.Name == m.tenant().Name {
 				tag = ui.StyleOK.Render("  (current)")
 			}
 			if t.Auth != config.AuthBrowser {
@@ -463,7 +455,7 @@ func (m tuiModel) sectionContent() []string {
 			if t.Added {
 				box = ui.StyleOK.Render("[x] ")
 			}
-			if why, bad := m.tenantIssues[t.TSGID]; bad {
+			if why, bad := m.tenantIssues()[t.TSGID]; bad {
 				tag += ui.StyleWarn.Render("  " + why)
 			}
 			out = append(out, box+fmt.Sprintf("%-24s", ui.Truncate(t.Name, 24))+
@@ -471,21 +463,21 @@ func (m tuiModel) sectionContent() []string {
 		}
 
 	case secUsers:
-		if !m.hasTenant {
+		if !m.hasTenant() {
 			out = append(out, ui.StyleDim.Render("no tenant selected"))
 			break
 		}
 		out = append(out, ui.StyleGhost.Render("+ New ION User"))
-		for _, u := range m.tenant.Users {
+		for _, u := range m.tenant().Users {
 			tags := ""
 			if u.Default {
 				tags += ui.StyleDim.Render("  (default)")
 			}
-			if u.Name == m.ionUser {
+			if u.Name == m.ionUser() {
 				tags += ui.StyleOK.Render("  (active)")
 			}
 			stored := ui.StyleWarn.Render("  no password")
-			if v, err := m.store.Secrets.Get(config.IONPassKey(m.tenant.TSGID, u.Name)); err == nil && v != "" {
+			if m.runtime().HasPassword(m.tenant().TSGID, u.Name) {
 				stored = ui.StyleDim.Render("  saved")
 			}
 			out = append(out, ui.StyleElement.Render(u.Name)+tags+stored)
@@ -494,19 +486,25 @@ func (m tuiModel) sectionContent() []string {
 	case secSession:
 		cols, rows := m.sessionGeometry()
 		warn := ui.StyleWarn.Render("  do not change unless you know what you are doing!")
+		keep, _ := m.runtime().Get("detached_for")
+		detached := "closed after " + keep
+		if keep == "off" {
+			detached = "kept until they end"
+		}
 		out = append(out,
 			ui.Label("Buffer Cols")+fmt.Sprintf("%-6d", cols)+warn,
 			ui.Label("Buffer Rows")+fmt.Sprintf("%-6d", rows)+warn,
+			ui.Label("Detached")+detached,
 		)
 
 	case secReset:
 		out = append(out, ui.StyleWarn.Render("Factory Reset"))
 		out = append(out, ui.StyleWarn.Render("Restore Themes")+
-			ui.StyleDim.Render("   restores default iontk themes - user themes are untouched"))
+			ui.StyleDim.Render("   restores default iontk themes - user themes are unchanged"))
 		if m.resetArmed {
 			what := "delete every tenant, ION password, token and scheme"
 			if m.setCursor == themeRestoreRow {
-				what = "put the shipped schemes back"
+				what = "put the built-in schemes back"
 			}
 			out = append(out, "",
 				ui.StyleErr.Render("press y to "+what),
@@ -514,29 +512,52 @@ func (m tuiModel) sectionContent() []string {
 			)
 		}
 
+	case secTutorial:
+		for _, f := range m.flows {
+			pages := fmt.Sprintf("   %d pages", len(f.steps))
+			if len(f.steps) == 1 {
+				pages = "   1 page"
+			}
+			out = append(out, ui.StyleCmd.Render(f.name)+ui.StyleDim.Render(pages))
+		}
+		if len(m.flows) == 0 {
+			out = append(out, ui.StyleDim.Render("no tutorials"))
+		}
+		if m.flowsErr != "" {
+			out = append(out, "", ui.StyleWarn.Render(ui.Truncate(m.flowsErr, max(20, m.width-4))))
+		}
+		out = append(out, "", ui.Label("Folder")+
+			ui.StyleDim.Render(ui.Truncate(app.TutorialsPath(m.store()), max(20, m.width-ui.LabelWidth-20))))
+
+	case secKeys:
+		out = append(out, m.keysContent()...)
+
 	case secDebug:
 		out = append(out,
-			ui.Label("Config")+ui.StyleDim.Render(m.store.Root),
-			ui.Label("Secrets")+ui.StyleDim.Render(m.store.Secrets.Backend()),
+			ui.Label(debugRowLabels[testingRow])+m.testingLine(),
+			ui.Label(debugRowLabels[logsRow])+logLine(),
+			"",
+			ui.Label("Config")+ui.StyleDim.Render(m.store().Root),
+			ui.Label("Exports")+ui.StyleDim.Render(m.store().ExportsDir()),
+			ui.Label("Secrets")+ui.StyleDim.Render(m.store().Secrets.Backend()),
 			ui.Label("Version")+ui.StyleDim.Render(Version),
 			ui.Label("Stats")+ui.StyleDim.Render("alt+i overlays live counters"),
 			ui.Label("Colors")+ui.StyleDim.Render(ui.CurrentTheme().Name+"  "+profileLabel()),
 			ui.Label("Terminal")+ui.StyleDim.Render(termColorLine()),
 			ui.Label("Times")+ui.StyleDim.Render(clock.Name()),
-			ui.Label("Log")+logLine(),
 			"",
-			ui.Label("Tenant")+ui.StyleDim.Render(m.tenant.Name+"  tsg "+m.tenant.TSGID),
-			ui.Label("ION User")+ui.StyleDim.Render(m.ionUser),
-			ui.Label("Mode")+ui.StyleDim.Render(m.mode.String()),
+			ui.Label("Tenant")+ui.StyleDim.Render(m.tenant().Name+"  tsg "+m.tenant().TSGID),
+			ui.Label("ION User")+ui.StyleDim.Render(m.ionUser()),
+			ui.Label("Mode")+ui.StyleDim.Render(m.mode()),
 			"",
-			ui.Label("Elements")+ui.StyleDim.Render(fmt.Sprintf("%d cached, %d shown", m.cacheCount, len(m.matches))),
-			ui.Label("Sessions")+ui.StyleDim.Render(fmt.Sprintf("%d open, %d detached", m.sessions.Count(), m.sessions.DetachedCount())),
+			ui.Label("Elements")+ui.StyleDim.Render(fmt.Sprintf("%d cached, %d shown", m.cacheCount(), len(m.matched()))),
+			ui.Label("Sessions")+ui.StyleDim.Render(fmt.Sprintf("%d open, %d detached", m.sessions().Count(), m.sessions().DetachedCount())),
 			ui.Label("HA")+ui.StyleDim.Render(m.haPath()),
-			ui.Label("Catalog")+ui.StyleDim.Render(fmt.Sprintf("%d commands, %d offered", len(ioncmd.Embedded()), len(m.catalog()))),
+			ui.Label("Catalog")+ui.StyleDim.Render(fmt.Sprintf("%d commands, %d available", len(ioncmd.Embedded()), len(m.catalog()))),
 			ui.Label("Terminal")+ui.StyleDim.Render(fmt.Sprintf("%d x %d", m.width, m.height)),
 		)
 		if app.Debug {
-			out = append(out, "", ui.StyleWarn.Render("--debug: throwaway config, no saved tenants, secrets held only in memory"))
+			out = append(out, "", ui.StyleWarn.Render("--debug: temporary config, no saved tenants, secrets kept only in memory"))
 		}
 		if tail := logging.Recent(logTailLines); len(tail) > 0 {
 			out = append(out, "")
@@ -552,7 +573,7 @@ const logTailLines = 5
 
 func logLine() string {
 	if err := logging.Problem(); err != nil {
-		return ui.StyleWarn.Render("nothing written: " + err.Error())
+		return ui.StyleWarn.Render("log not written: " + err.Error())
 	}
 	if !logging.On() {
 		return ui.StyleDim.Render("off")
@@ -561,12 +582,18 @@ func logLine() string {
 }
 
 func (m tuiModel) sectionHint() string {
-	if m.setSection == secDebug {
-		return "read only · ↑↓ section · esc back"
+	if m.setSection == secDebug && m.setFocus == focusContent {
+		if m.setCursor == logsRow {
+			return "enter download · tab back · esc back"
+		}
+		if m.real.held {
+			return "enter leave testing · " + editKeyHint + " · tab back · esc back"
+		}
+		return "enter testing mode · " + editKeyHint + " · tab back · esc back"
 	}
 	if m.setSection == secReset && m.resetArmed {
 		if m.setCursor == themeRestoreRow {
-			return "y restore the shipped themes · any other key cancels"
+			return "y restore the built-in themes · any other key cancels"
 		}
 		return "y reset · any other key cancels"
 	}
@@ -574,6 +601,14 @@ func (m tuiModel) sectionHint() string {
 		return "↑↓ section · enter/→ open · esc back"
 	}
 	switch m.setSection {
+	case secTutorial:
+		return "enter start · " + editKeyHint + " · tab back · esc back"
+	case secKeys:
+		if m.setFocus == focusContent {
+			return "enter edit · tab back · esc back"
+		}
+		return "read only · " + editKeyHint + " · esc back"
+
 	case secGeneral:
 		return "↑↓ row · enter change/refresh/type · space cycle · tab back · esc back"
 	case secTheme:
@@ -588,13 +623,16 @@ func (m tuiModel) sectionHint() string {
 	case secUsers:
 		return "↑↓ row · enter new/edit · r run as · p password · d default · x remove · tab back"
 	case secSession:
+		if m.setCursor == detachedRow {
+			return "↑↓ row · enter next · -/+ change · tab back"
+		}
 		return "↑↓ row · enter type · -/+ adjust · tab back"
 	case secDebug:
 		return "read only · tab back · esc back"
 	case secReset:
 		if m.resetArmed {
 			if m.setCursor == themeRestoreRow {
-				return "y restore the shipped themes · any other key cancels"
+				return "y restore the built-in themes · any other key cancels"
 			}
 			return "y reset · any other key cancels"
 		}
@@ -657,20 +695,24 @@ func (m tuiModel) viewSettings() string {
 	return body + "\n" + ui.Footer(m.status, m.sectionHint())
 }
 
-func (m tuiModel) batchFormat() string {
-	f, err := output.NormalizeFormat(m.cfg.BatchFormat)
-	if err != nil {
-		return output.FormatJSON
+func (m tuiModel) batchFormat() string { return m.option("batch_format") }
+
+func (m tuiModel) batchOrient() string { return m.option("batch_orient") }
+
+func (m tuiModel) option(name string) string {
+	rt := m.rt
+	if rt == nil {
+		rt = app.NewRuntime(nil, nil)
 	}
-	return f
+	v, _ := rt.Get(name)
+	return v
 }
 
-func (m tuiModel) batchOrient() string {
-	o, err := output.NormalizeOrientation(m.cfg.BatchOrient)
-	if err != nil {
-		return output.OrientION
+func (m tuiModel) setOption(name, value string) tuiModel {
+	if err := m.runtime().Set(name, value); err != nil {
+		m.status = err.Error()
 	}
-	return o
+	return m
 }
 
 func (m tuiModel) onBatchKey(key string) (tea.Model, tea.Cmd) {
@@ -679,43 +721,37 @@ func (m tuiModel) onBatchKey(key string) (tea.Model, tea.Cmd) {
 		if key != "enter" && key != " " && key != "space" {
 			return m, nil
 		}
-		m.cfg.BatchFormat = output.NextFormat(m.batchFormat())
+		return m.setOption("batch_format", "next"), nil
 	case 1:
 		if key != "enter" && key != " " && key != "space" {
 			return m, nil
 		}
-		m.cfg.BatchOrient = output.NextOrientation(m.batchOrient())
+		return m.setOption("batch_orient", "next"), nil
 	case 2:
 		if key != "enter" && key != " " && key != "space" {
 			return m, nil
 		}
-		m.cfg.BatchToFile = !m.cfg.BatchToFile
+		return m.setOption("batch_to_file", ""), nil
 	case 3:
 		if key != "enter" {
 			return m, nil
 		}
 		return m.openBatchDirForm()
-	default:
-		return m, nil
-	}
-
-	if err := m.store.SaveConfig(m.cfg); err != nil {
-		m.status = err.Error()
 	}
 	return m, nil
 }
 
 func (m tuiModel) openBatchDirForm() (tea.Model, tea.Cmd) {
 	dir := newField("folder", "~/ion-reports", false)
-	dir.input.SetValue(m.cfg.BatchDir)
+	dir.input.SetValue(m.cfg().BatchDir)
 	return m.openForm(formBatchDir, "Folder for batch output", phaseAddTenant, []formField{dir})
 }
 
 func (m tuiModel) secretsLine() string {
-	if config.Plaintext(m.store.Secrets) {
-		return ui.StyleWarn.Render(config.SecretsWarning(m.store.Secrets))
+	if config.Plaintext(m.store().Secrets) {
+		return ui.StyleWarn.Render(config.SecretsWarning(m.store().Secrets))
 	}
-	return ui.StyleOK.Render(config.SecretsWarning(m.store.Secrets))
+	return ui.StyleOK.Render(config.SecretsWarning(m.store().Secrets))
 }
 
 func shortenPath(p string, n int) string {
@@ -726,61 +762,35 @@ func shortenPath(p string, n int) string {
 	return "…" + string(r[len(r)-(n-1):])
 }
 
-var pageSteps = []int{5, 10, 20, 25, 50}
-
-const DefaultPageStep = 10
+const DefaultPageStep = runtime.DefaultPageStep
 
 func (m tuiModel) pageStep() int {
-	if m.cfg != nil && m.cfg.PageStep > 0 {
-		return m.cfg.PageStep
-	}
-	return DefaultPageStep
+	n, _ := strconv.Atoi(m.option("page_step"))
+	return max(1, n)
 }
 
 func (m tuiModel) cyclePageStep() (tea.Model, tea.Cmd) {
-	next := pageSteps[0]
-	for i, n := range pageSteps {
-		if n == m.pageStep() {
-			next = pageSteps[(i+1)%len(pageSteps)]
-			break
-		}
-	}
-	m.cfg.PageStep = next
-	if err := m.store.SaveConfig(m.cfg); err != nil {
-		m.status = err.Error()
-	}
-	return m, nil
+	return m.setOption("page_step", "next"), nil
 }
 
-func (m tuiModel) viewsLine() string {
-	n := len(m.viewNames())
-	line := ui.StyleElement.Render(fmt.Sprintf("%d", n)) + ui.StyleDim.Render(" for rich-data mode")
-	if m.viewsErr != "" {
-		return line + "  " + ui.StyleErr.Render(ui.Truncate(m.viewsErr, 46))
+func (m tuiModel) screensLine() string {
+	n := fmt.Sprintf("%d views · %d columns", len(m.viewNames()), len(m.columns()))
+	line := ui.StyleElement.Render(n)
+	if err := m.runtimeErr(); err != nil {
+		return line + "  " + ui.StyleErr.Render(ui.Truncate(err.Error(), 46))
 	}
-	path := ViewsPath(m.store)
-	if path == "" {
+	dir := ViewsDir(m.store())
+	if dir == "" {
 		return line
 	}
-	if _, err := os.Stat(path); err != nil {
-		return line + ui.StyleDim.Render("  add "+shortenPath(path, 40))
+	if len(m.viewFiles) == 0 {
+		return line + ui.StyleDim.Render("  add "+shortenPath(dir, 40))
 	}
-	return line + ui.StyleDim.Render("  from "+shortenPath(path, 40))
+	return line + ui.StyleDim.Render(fmt.Sprintf("  %d files from %s", len(m.viewFiles), shortenPath(dir, 34)))
 }
 
-func (m tuiModel) defaultMode() pickMode {
-	if mode, ok := parseMode(m.cfg.DefaultMode); ok {
-		return mode
-	}
-	return modeShell
-}
+func (m tuiModel) defaultMode() string { return m.option("default_mode") }
 
 func (m tuiModel) cycleDefaultMode() (tea.Model, tea.Cmd) {
-	next := m.defaultMode().next()
-	m.cfg.DefaultMode = next.String()
-	m.mode = next
-	if err := m.store.SaveConfig(m.cfg); err != nil {
-		m.status = err.Error()
-	}
-	return m, nil
+	return m.setOption("default_mode", "next"), nil
 }

@@ -4,7 +4,6 @@ import (
 	"embed"
 	"strings"
 	"sync"
-	"unicode"
 )
 
 //go:embed reference/ion1200.tree
@@ -95,13 +94,4 @@ func ReadOnly(cmds []string, allowed func(string) bool) []string {
 		}
 	}
 	return out
-}
-
-func Verb(cmd string) string {
-	for i, r := range cmd {
-		if unicode.IsSpace(r) {
-			return cmd[:i]
-		}
-	}
-	return cmd
 }

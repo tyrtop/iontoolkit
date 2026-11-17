@@ -3,6 +3,7 @@ package fixture
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"tyrtop.com/iontk/internal/sase/api"
 	"tyrtop.com/iontk/internal/sase/ioncli"
@@ -27,6 +28,13 @@ func (c *SessionClient) LookupElement(ctx context.Context, eid string) (api.Elem
 }
 
 func (c *SessionClient) ToolkitSession(ctx context.Context, eid, prompt, user, pass string, cmds []string) ([]ioncli.CommandOutput, error) {
+	if el := c.set.element(eid); el != nil {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(el.wait(1)):
+		}
+	}
 	conn, err := c.set.dial(eid)
 	if err != nil {
 		return nil, fmt.Errorf("dial: %w", err)

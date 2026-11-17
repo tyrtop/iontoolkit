@@ -3,7 +3,7 @@ package ionterm
 import "testing"
 
 func TestAutologinSendsUserThenPassword(t *testing.T) {
-	a := newAutologin(Credentials{User: "cisops", Pass: "s3cret"})
+	a := newAutologin(Credentials{User: "ops", Pass: "s3cret"})
 	if a == nil {
 		t.Fatal("want an autologin")
 	}
@@ -12,9 +12,9 @@ func TestAutologinSendsUserThenPassword(t *testing.T) {
 		t.Error("sent something before the login prompt")
 	}
 
-	got, ok := a.feed([]byte("028201-011790-4565 login: "))
-	if !ok || got != "cisops\r" {
-		t.Fatalf("login step sent %q ok=%v, want cisops", got, ok)
+	got, ok := a.feed([]byte("000001-000002-0002 login: "))
+	if !ok || got != "ops\r" {
+		t.Fatalf("login step sent %q ok=%v, want ops", got, ok)
 	}
 
 	got, ok = a.feed([]byte("\r\nPassword: "))

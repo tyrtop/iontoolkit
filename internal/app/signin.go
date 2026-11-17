@@ -12,28 +12,23 @@ import (
 	"tyrtop.com/iontk/internal/saseauth"
 )
 
-func SignIn(ctx context.Context, st *config.Store, w io.Writer) (saseauth.Discovery, error) {
-	opt := BrowserOptions(&http.Client{Timeout: Defaults.HTTPTimeout}, st)
-	d, err := saseauth.Discover(ctx, opt, "")
-	if err != nil {
-		return d, fmt.Errorf("browser sign-in: %w", err)
-	}
+func Discover(ctx context.Context, st *config.Store) (saseauth.Discovery, error) {
+	return saseauth.Discover(ctx, BrowserOptions(&http.Client{Timeout: Defaults.HTTPTimeout}, st))
+}
+
+func SaveDiscovery(st *config.Store, d saseauth.Discovery) error {
 	if d.RefreshToken != "" {
 		if err := st.Secrets.Set(config.AccountRefreshTokenKey(), d.RefreshToken); err != nil {
-			return d, fmt.Errorf("save the account credential: %w", err)
+			return fmt.Errorf("save the account credential: %w", err)
 		}
 	}
 	known := make([]config.KnownTenant, 0, len(d.Tenants))
 	for _, t := range d.Tenants {
 		known = append(known, config.KnownTenant{TSGID: t.ID, Name: t.Name})
 	}
-	if err := st.SaveTenantCache(&config.TenantCache{
+	return st.SaveTenantCache(&config.TenantCache{
 		FetchedAt: time.Now(), Account: d.Identity.Display(), Tenants: known,
-	}); err != nil {
-		return d, err
-	}
-	fmt.Fprintf(w, "signed in as %s — %d tenants visible\n", d.Identity.Display(), len(d.Tenants))
-	return d, nil
+	})
 }
 
 type TenantWarm struct {
@@ -42,7 +37,7 @@ type TenantWarm struct {
 	Err     error
 }
 
-// rotated as it is redeemed, so it narrows to one tenant
+// the refresh token rotates on redeem and narrows to one tenant
 func WarmEach(ctx context.Context, st *config.Store, tenants []config.Tenant) []TenantWarm {
 	httpClient := &http.Client{Timeout: Defaults.HTTPTimeout}
 	out := make([]TenantWarm, 0, len(tenants))
@@ -62,12 +57,12 @@ func WarmEach(ctx context.Context, st *config.Store, tenants []config.Tenant) []
 	return out
 }
 
-func WarmTenants(ctx context.Context, st *config.Store, tenants []config.Tenant, w io.Writer) error {
+func WarmReport(results []TenantWarm, w io.Writer) error {
 	var failed, browser int
 
-	for _, r := range WarmEach(ctx, st, tenants) {
+	for _, r := range results {
 		if r.Skipped {
-			fmt.Fprintf(w, "  %-28s service account, nothing to sign in\n", r.Tenant.Name)
+			fmt.Fprintf(w, "  %-28s service account, no sign-in needed\n", r.Tenant.Name)
 			continue
 		}
 		browser++
@@ -85,7 +80,7 @@ func WarmTenants(ctx context.Context, st *config.Store, tenants []config.Tenant,
 	}
 	if failed > 0 {
 		fmt.Fprintf(w, "%d of %d tenants could not be signed in; this account may not have access to them\n",
-			failed, len(tenants))
+			failed, len(results))
 	}
 	return nil
 }

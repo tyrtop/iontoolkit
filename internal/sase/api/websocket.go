@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/coder/websocket"
@@ -90,7 +91,10 @@ func (s *Client) dialPolicy() DialPolicy {
 }
 
 func (s *Client) DialToolkit(ctx context.Context, eid string, cols, rows int) (*websocket.Conn, error) {
-	url := fmt.Sprintf("wss://api.sase.paloaltonetworks.com/sdwan/v2.0/api/elements/%s/ws/toolkitsessions?cols=%d&rows=%d", eid, cols, rows)
+	url, err := session.URL("toolkit_session", vars{"element_id": eid, "cols": strconv.Itoa(cols), "rows": strconv.Itoa(rows)})
+	if err != nil {
+		return nil, err
+	}
 	return s.dialURL(ctx, url, eid)
 }
 
@@ -173,11 +177,7 @@ func (s *Client) ToolkitSession(ctx context.Context, eid, prompt, user, pass str
 	if err != nil {
 		return nil, fmt.Errorf("dial: %w", err)
 	}
-	// this line lets you do more than ~150 devices at once. If you don't
-	// "gracefully close your websocket connection" the ION hijacks it, and it
-	// seems like PA keeps track of the # of sessions you have open. Sacrificing
-	// a frame lets you utilize more socket connections overall; with CloseNow()
-	// you start getting limited at ~500 connections opened.
+	// PA counts sessions not closed gracefully; CloseNow() caps out near 500
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	return ioncli.Run(ctx, conn, ioncli.RunOptions{

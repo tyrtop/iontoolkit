@@ -30,7 +30,7 @@ func TestConfigRoundTrip(t *testing.T) {
 			Name:     "acme-prod",
 			TSGID:    "1234567890",
 			ClientID: "svc@1234.iam",
-			Users:    []IONUser{{Name: "readonly", Default: true}, {Name: "cisops"}},
+			Users:    []IONUser{{Name: "readonly", Default: true}, {Name: "ops"}},
 		}},
 	}
 	if err := s.SaveConfig(want); err != nil {
@@ -133,7 +133,7 @@ func TestUserManagement(t *testing.T) {
 	var tn Tenant
 
 	tn.AddUser("readonly", true)
-	tn.AddUser("cisops", false)
+	tn.AddUser("ops", false)
 	tn.AddUser("readonly", false)
 
 	if len(tn.Users) != 2 {
@@ -143,18 +143,18 @@ func TestUserManagement(t *testing.T) {
 		t.Errorf("DefaultUser() = %q", tn.DefaultUser())
 	}
 
-	tn.AddUser("cisops", true)
-	if tn.DefaultUser() != "cisops" {
+	tn.AddUser("ops", true)
+	if tn.DefaultUser() != "ops" {
 		t.Errorf("after re-default, DefaultUser() = %q", tn.DefaultUser())
 	}
 
-	if !tn.RemoveUser("cisops") {
+	if !tn.RemoveUser("ops") {
 		t.Fatal("RemoveUser returned false")
 	}
 	if tn.DefaultUser() != "readonly" {
 		t.Errorf("default should move to survivor, got %q", tn.DefaultUser())
 	}
-	if tn.HasUser("cisops") {
+	if tn.HasUser("ops") {
 		t.Error("removed user still present")
 	}
 }

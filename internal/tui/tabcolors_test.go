@@ -208,7 +208,7 @@ func TestThePreviewBarShowsTwoOfEachKind(t *testing.T) {
 	if !strings.Contains(out, "store-0003-rtr-02") {
 		t.Errorf("the preview bar has only one shell tab:\n%s", out)
 	}
-	if ui.CurrentTheme().Name != m.cfg.Theme && m.cfg.Theme != "" {
+	if ui.CurrentTheme().Name != m.cfg().Theme && m.cfg().Theme != "" {
 		t.Errorf("the preview left %q applied", ui.CurrentTheme().Name)
 	}
 }

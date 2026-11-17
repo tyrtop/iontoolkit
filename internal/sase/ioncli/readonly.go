@@ -1,6 +1,7 @@
 package ioncli
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -40,6 +41,8 @@ func ReadOnlyVerbs() []string {
 	return out
 }
 
+var ErrNotReadOnly = errors.New("not read-only")
+
 func CheckReadOnly(cmds []string) error {
 	var bad []string
 	for _, c := range cmds {
@@ -54,6 +57,6 @@ func CheckReadOnly(cmds []string) error {
 	if len(bad) > 1 {
 		plural = "commands"
 	}
-	return fmt.Errorf("%s not read-only: %s (allowed: %s)",
-		plural, strings.Join(bad, ", "), strings.Join(ReadOnlyVerbs(), " "))
+	return fmt.Errorf("%s %w: %s (allowed: %s)",
+		plural, ErrNotReadOnly, strings.Join(bad, ", "), strings.Join(ReadOnlyVerbs(), " "))
 }

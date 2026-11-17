@@ -1,0 +1,68 @@
+unknown_response: Fake shell! Testing Mode!
+
+slow: 1500ms
+
+tenants:
+  - name: Acme Co
+    tsg_id: "999000999"
+    users:
+      - name: admin
+        password: ion
+
+    elements:
+      - name: store-0003-rtr-01
+        id: "1000000000000000001"
+        model: ion 1200
+        software: 6.5.1
+        hw_id: "5C260A1F0003"
+        site: Store 0003
+        connected: true
+        ha: true
+
+      - name: store-0003-rtr-02
+        id: "1000000000000000002"
+        model: ion 1200
+        software: 6.5.1
+        hw_id: "5C260A1F0004"
+        site: Store 0003
+        connected: true
+        ha: true
+
+      - name: store-0100-rtr-01
+        id: "1000000000000000003"
+        model: ion 2000
+        software: 6.5.1
+        hw_id: "5C260A1F0100"
+        site: Store 0100
+        connected: true
+
+      - name: store-0100-rtr-02
+        id: "1000000000000000004"
+        model: ion 1200-s
+        software: 6.4.3
+        hw_id: "5C260A1F0101"
+        site: Store 0100
+        connected: true
+
+      - name: dc-east-rtr-01
+        id: "1000000000000000005"
+        model: ion 3200
+        software: 6.5.1
+        hw_id: "5C260A1F0DC1"
+        site: DC East
+        connected: true
+
+      - name: store-0412-rtr-01
+        id: "1000000000000000006"
+        model: ion 1200
+        software: 6.3.4-b2
+        hw_id: "5C260A1F0412"
+        site: Store 0412
+        connected: false
+
+  - name: Globex
+    tsg_id: "999000222"
+    users:
+      - name: admin
+        password: ion
+    fleet: 100

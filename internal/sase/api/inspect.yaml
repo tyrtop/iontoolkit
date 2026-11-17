@@ -1,0 +1,7 @@
+endpoints:
+  - name: element
+    path: /sdwan/v3.2/api/elements/{element_id}
+  - name: interface_status
+    path: /sdwan/v3.9/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}/status
+  - name: spokecluster_status
+    path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters/{cluster_id}/status

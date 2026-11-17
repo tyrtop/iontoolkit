@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"tyrtop.com/iontk/internal/app"
+	"tyrtop.com/iontk/internal/runtime"
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/config"
@@ -20,7 +21,7 @@ func settingsModel(t *testing.T) tuiModel {
 		LastTenant: "Acme Co",
 		Tenants: []config.Tenant{
 			{Name: "Acme Co", TSGID: "1", Users: []config.IONUser{
-				{Name: "readonly", Default: true}, {Name: "cisops"},
+				{Name: "readonly", Default: true}, {Name: "ops"},
 			}},
 			{Name: "Lab", TSGID: "2"},
 		},
@@ -30,8 +31,8 @@ func settingsModel(t *testing.T) tuiModel {
 	}
 
 	m := newTUIModel(context.Background(), st, cfg)
-	m.tenant, m.hasTenant = cfg.Tenants[0], true
-	m.ionUser = "readonly"
+	m.runtime().UseTenant(cfg.Tenants[0])
+	m.runtime().SetIONUser("readonly")
 	m.phase = phaseSettings
 	m.width, m.height = 100, 30
 	return m
@@ -115,11 +116,11 @@ func TestSettingsGeneralTogglesWriteGuard(t *testing.T) {
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = mm.(tuiModel)
-	if !m.cfg.AllowWrites {
+	if !m.cfg().AllowWrites {
 		t.Error("enter did not toggle the write guard")
 	}
 
-	saved, err := m.store.Config()
+	saved, err := m.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,15 +138,42 @@ func TestSettingsSessionGeometryAdjusts(t *testing.T) {
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '+', Text: "+"}))
 	m = mm.(tuiModel)
 	cols, _ := m.sessionGeometry()
-	if cols != defaultSessionCols+10 {
-		t.Errorf("cols = %d, want %d", cols, defaultSessionCols+10)
+	if cols != runtime.DefaultSessionCols+10 {
+		t.Errorf("cols = %d, want %d", cols, runtime.DefaultSessionCols+10)
 	}
 
 	m.setCursor = 1
 	mm, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: '-', Text: "-"}))
 	_, rows := mm.(tuiModel).sessionGeometry()
-	if rows != defaultSessionRows-10 {
-		t.Errorf("rows = %d, want %d", rows, defaultSessionRows-10)
+	if rows != runtime.DefaultSessionRows-10 {
+		t.Errorf("rows = %d, want %d", rows, runtime.DefaultSessionRows-10)
+	}
+}
+
+func TestTheDetachedRowStepsThroughHowLongADetachedShellIsKept(t *testing.T) {
+	m := settingsModel(t)
+	m.setSection = secSession
+	m.setFocus = focusContent
+	m.setCursor = detachedRow
+
+	for _, step := range []struct {
+		key  rune
+		want string
+		says string
+	}{
+		{'+', "5m", "closed after 5m"},
+		{'-', "3m", "closed after 3m"},
+		{'-', "1m", "closed after 1m"},
+		{'-', "off", "kept until they end"},
+	} {
+		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: step.key, Text: string(step.key)}))
+		m = mm.(tuiModel)
+		if got, _ := m.runtime().Get("detached_for"); got != step.want {
+			t.Errorf("after %q detached_for = %q, want %q", step.key, got, step.want)
+		}
+		if page := plain(strings.Join(m.sectionContent(), "\n")); !strings.Contains(page, step.says) {
+			t.Errorf("after %q the section reads:\n%s\nwant %q", step.key, page, step.says)
+		}
 	}
 }
 
@@ -174,7 +202,7 @@ func TestEditPasswordFromSettingsUsers(t *testing.T) {
 	if done.phase != phaseSettings {
 		t.Errorf("phase = %v, want to return to settings", done.phase)
 	}
-	got, err := done.store.Secrets.Get(config.IONPassKey("1", "readonly"))
+	got, err := done.store().Secrets.Get(config.IONPassKey("1", "readonly"))
 	if err != nil || got != "brandnew" {
 		t.Errorf("stored password = %q %v, want brandnew", got, err)
 	}
@@ -187,7 +215,7 @@ func TestEditPasswordFromElementsReturnsToElements(t *testing.T) {
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'p', Text: "p"}))
 	f := mm.(tuiModel)
-	if f.formKind != formEditPass || f.formUserName != "cisops" {
+	if f.formKind != formEditPass || f.formUserName != "ops" {
 		t.Fatalf("form = %d/%q", f.formKind, f.formUserName)
 	}
 	if f.formReturn != phasePicking {
@@ -201,7 +229,7 @@ func TestEditPasswordFromElementsReturnsToElements(t *testing.T) {
 	if done.phase != phasePicking {
 		t.Errorf("phase = %v, want to drop back into elements", done.phase)
 	}
-	if got, _ := done.store.Secrets.Get(config.IONPassKey("1", "cisops")); got != "pw2" {
+	if got, _ := done.store().Secrets.Get(config.IONPassKey("1", "ops")); got != "pw2" {
 		t.Errorf("password = %q, want pw2", got)
 	}
 }
@@ -219,14 +247,15 @@ func TestAddUserFromElementsReturnsToElements(t *testing.T) {
 		t.Errorf("formReturn = %v, want phasePicking", f.formReturn)
 	}
 
-	f = typeString(t, f, "netadmin")
+	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	f = typeString(t, mm.(tuiModel), "netadmin")
 	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	done := mm.(tuiModel)
 
 	if done.phase != phasePicking {
 		t.Errorf("phase = %v, want to drop back into elements", done.phase)
 	}
-	if !done.tenant.HasUser("netadmin") {
+	if !done.tenant().HasUser("netadmin") {
 		t.Error("user was not added")
 	}
 }
@@ -243,7 +272,8 @@ func TestAddUserFromSettingsReturnsToSettings(t *testing.T) {
 		t.Errorf("formReturn = %v, want phaseSettings", f.formReturn)
 	}
 
-	f = typeString(t, f, "ops2")
+	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	f = typeString(t, mm.(tuiModel), "ops2")
 	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if got := mm.(tuiModel).phase; got != phaseSettings {
 		t.Errorf("phase = %v, want phaseSettings", got)
@@ -306,7 +336,7 @@ func TestSettingsUsersPaneKeepsTheWholeRow(t *testing.T) {
 
 func TestSettingsUsersSectionOpensForATenantWithNoUsers(t *testing.T) {
 	m := settingsModel(t)
-	m.tenant = m.cfg.Tenants[1]
+	m.runtime().ReplaceTenant(m.cfg().Tenants[1])
 	m.setSection = secUsers
 	m.setFocus = focusNav
 
@@ -339,16 +369,16 @@ func TestDefaultUserSwitchesRepeatedlyInSettings(t *testing.T) {
 		cursor int
 		want   string
 	}{
-		{2, "cisops"}, {1, "readonly"}, {2, "cisops"},
+		{2, "ops"}, {1, "readonly"}, {2, "ops"},
 	} {
 		m.setCursor = step.cursor
 		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
 		m = mm.(tuiModel)
 
-		if got := m.tenant.DefaultUser(); got != step.want {
-			t.Errorf("cursor %d: model default = %q, want %q (users=%+v)", step.cursor, got, step.want, m.tenant.Users)
+		if got := m.tenant().DefaultUser(); got != step.want {
+			t.Errorf("cursor %d: model default = %q, want %q (users=%+v)", step.cursor, got, step.want, m.tenant().Users)
 		}
-		saved, err := m.store.Config()
+		saved, err := m.store().Config()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -370,14 +400,14 @@ func TestDefaultUserSwitchesRepeatedlyInUserPanel(t *testing.T) {
 		cursor int
 		want   string
 	}{
-		{1, "cisops"}, {0, "readonly"}, {1, "cisops"},
+		{1, "ops"}, {0, "readonly"}, {1, "ops"},
 	} {
 		m.userCursor = step.cursor
 		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
 		m = mm.(tuiModel)
 
-		if got := m.tenant.DefaultUser(); got != step.want {
-			t.Errorf("cursor %d: default = %q, want %q (users=%+v)", step.cursor, got, step.want, m.tenant.Users)
+		if got := m.tenant().DefaultUser(); got != step.want {
+			t.Errorf("cursor %d: default = %q, want %q (users=%+v)", step.cursor, got, step.want, m.tenant().Users)
 		}
 	}
 }
@@ -397,16 +427,16 @@ func TestDefaultUserSwitchViaNavigationKeys(t *testing.T) {
 	m = press(m, tea.Key{Code: tea.KeyDown})
 	t.Logf("after down: setCursor=%d focus=%d rows=%d", m.setCursor, m.setFocus, m.sectionRows())
 	m = press(m, tea.Key{Code: 'd', Text: "d"})
-	t.Logf("after d: default=%q active=%q", m.tenant.DefaultUser(), m.ionUser)
-	if got := m.tenant.DefaultUser(); got != "cisops" {
-		t.Errorf("default = %q, want cisops", got)
+	t.Logf("after d: default=%q active=%q", m.tenant().DefaultUser(), m.ionUser())
+	if got := m.tenant().DefaultUser(); got != "ops" {
+		t.Errorf("default = %q, want ops", got)
 	}
 
 	m = press(m, tea.Key{Code: tea.KeyUp})
 	t.Logf("after up: setCursor=%d", m.setCursor)
 	m = press(m, tea.Key{Code: 'd', Text: "d"})
-	t.Logf("after d: default=%q", m.tenant.DefaultUser())
-	if got := m.tenant.DefaultUser(); got != "readonly" {
+	t.Logf("after d: default=%q", m.tenant().DefaultUser())
+	if got := m.tenant().DefaultUser(); got != "readonly" {
 		t.Errorf("second switch default = %q, want readonly", got)
 	}
 }
@@ -418,7 +448,7 @@ func TestUserPanelStaysOpenForRepeatedSwitches(t *testing.T) {
 	for _, step := range []struct {
 		cursor int
 		want   string
-	}{{1, "cisops"}, {0, "readonly"}, {1, "cisops"}} {
+	}{{1, "ops"}, {0, "readonly"}, {1, "ops"}} {
 		m.userCursor = step.cursor
 		mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 		m = mm.(tuiModel)
@@ -426,8 +456,8 @@ func TestUserPanelStaysOpenForRepeatedSwitches(t *testing.T) {
 		if m.phase != phaseUsers {
 			t.Fatalf("enter left the panel (phase %v); you could only switch once per visit", m.phase)
 		}
-		if m.ionUser != step.want {
-			t.Errorf("ionUser = %q, want %q", m.ionUser, step.want)
+		if m.ionUser() != step.want {
+			t.Errorf("ionUser = %q, want %q", m.ionUser(), step.want)
 		}
 	}
 
@@ -467,7 +497,7 @@ func TestEnterInContentStillActs(t *testing.T) {
 	m.setCursor = guardRow
 
 	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if !mm.(tuiModel).cfg.AllowWrites {
+	if !mm.(tuiModel).cfg().AllowWrites {
 		t.Error("enter in the content pane must still perform the row action")
 	}
 }
@@ -486,27 +516,41 @@ func TestEnterOnAnEmptySectionDoesNotTrap(t *testing.T) {
 	}
 }
 
-func TestDebugSectionIsReadOnly(t *testing.T) {
+func TestDebugRowsMatchTheirLabels(t *testing.T) {
 	m := settingsModel(t)
 	m.setSection = secDebug
+	m.spinner = ui.NewSpinner("")
 
-	if m.sectionRows() != 0 {
-		t.Errorf("sectionRows() = %d, want 0 — Debug takes no cursor", m.sectionRows())
+	rows := m.sectionContent()
+	if len(rows) < debugRows {
+		t.Fatalf("%d content lines, want at least one per row (%d)", len(rows), debugRows)
 	}
-
-	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if got := mm.(tuiModel).setFocus; got != focusNav {
-		t.Error("Debug should not take content focus")
+	for row := range debugRows {
+		want, ok := debugRowLabels[row]
+		if !ok {
+			t.Fatalf("row %d has no label in debugRowLabels", row)
+		}
+		if got := plain(rows[row]); !strings.HasPrefix(strings.TrimSpace(got), want) {
+			t.Errorf("row %d is %q, want it to start with %q", row, got, want)
+		}
 	}
 
 	got := plain(m.viewSettings())
-	for _, want := range []string{"Config", "Secrets", "Version", "Catalog", "Terminal", "Sessions"} {
+	for _, want := range []string{"Config", "Exports", "Secrets", "Version", "Catalog", "Terminal", "Sessions"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Debug missing %q:\n%s", want, got)
 		}
 	}
-	if !strings.Contains(got, "read only") {
-		t.Error("hint should say the section is read only")
+}
+
+func TestDownloadingTheLogWritesItToExports(t *testing.T) {
+	m := settingsModel(t)
+	m.setSection, m.setFocus, m.setCursor = secDebug, focusContent, logsRow
+
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	got := mm.(tuiModel)
+	if !strings.Contains(got.status, "no log this run") {
+		t.Errorf("status = %q, want it to say there is nothing to write", got.status)
 	}
 }
 
@@ -531,7 +575,7 @@ func TestEditTenantRenameMovesSecretsAndConfig(t *testing.T) {
 	m.setFocus = focusContent
 	m.setCursor = 0
 
-	if err := m.store.Secrets.Set(config.ClientSecretKey("1"), "sa-secret"); err != nil {
+	if err := m.store().Secrets.Set(config.ClientSecretKey("1"), "sa-secret"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -549,7 +593,7 @@ func TestEditTenantRenameMovesSecretsAndConfig(t *testing.T) {
 	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	done := mm.(tuiModel)
 
-	saved, err := done.store.Config()
+	saved, err := done.store().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,13 +614,13 @@ func TestEditTenantRenameMovesSecretsAndConfig(t *testing.T) {
 		t.Errorf("LastTenant = %q, want the new name", saved.LastTenant)
 	}
 
-	if got, _ := done.store.Secrets.Get(config.ClientSecretKey("99")); got != "sa-secret" {
+	if got, _ := done.store().Secrets.Get(config.ClientSecretKey("99")); got != "sa-secret" {
 		t.Errorf("client secret did not move to the new tsg: %q", got)
 	}
-	if _, err := done.store.Secrets.Get(config.ClientSecretKey("1")); err == nil {
+	if _, err := done.store().Secrets.Get(config.ClientSecretKey("1")); err == nil {
 		t.Error("old client secret key left behind")
 	}
-	if got, _ := done.store.Secrets.Get(config.IONPassKey("99", "readonly")); got != "old" {
+	if got, _ := done.store().Secrets.Get(config.IONPassKey("99", "readonly")); got != "old" {
 		t.Errorf("ion password did not move to the new tsg: %q", got)
 	}
 }
@@ -600,16 +644,16 @@ func TestEditUserRenameKeepsDefaultAndMovesPassword(t *testing.T) {
 	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	done := mm.(tuiModel)
 
-	if done.tenant.DefaultUser() != "ro" {
-		t.Errorf("DefaultUser() = %q, want the renamed user to stay default", done.tenant.DefaultUser())
+	if done.tenant().DefaultUser() != "ro" {
+		t.Errorf("DefaultUser() = %q, want the renamed user to stay default", done.tenant().DefaultUser())
 	}
-	if done.tenant.HasUser("readonly") {
+	if done.tenant().HasUser("readonly") {
 		t.Error("old user name survived")
 	}
-	if got, _ := done.store.Secrets.Get(config.IONPassKey("1", "ro")); got != "old" {
+	if got, _ := done.store().Secrets.Get(config.IONPassKey("1", "ro")); got != "old" {
 		t.Errorf("password did not follow the rename: %q", got)
 	}
-	if _, err := done.store.Secrets.Get(config.IONPassKey("1", "readonly")); err == nil {
+	if _, err := done.store().Secrets.Get(config.IONPassKey("1", "readonly")); err == nil {
 		t.Error("old password key left behind")
 	}
 }
@@ -699,10 +743,10 @@ func TestTheResetSectionsTwoRowsArmSeparately(t *testing.T) {
 	}
 	next, _ = m.onSettingsKey("y")
 	m = next.(tuiModel)
-	if !strings.Contains(m.status, "shipped schemes are back") {
+	if !strings.Contains(m.status, "built-in schemes are back") {
 		t.Errorf("status = %q, want the restore to have run", m.status)
 	}
-	if len(m.cfg.Tenants) == 0 {
+	if len(m.cfg().Tenants) == 0 {
 		t.Error("restoring the themes took the tenants with it")
 	}
 
@@ -714,7 +758,7 @@ func TestTheResetSectionsTwoRowsArmSeparately(t *testing.T) {
 	if !strings.Contains(m.status, "cancel") {
 		t.Errorf("status = %q, want the reset cancelled", m.status)
 	}
-	if len(m.cfg.Tenants) == 0 {
+	if len(m.cfg().Tenants) == 0 {
 		t.Error("a cancelled reset still wiped the tenants")
 	}
 }
@@ -771,5 +815,46 @@ func TestTheDebugPageKeepsTheFrameHeight(t *testing.T) {
 	if want := len(strings.Split(general.viewSettings(), "\n")); got != want {
 		t.Errorf("the Debug page is %d lines where General is %d on a %d-row terminal; the tail must be clipped, not grow the frame",
 			got, want, m.height)
+	}
+}
+
+func TestAddUserPicksItsTenantWithTheArrows(t *testing.T) {
+	m := settingsModel(t)
+	m.setSection = secUsers
+	m.setFocus = focusContent
+	m.setCursor = 0
+
+	mm, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	f := mm.(tuiModel)
+	if f.formKind != formUser || f.form[0].label != "tenant" || f.formValue(0) != "Acme Co" {
+		t.Fatalf("form %d opens on %q = %q, want the tenant field on Acme Co", f.formKind, f.form[0].label, f.formValue(0))
+	}
+	if got := plain(f.viewForm()); !strings.Contains(got, "← Acme Co →") || !strings.Contains(got, "←→ tenant") {
+		t.Errorf("the tenant field does not show it can be changed:\n%s", got)
+	}
+
+	f = typeString(t, f, "Lab")
+	if f.formValue(0) != "Acme Co" {
+		t.Errorf("typing on the tenant field changed it to %q", f.formValue(0))
+	}
+	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	f = mm.(tuiModel)
+	if f.formValue(0) != "Lab" || f.formTenantTSG != "2" {
+		t.Fatalf("→ picked %q (%s), want Lab", f.formValue(0), f.formTenantTSG)
+	}
+
+	for _, s := range []string{"labops", "pw"} {
+		mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+		f = typeString(t, mm.(tuiModel), s)
+	}
+	mm, _ = f.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	done := mm.(tuiModel)
+	lab, _ := done.cfg().Tenant("Lab")
+	acme, _ := done.cfg().Tenant("Acme Co")
+	if !lab.HasUser("labops") || acme.HasUser("labops") {
+		t.Errorf("labops on Lab %v, on Acme Co %v; want it on the tenant picked", lab.HasUser("labops"), acme.HasUser("labops"))
+	}
+	if got, _ := done.store().Secrets.Get(config.IONPassKey("2", "labops")); got != "pw" {
+		t.Errorf("password = %q, want it saved under Lab", got)
 	}
 }

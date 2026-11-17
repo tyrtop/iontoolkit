@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"tyrtop.com/iontk/internal/config"
@@ -50,13 +52,70 @@ func testStore(t *testing.T) *config.Store {
 	return config.OpenAt(root, config.NewFileSecrets(filepath.Join(root, "secrets.json")))
 }
 
+type toServer string
+
+func (s toServer) RoundTrip(r *http.Request) (*http.Response, error) {
+	u, err := url.Parse(string(s))
+	if err != nil {
+		return nil, err
+	}
+	r = r.Clone(r.Context())
+	r.URL.Scheme, r.URL.Host, r.Host = u.Scheme, u.Host, u.Host
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestTwoRunsOnOneTenantKeepEachOtherSignedIn(t *testing.T) {
+	var mu sync.Mutex
+	live, n := map[string]bool{"rt1": true}, 1
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		mu.Lock()
+		defer mu.Unlock()
+		rt := r.PostFormValue("refresh_token")
+		if !live[rt] {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error_description":"grant is invalid","error":"invalid_grant"}`))
+			return
+		}
+		delete(live, rt)
+		n++
+		live[fmt.Sprintf("rt%d", n)] = true
+		fmt.Fprintf(w, `{"access_token":"at%d","refresh_token":"rt%d","expires_in":899}`, n, n)
+	}))
+	defer srv.Close()
+
+	const tsg = "1900000017"
+	st := testStore(t)
+	if err := st.Secrets.Set(config.RefreshTokenKey(tsg), "rt1"); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: toServer(srv.URL)}
+	ctx := context.Background()
+	first := BrowserSource(Flags{TSGID: tsg}, client, st)
+	if _, _, err := first.Token(ctx); err != nil {
+		t.Fatalf("the first run could not sign in: %v", err)
+	}
+	second := BrowserSource(Flags{TSGID: tsg}, client, st)
+	if _, _, err := second.Token(ctx); err != nil {
+		t.Fatalf("the second run could not sign in: %v", err)
+	}
+	for _, run := range []struct {
+		name string
+		src  *saseauth.Source
+	}{{"the first run", first}, {"the second run", second}} {
+		if _, _, err := run.src.Token(ctx); err != nil {
+			t.Errorf("%s lost its sign-in once the other rotated the token: %v", run.name, err)
+		}
+	}
+}
+
 func TestBrowserSourceReusesStoredRefreshToken(t *testing.T) {
 	st := testStore(t)
-	if err := st.Secrets.Set(config.RefreshTokenKey("1984021017"), "stored-rt"); err != nil {
+	if err := st.Secrets.Set(config.RefreshTokenKey("1900000017"), "stored-rt"); err != nil {
 		t.Fatalf("seed refresh token: %v", err)
 	}
 
-	src := BrowserSource(Flags{TSGID: "1984021017"}, nil, st)
+	src := BrowserSource(Flags{TSGID: "1900000017"}, nil, st)
 	if got := src.RefreshToken(); got != "stored-rt" {
 		t.Errorf("RefreshToken() = %q, want %q", got, "stored-rt")
 	}
@@ -64,15 +123,15 @@ func TestBrowserSourceReusesStoredRefreshToken(t *testing.T) {
 
 func TestBrowserSourcePersistsRotatedToken(t *testing.T) {
 	st := testStore(t)
-	src := BrowserSource(Flags{TSGID: "1984021017"}, nil, st)
+	src := BrowserSource(Flags{TSGID: "1900000017"}, nil, st)
 	if got := src.RefreshToken(); got != "" {
 		t.Errorf("RefreshToken() = %q, want empty with nothing stored", got)
 	}
 
-	if err := st.Secrets.Set(config.RefreshTokenKey("1984021017"), "rotated"); err != nil {
+	if err := st.Secrets.Set(config.RefreshTokenKey("1900000017"), "rotated"); err != nil {
 		t.Fatalf("Set() error = %v", err)
 	}
-	again := BrowserSource(Flags{TSGID: "1984021017"}, nil, st)
+	again := BrowserSource(Flags{TSGID: "1900000017"}, nil, st)
 	if got := again.RefreshToken(); got != "rotated" {
 		t.Errorf("RefreshToken() = %q, want %q to be read back", got, "rotated")
 	}
@@ -298,8 +357,8 @@ func TestFixturesSeedTenantsThatResolveWithoutASignIn(t *testing.T) {
 
 func TestATenantWithNoSignInReadsTheSameWhateverTheAccountCredentialDid(t *testing.T) {
 	const (
-		good = "1984021017"
-		bad  = "1538107912"
+		good = "1900000017"
+		bad  = "1500000012"
 	)
 
 	tests := []struct {
@@ -314,7 +373,7 @@ func TestATenantWithNoSignInReadsTheSameWhateverTheAccountCredentialDid(t *testi
 			name: "another tenant narrowed it first",
 			seed: func(t *testing.T, tokenURL string, client *http.Client) *saseauth.Seed {
 				s := saseauth.NewSeed("acct")
-				opt := saseauth.Options{TokenURL: tokenURL, Client: client, Seed: s}
+				opt := saseauth.Options{Host: tokenURL, Client: client, Seed: s}
 				if _, _, err := saseauth.NewSource(good, "", opt, nil).Token(context.Background()); err != nil {
 					t.Fatalf("the first tenant could not narrow the account credential: %v", err)
 				}
@@ -343,9 +402,9 @@ func TestATenantWithNoSignInReadsTheSameWhateverTheAccountCredentialDid(t *testi
 			defer srv.Close()
 
 			opt := saseauth.Options{
-				TokenURL: srv.URL,
-				Client:   srv.Client(),
-				Seed:     tt.seed(t, srv.URL, srv.Client()),
+				Host:   srv.URL,
+				Client: srv.Client(),
+				Seed:   tt.seed(t, srv.URL, srv.Client()),
 			}
 			_, _, err := saseauth.NewSource(bad, "", opt, nil).Token(context.Background())
 			if err == nil {

@@ -1,0 +1,40 @@
+endpoints:
+  - name: profile
+    path: /sdwan/{version}/api/profile
+  - name: sites
+    path: /sdwan/{version}/api/sites
+  - name: elements
+    path: /sdwan/{version}/api/elements
+  - name: element
+    path: /sdwan/{version}/api/elements/{element_id}
+  - name: element_status
+    path: /sdwan/{version}/api/elements/{element_id}/status
+  - name: wan_labels
+    path: /sdwan/{version}/api/waninterfacelabels
+  - name: wan_networks
+    path: /sdwan/{version}/api/wannetworks
+  - name: zones
+    path: /sdwan/{version}/api/securityzones
+  - name: element_zones
+    path: /sdwan/{version}/api/sites/{site_id}/elements/{element_id}/securityzones
+  - name: site_circuits
+    path: /sdwan/{version}/api/sites/{site_id}/waninterfaces
+  - name: circuit_status
+    path: /sdwan/{version}/api/sites/{site_id}/waninterfaces/{circuit_id}/status
+  - name: circuit_state
+    path: /sdwan/{version}/api/sites/{site_id}/elements/{element_id}/waninterfaces/{circuit_id}/state
+  - name: cluster_query
+    method: POST
+    path: /sdwan/{version}/api/spokeclusters/status/query
+  - name: cluster_status
+    path: /sdwan/{version}/api/sites/{site_id}/spokeclusters/{cluster_id}/status
+  - name: interfaces
+    path: /sdwan/{version}/api/sites/{site_id}/elements/{element_id}/interfaces
+  - name: interface_status
+    path: /sdwan/{version}/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}/status
+  - name: interface_put
+    method: PUT
+    path: /sdwan/{version}/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}
+  - name: interface_patch
+    method: PATCH
+    path: /sdwan/{version}/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}

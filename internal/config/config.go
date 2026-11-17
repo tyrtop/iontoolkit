@@ -72,10 +72,12 @@ type Config struct {
 	AllowWrites  bool     `json:"allow_writes,omitempty"`
 	SessionCols  int      `json:"session_cols,omitempty"`
 	SessionRows  int      `json:"session_rows,omitempty"`
+	DetachedFor  string   `json:"detached_for,omitempty"`
 	PageStep     int      `json:"page_step,omitempty"`
 	Theme        string   `json:"theme,omitempty"`
 	HiddenThemes []string `json:"hidden_themes,omitempty"`
 	Zone         string   `json:"zone,omitempty"`
+	TutorialSeen bool     `json:"tutorial_seen,omitempty"`
 	BatchFormat  string   `json:"batch_format,omitempty"`
 	BatchOrient  string   `json:"batch_orient,omitempty"`
 	BatchToFile  bool     `json:"batch_to_file,omitempty"`
@@ -93,6 +95,8 @@ func (c *Config) BatchOutDir() string {
 type Store struct {
 	Root    string
 	Secrets Secrets
+
+	cacheMu sync.Mutex
 }
 
 func Open() (*Store, error) {
@@ -143,6 +147,8 @@ func (s *Store) BrowserDir() string { return filepath.Join(s.Root, "browser") }
 
 func (s *Store) LogsDir() string { return filepath.Join(s.Root, logging.DirName) }
 
+func (s *Store) ExportsDir() string { return filepath.Join(s.Root, "exports") }
+
 func (s *Store) Config() (*Config, error) {
 	b, err := os.ReadFile(s.configPath())
 	if os.IsNotExist(err) {
@@ -165,6 +171,8 @@ func (s *Store) SaveConfig(c *Config) error {
 	}
 	return writeAtomic(s.configPath(), append(b, '\n'), 0o600)
 }
+
+func WriteFile(path string, data []byte) error { return writeAtomic(path, data, 0o600) }
 
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

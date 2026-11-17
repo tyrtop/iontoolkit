@@ -64,8 +64,6 @@ func SessionExpiry(refreshToken string) (time.Time, bool) {
 	return exp, !exp.IsZero()
 }
 
-// unverified on purpose: these label the session and check the tenant scope,
-// never an access decision, so there is nothing here for a signature to protect
 func jwtClaims(token string) map[string]any {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {

@@ -1,0 +1,6 @@
+title: Site report
+description: Lists a site's routers and what dump spoke-ha status returns on each.
+inputs:
+  - name: site
+    prompt: Site name
+    required: true

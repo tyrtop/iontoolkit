@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -29,13 +30,7 @@ func lastLineAt(s string) (string, int) {
 	return strings.TrimSpace(s[i:]), i
 }
 
-// the earliest match in the line, not the first pattern in the list: ION 6.3.4
-// prints "--More--(4%)[Press space to continue, 'q' to quit.]", which matches
-// two of them, and cutting the later one left "--More--(4%)[" in the output.
-//
-// What follows the prompt is the device's own progress, so it goes too.
-// Backspaces are the exception: the prompt was erased in place and what comes
-// after them is the next page.
+// earliest match: the ION 6.3.4 pager line matches two patterns
 func stripPager(line string, pagers []string) (string, bool) {
 	low := strings.ToLower(line)
 	if len(low) != len(line) {
@@ -67,6 +62,10 @@ func isPager(line string, pagers []string) bool {
 	_, hit := stripPager(line, pagers)
 	return hit && line != ""
 }
+
+func IsPager(line string) bool { return isPager(line, DefaultPagers) }
+
+func StripPager(line string) (string, bool) { return stripPager(line, DefaultPagers) }
 
 func strip(s string) string {
 	return ansi.ReplaceAllString(s, "")
@@ -136,10 +135,9 @@ func readUntilPrompt(ctx context.Context, conn Conn, prompt string, pagers []str
 
 		last, at := lastLineAt(seen)
 		if at > answeredAt && isPager(last, pagers) {
-			// A plain space, no carriage return. The device wants a keypress,
-			// and a return would run as an empty command.
+			// the device wants a keypress; a return runs an empty command
 			if err := conn.Write(ctx, websocket.MessageText, []byte(" ")); err != nil {
-				return buf.String(), fmt.Errorf("answering %q: %w", last, err)
+				return buf.String(), fmt.Errorf("replying to %q: %w", last, err)
 			}
 			answeredAt = at
 		}
@@ -159,6 +157,32 @@ func tail(raw, redact string) string {
 		s = "\u2026" + string(r[len(r)-max:])
 	}
 	return fmt.Sprintf("%q", s)
+}
+
+const interruptGrace = 3 * time.Second
+
+// coder/websocket drops the socket unclosed when a read's context ends
+func interruptNearDeadline(ctx context.Context, conn Conn) (stop func() bool) {
+	dl, ok := ctx.Deadline()
+	if !ok {
+		return func() bool { return false }
+	}
+	wait := time.Until(dl) - interruptGrace
+	if wait <= 0 {
+		wait = time.Until(dl) / 2
+	}
+	done := make(chan struct{})
+	t := time.AfterFunc(wait, func() {
+		defer close(done)
+		_ = conn.Write(ctx, websocket.MessageText, []byte("\x03"))
+	})
+	return func() bool {
+		if t.Stop() {
+			return false
+		}
+		<-done
+		return true
+	}
 }
 
 type RunOptions struct {
@@ -212,7 +236,9 @@ func Run(ctx context.Context, conn Conn, o RunOptions) ([]CommandOutput, error) 
 		if err := conn.Write(ctx, websocket.MessageText, []byte(cmd+"\r")); err != nil {
 			return outs, fmt.Errorf("write %q: %w", cmd, err)
 		}
+		stop := interruptNearDeadline(ctx, conn)
 		raw, err := readUntilPrompt(ctx, conn, prompt, o.pagers())
+		interrupted := stop()
 		if err != nil {
 			return outs, fmt.Errorf("read after %q: %w; last saw %s", cmd, err, tail(raw, o.Pass))
 		}
@@ -220,6 +246,9 @@ func Run(ctx context.Context, conn Conn, o RunOptions) ([]CommandOutput, error) 
 			Command: cmd,
 			Output:  clean(raw, prompt, cmd, o.pagers()),
 		})
+		if interrupted {
+			return outs, fmt.Errorf("%q was still running at the session timeout; stopped it with ctrl+c", cmd)
+		}
 	}
 	return outs, nil
 }

@@ -137,9 +137,6 @@ func TestResolveCredentialsReadsTheKeyring(t *testing.T) {
 	if got.Flags.IONUsername != "admin" || got.Flags.IONPassword != "stored-pass" {
 		t.Errorf("device login = %q/%q, want admin/stored-pass", got.Flags.IONUsername, got.Flags.IONPassword)
 	}
-	if err := got.Flags.Validate(); err == nil {
-		t.Error("Validate() error = nil with no elements, want the usual element check still to apply")
-	}
 }
 
 func TestResolveCredentialsPrefersTheEnvironmentDeviceLogin(t *testing.T) {

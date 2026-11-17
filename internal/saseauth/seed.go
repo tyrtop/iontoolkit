@@ -39,7 +39,7 @@ func (s *Seed) redeem(ctx context.Context, client *http.Client, tokenURL, tsg st
 		if strings.Contains(err.Error(), "invalid_grant") {
 			s.spent = true
 		}
-		log.Warn("account credential refused", "err", err, "spent", s.spent)
+		log.Warn("account credential rejected", "err", err, "spent", s.spent)
 		return nil, true, err
 	}
 	if tok.RefreshToken != s.token {
@@ -53,5 +53,5 @@ func reason(spent bool) string {
 	if spent {
 		return "already spent by another tenant"
 	}
-	return "none is held"
+	return "none is kept"
 }

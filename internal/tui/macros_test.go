@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"tyrtop.com/iontk/internal/config"
+	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase/api"
 )
 
@@ -17,7 +18,7 @@ func macroModel(t *testing.T) tuiModel {
 		{Name: "wan check", Commands: []string{"dump interface status all", "dump vpn count"}, Model: "ion 1200"},
 		{Name: "ha check", Commands: []string{"dump spoke-ha status"}, Model: "ion 1200"},
 	} {
-		if err := m.cmds.SetMacro(mac); err != nil {
+		if err := m.runtime().SetMacro(mac); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -64,7 +65,7 @@ func TestTheMacroPageListsFiltersAndDeletes(t *testing.T) {
 	m.macroCursor = 1
 	next, cmd := m.onMacroKey(tea.KeyPressMsg(tea.Key{Code: 'd', Mod: tea.ModCtrl}), "ctrl+d")
 	m = next.(tuiModel)
-	if _, ok := m.cmds.Macro("wan check"); !ok {
+	if _, ok := m.runtime().Macro("wan check"); !ok {
 		t.Fatal("ctrl+d deleted the macro")
 	}
 	if cmd != nil {
@@ -73,7 +74,7 @@ func TestTheMacroPageListsFiltersAndDeletes(t *testing.T) {
 
 	next, cmd = m.onMacroKey(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"}), "x")
 	m = next.(tuiModel)
-	if _, ok := m.cmds.Macro("wan check"); !ok {
+	if _, ok := m.runtime().Macro("wan check"); !ok {
 		t.Fatal("one x deleted the macro")
 	}
 	if !strings.Contains(m.status, "x again") {
@@ -81,14 +82,14 @@ func TestTheMacroPageListsFiltersAndDeletes(t *testing.T) {
 	}
 	next, cmd = m.onMacroKey(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"}), "x")
 	m = next.(tuiModel)
-	if _, ok := m.cmds.Macro("wan check"); ok {
+	if _, ok := m.runtime().Macro("wan check"); ok {
 		t.Error("the second x left the macro in place")
 	}
 	if cmd == nil {
 		t.Fatal("deleting queued no write")
 	}
 	runSave(t, cmd)
-	saved, err := m.store.Commands()
+	saved, err := m.store().Commands()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,16 +104,13 @@ func TestAMacroIsGatedAsAUnit(t *testing.T) {
 		"dump device status",
 		"config banner hello",
 	}}
-	if err := m.cmds.SetMacro(mac); err != nil {
+	if err := m.runtime().SetMacro(mac); err != nil {
 		t.Fatal(err)
 	}
-	next, cmd := m.runMacro(mac, m.all)
-	got := next.(tuiModel)
+	next, cmd := m.runMacro(mac, m.rows())
+	got := afterStart(t, next.(tuiModel), cmd)
 	if got.phase == phaseRunning {
 		t.Fatal("a macro with a write in it started running")
-	}
-	if cmd != nil {
-		t.Error("the refused macro queued work")
 	}
 	for _, want := range []string{"risky", "not read-only", "config banner hello"} {
 		if !strings.Contains(got.status, want) {
@@ -123,38 +121,38 @@ func TestAMacroIsGatedAsAUnit(t *testing.T) {
 		t.Error("the run stream was opened for a refused macro")
 	}
 
-	m.cfg.AllowWrites = true
-	next, _ = m.runMacro(mac, m.all)
-	if status := next.(tuiModel).status; strings.Contains(status, "not read-only") {
+	m.cfg().AllowWrites = true
+	next, cmd = m.runMacro(mac, m.rows())
+	if status := afterStart(t, next.(tuiModel), cmd).status; strings.Contains(status, "not read-only") {
 		t.Errorf("AllowWrites did not lift the guard: %q", status)
 	}
 }
 
 func TestAMacroNeedsSomethingToRunOn(t *testing.T) {
 	m := macroModel(t)
-	mac, _ := m.cmds.Macro("ha check")
+	mac, _ := m.runtime().Macro("ha check")
 
 	next, cmd := m.runMacro(mac, nil)
-	got := next.(tuiModel)
-	if cmd != nil || got.phase == phaseRunning {
+	got := afterStart(t, next.(tuiModel), cmd)
+	if got.phase == phaseRunning || got.events != nil {
 		t.Error("the macro ran with nothing selected")
 	}
-	if !strings.Contains(got.status, "nothing selected") {
+	if !strings.Contains(got.status, "no elements selected") {
 		t.Errorf("status = %q, want it to say what is missing", got.status)
 	}
 }
 
 func TestACrossModelMacroAsksOnceAndThenNeverAgain(t *testing.T) {
 	m := macroModel(t)
-	mac, _ := m.cmds.Macro("ha check")
+	mac, _ := m.runtime().Macro("ha check")
 	on := rowsOfModel(m, "ion 3200")
 
 	next, cmd := m.runMacro(mac, on)
-	m = next.(tuiModel)
+	m = afterStart(t, next.(tuiModel), cmd)
 	if m.askMacro != "ha check" {
 		t.Fatalf("askMacro = %q, want the macro held on the question", m.askMacro)
 	}
-	if cmd != nil {
+	if m.phase == phaseRunning || m.events != nil {
 		t.Error("the macro ran before the question was answered")
 	}
 	prompt := plain(m.macroWarnPrompt())
@@ -166,32 +164,28 @@ func TestACrossModelMacroAsksOnceAndThenNeverAgain(t *testing.T) {
 
 	next, _ = m.onMacroWarnKey("n")
 	declined := next.(tuiModel)
-	if declined.askMacro != "" || declined.cmds.Acked(warnMacroModel) {
+	if declined.askMacro != "" || declined.runtime().Acked(runtime.WarnMacroModel) {
 		t.Errorf("declining acknowledged the warning: askMacro=%q acked=%v",
-			declined.askMacro, declined.cmds.Acked(warnMacroModel))
+			declined.askMacro, declined.runtime().Acked(runtime.WarnMacroModel))
 	}
 
-	next, _ = declined.runMacro(mac, on)
-	m = next.(tuiModel)
+	next, cmd = declined.runMacro(mac, on)
+	m = afterStart(t, next.(tuiModel), cmd)
 	next, cmd = m.onMacroWarnKey("y")
-	m = next.(tuiModel)
-	if !m.cmds.Acked(warnMacroModel) {
+	m = afterStart(t, next.(tuiModel), cmd)
+	if !m.runtime().Acked(runtime.WarnMacroModel) {
 		t.Error("yes did not acknowledge the warning")
 	}
-	if cmd == nil {
-		t.Fatal("the acknowledgement queued no write")
-	}
-	runSave(t, cmd)
-	saved, err := m.store.Commands()
+	saved, err := m.store().Commands()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !saved.Acked(warnMacroModel) {
+	if !saved.Acked(runtime.WarnMacroModel) {
 		t.Error("the acknowledgement was not written through, so it would ask again next run")
 	}
 
-	next, _ = m.runMacro(mac, on)
-	again := next.(tuiModel)
+	next, cmd = m.runMacro(mac, on)
+	again := afterStart(t, next.(tuiModel), cmd)
 	if again.askMacro != "" {
 		t.Error("the warning was asked a second time after being acknowledged")
 	}
@@ -203,10 +197,10 @@ func TestACrossModelMacroAsksOnceAndThenNeverAgain(t *testing.T) {
 func TestAMacroWithNoModelDoesNotWarn(t *testing.T) {
 	m := macroModel(t)
 	mac := config.Macro{Name: "anywhere", Commands: []string{"dump device status"}}
-	if err := m.cmds.SetMacro(mac); err != nil {
+	if err := m.runtime().SetMacro(mac); err != nil {
 		t.Fatal(err)
 	}
-	next, _ := m.runMacro(mac, m.all)
+	next, _ := m.runMacro(mac, m.rows())
 	if got := next.(tuiModel); got.askMacro != "" {
 		t.Errorf("askMacro = %q, want no question for a macro with no model", got.askMacro)
 	}
@@ -214,7 +208,7 @@ func TestAMacroWithNoModelDoesNotWarn(t *testing.T) {
 
 func rowsOfModel(m tuiModel, model string) []elementRow {
 	var out []elementRow
-	for _, r := range m.all {
+	for _, r := range m.rows() {
 		if r.Model == model {
 			out = append(out, r)
 		}
@@ -232,8 +226,8 @@ func TestPickingAMacroArmsTheElementList(t *testing.T) {
 	if m.phase != phasePicking {
 		t.Fatalf("phase = %v, want the element list", m.phase)
 	}
-	if m.mode != modeMacro || m.armedMacro != mac.Name {
-		t.Fatalf("mode = %v, armed = %q, want macro mode holding %q", m.mode, m.armedMacro, mac.Name)
+	if m.mode() != modeMacro || m.armed() != mac.Name {
+		t.Fatalf("mode = %v, armed = %q, want macro mode holding %q", m.mode(), m.armed(), mac.Name)
 	}
 	got := plain(m.viewPicking())
 	for _, want := range []string{"Macro Mode", mac.Name, "enter run " + mac.Name} {
@@ -244,24 +238,23 @@ func TestPickingAMacroArmsTheElementList(t *testing.T) {
 
 	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModAlt}))
 	after := next.(tuiModel)
-	if after.mode == modeMacro || after.armedMacro != "" {
-		t.Errorf("alt+m left mode %v armed with %q", after.mode, after.armedMacro)
+	if after.mode() == modeMacro || after.armed() != "" {
+		t.Errorf("alt+m left mode %v armed with %q", after.mode(), after.armed())
 	}
 }
 
 func TestEnterInMacroModeRunsTheArmedMacro(t *testing.T) {
 	m := macroModel(t)
 	mac := config.Macro{Name: "risky", Commands: []string{"config banner hello"}}
-	if err := m.cmds.SetMacro(mac); err != nil {
+	if err := m.runtime().SetMacro(mac); err != nil {
 		t.Fatal(err)
 	}
-	m.mode = modeMacro
-	m.armedMacro = "risky"
+	m.runtime().ArmMacro("risky")
 	m.phase = phasePicking
 	m.rebuildRows()
 
-	next, _ := m.onPickEnter()
-	got := next.(tuiModel)
+	next, cmd := m.onPickEnter()
+	got := afterStart(t, next.(tuiModel), cmd)
 	if got.phase == phaseRunning {
 		t.Fatal("a macro with a write in it ran from the element list")
 	}
@@ -269,19 +262,19 @@ func TestEnterInMacroModeRunsTheArmedMacro(t *testing.T) {
 		t.Errorf("status = %q, want the macro refused by name", got.status)
 	}
 
-	m.cmds.RemoveMacro("risky")
+	m.runtime().RemoveMacro("risky")
 	next, _ = m.onPickEnter()
 	gone := next.(tuiModel)
-	if gone.mode == modeMacro || !strings.Contains(gone.status, "gone") {
-		t.Errorf("mode = %v, status = %q, want macro mode dropped", gone.mode, gone.status)
+	if gone.mode() == modeMacro || !strings.Contains(gone.status, "no longer exists") {
+		t.Errorf("mode = %v, status = %q, want macro mode dropped", gone.mode(), gone.status)
 	}
 }
 
 func TestTheMacroFormGrowsALineAtATime(t *testing.T) {
 	m := macroModel(t)
-	for _, r := range m.all {
+	for _, r := range m.rows() {
 		if r.Model == "ion 1200" {
-			m.selected[r.key()] = true
+			m.runtime().Select(r.Key())
 		}
 	}
 
@@ -325,7 +318,7 @@ func TestTheMacroFormGrowsALineAtATime(t *testing.T) {
 
 	next, cmd := m.submitForm()
 	m = next.(tuiModel)
-	mac, ok := m.cmds.Macro("boot check")
+	mac, ok := m.runtime().Macro("boot check")
 	if !ok {
 		t.Fatal("the macro was not saved")
 	}
@@ -408,10 +401,10 @@ func TestEditingAMacroReopensItsCommands(t *testing.T) {
 	m.form[0].input.SetValue(old + " v2")
 	next, _ = m.submitForm()
 	m = next.(tuiModel)
-	if _, ok := m.cmds.Macro(old); ok {
+	if _, ok := m.runtime().Macro(old); ok {
 		t.Errorf("%q survived the rename", old)
 	}
-	if mac, ok := m.cmds.Macro(old + " v2"); !ok || len(mac.Commands) != 2 {
+	if mac, ok := m.runtime().Macro(old + " v2"); !ok || len(mac.Commands) != 2 {
 		t.Errorf("renamed macro = %+v, %v, want its commands kept", mac, ok)
 	}
 
@@ -425,11 +418,11 @@ func TestEditingAMacroReopensItsCommands(t *testing.T) {
 
 func TestAMixedSelectionRecordsNoModel(t *testing.T) {
 	m := macroModel(t)
-	for _, r := range m.all {
-		m.selected[r.key()] = true
+	for _, r := range m.rows() {
+		m.runtime().Select(r.Key())
 	}
-	if got := m.selectionModel(); got != "" {
-		t.Errorf("selectionModel() = %q, want empty for a mixed selection", got)
+	if got := m.runtime().SelectionModel(); got != "" {
+		t.Errorf("SelectionModel() = %q, want empty for a mixed selection", got)
 	}
 }
 
@@ -438,23 +431,23 @@ func TestTheMenuDoesNotOpenTheListInMacroMode(t *testing.T) {
 	m.macroCursor = 1
 	next, _ := m.onMacroKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), "enter")
 	m = next.(tuiModel)
-	if m.mode != modeMacro {
-		t.Fatalf("mode = %v, want macro mode after picking one", m.mode)
+	if m.mode() != modeMacro {
+		t.Fatalf("mode = %v, want macro mode after picking one", m.mode())
 	}
 
 	m.phase = phaseMenu
 	m.menuCursor = 0
 	next, _ = m.onMenuKey("enter")
 	got := next.(tuiModel)
-	if got.mode == modeMacro || got.armedMacro != "" {
-		t.Errorf("mode = %v armed with %q, want the macro put down", got.mode, got.armedMacro)
+	if got.mode() == modeMacro || got.armed() != "" {
+		t.Errorf("mode = %v armed with %q, want the macro put down", got.mode(), got.armed())
 	}
-	if got.mode != modeShell {
-		t.Errorf("mode = %v, want the saved default", got.mode)
+	if got.mode() != modeShell {
+		t.Errorf("mode = %v, want the saved default", got.mode())
 	}
 }
 
-func TestTheMacroCursorHighlightsTheWholeLine(t *testing.T) {
+func TestTheMacroCursorIsACaretLikeTheOtherMenus(t *testing.T) {
 	m := macroModel(t)
 	m.width = 120
 
@@ -464,44 +457,41 @@ func TestTheMacroCursorHighlightsTheWholeLine(t *testing.T) {
 	if len(rows) < 2 {
 		t.Fatalf("%d macros, want at least two to tell the lines apart", len(rows))
 	}
-
-	var want string
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(plain(line), rows[0].Name) {
-			want = line
-			break
+	lineOf := func(out, text string) string {
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(plain(line), text) {
+				return line
+			}
 		}
+		t.Fatalf("no line for %s:\n%s", text, out)
+		return ""
 	}
-	if want == "" {
-		t.Fatalf("no line for %s:\n%s", rows[0].Name, out)
+
+	here, other := lineOf(out, rows[0].Name), lineOf(out, rows[1].Name)
+	if !strings.HasPrefix(plain(here), "> "+rows[0].Name) || !strings.HasPrefix(plain(other), "  "+rows[1].Name) {
+		t.Errorf("the cursor row moved instead of taking a caret:\n%q\n%q", plain(here), plain(other))
 	}
-	if !strings.Contains(want, "\x1b[1;35m") {
-		t.Errorf("the cursor line is not highlighted:\n%q", want)
+	if !strings.Contains(here, "\x1b[1;35m") {
+		t.Errorf("the cursor row did not change colour:\n%q", here)
 	}
-	if n := strings.Count(want, "\x1b[0m") + strings.Count(want, "\x1b[m"); n > 1 {
-		t.Errorf("the highlight is broken into %d runs:\n%q", n, want)
+	if p := plain(here); p != strings.TrimRight(p, " ") {
+		t.Errorf("the cursor row is padded out into a bar:\n%q", p)
 	}
 
 	m.macroCursor = 0
-	out = m.viewMacros()
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(plain(line), "+ New Macro") {
-			if !strings.Contains(line, "\x1b[1;35m") {
-				t.Errorf("the new-macro row is not highlighted:\n%q", line)
-			}
-		}
+	if line := lineOf(m.viewMacros(), "+ New Macro"); !strings.HasPrefix(plain(line), "> + New Macro") || !strings.Contains(line, "\x1b[1;35m") {
+		t.Errorf("the new-macro row does not take the caret:\n%q", line)
 	}
 }
 
 func TestLeavingTheElementListGoesBackToTheMacroPage(t *testing.T) {
 	m := macroModel(t)
-	m.all = []elementRow{{Element: api.Element{ID: "1", Name: "s0100-rtr-01"}, TSG: "1"}}
-	m.matches = []int{0}
+	m.runtime().SetElements([]elementRow{{Element: api.Element{ID: "1", Name: "s0100-rtr-01"}, TSG: "1"}})
 
-	next, _ := m.armMacro(m.cmds.Macros[0])
+	next, _ := m.armMacro(m.runtime().Macros()[0])
 	m = next.(tuiModel)
-	if m.phase != phasePicking || m.mode != modeMacro {
-		t.Fatalf("phase = %v mode = %v, want the element list in macro mode", m.phase, m.mode)
+	if m.phase != phasePicking || m.mode() != modeMacro {
+		t.Fatalf("phase = %v mode = %v, want the element list in macro mode", m.phase, m.mode())
 	}
 
 	for _, key := range []string{"q", "esc", "alt+w"} {
@@ -511,12 +501,12 @@ func TestLeavingTheElementListGoesBackToTheMacroPage(t *testing.T) {
 		}
 	}
 
-	m.mode, m.armedMacro = modeShell, ""
+	m.setMode(modeShell)
 	back, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: 'q', Text: "q"}), "q")
 	if got := back.(tuiModel).phase; got != phaseMenu {
 		t.Errorf("q from the plain list went to phase %v, want the menu", got)
 	}
-	m.mode, m.armedMacro = modeMacro, m.cmds.Macros[0].Name
+	m.runtime().ArmMacro(m.runtime().Macros()[0].Name)
 	m.phase, m.width, m.height = phasePicking, 140, 24
 	m.rebuildRows()
 	if got := plain(m.viewPicking()); !strings.Contains(got, "alt+w macros") {
@@ -545,13 +535,13 @@ func TestDeletingAMacroCanBeUndone(t *testing.T) {
 		return cmd
 	}
 	runSave(t, del())
-	if _, still := m.cmds.Macro(mac.Name); still {
+	if _, still := m.runtime().Macro(mac.Name); still {
 		t.Fatal("the macro survived two presses")
 	}
 
 	next, cmd := m.onMacroKey(tea.KeyPressMsg(tea.Key{Code: 'u', Text: "u"}), "u")
 	m = next.(tuiModel)
-	back, ok := m.cmds.Macro(mac.Name)
+	back, ok := m.runtime().Macro(mac.Name)
 	if !ok {
 		t.Fatalf("u did not put it back: %s", m.status)
 	}
@@ -562,7 +552,7 @@ func TestDeletingAMacroCanBeUndone(t *testing.T) {
 		t.Error("the undo queued no write, so it is back only until a restart")
 	}
 	runSave(t, cmd)
-	saved, err := m.store.Commands()
+	saved, err := m.store().Commands()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,7 +561,7 @@ func TestDeletingAMacroCanBeUndone(t *testing.T) {
 	}
 
 	next, _ = m.onMacroKey(tea.KeyPressMsg(tea.Key{Code: 'u', Text: "u"}), "u")
-	if got := next.(tuiModel).status; !strings.Contains(got, "nothing to undo") {
+	if got := next.(tuiModel).status; !strings.Contains(got, "no removed macro to undo") {
 		t.Errorf("status = %q with nothing left to undo", got)
 	}
 }
@@ -595,7 +585,7 @@ func TestTheMacroDeleteArmIsClearedByAnyOtherKey(t *testing.T) {
 	m.macroCursor = 1
 	next, _ = m.onMacroKey(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"}), "x")
 	m = next.(tuiModel)
-	if _, still := m.cmds.Macro(mac.Name); !still {
+	if _, still := m.runtime().Macro(mac.Name); !still {
 		t.Error("a disarmed x deleted on one press")
 	}
 }

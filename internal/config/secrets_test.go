@@ -35,7 +35,7 @@ func TestFileSecretsRoundTrip(t *testing.T) {
 		t.Errorf("Get() = %q, want sekrit", got)
 	}
 
-	if err := s.Set(IONPassKey("1234", "cisops"), "pw1"); err != nil {
+	if err := s.Set(IONPassKey("1234", "ops"), "pw1"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.Get(ClientSecretKey("1234")); got != "sekrit" {
@@ -48,7 +48,7 @@ func TestFileSecretsRoundTrip(t *testing.T) {
 	if _, err := s.Get(ClientSecretKey("1234")); !errors.Is(err, ErrNotFound) {
 		t.Errorf("after Delete, err = %v, want ErrNotFound", err)
 	}
-	if got, _ := s.Get(IONPassKey("1234", "cisops")); got != "pw1" {
+	if got, _ := s.Get(IONPassKey("1234", "ops")); got != "pw1" {
 		t.Error("Delete removed the wrong key")
 	}
 }
@@ -102,6 +102,24 @@ func TestKeyringSecretsWithMock(t *testing.T) {
 	}
 	if _, err := s.Get(key); err == nil {
 		t.Error("Get after Delete returned no error")
+	}
+}
+
+func TestKeyringProbeLeavesAnotherProcessesProbeAlone(t *testing.T) {
+	keyring.MockInit()
+
+	other := probeKey(os.Getpid() + 1)
+	if err := keyring.Set(keyringService, other, "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := (keyringSecrets{}).probe(); err != nil {
+		t.Fatalf("probe = %v", err)
+	}
+	if _, err := keyring.Get(keyringService, other); err != nil {
+		t.Errorf("the probe removed %s: %v", other, err)
+	}
+	if _, err := keyring.Get(keyringService, probeKey(os.Getpid())); err == nil {
+		t.Error("the probe left its own key behind")
 	}
 }
 

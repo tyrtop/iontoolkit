@@ -15,7 +15,7 @@ func TestRunElementSuccess(t *testing.T) {
 	f := &fakeClient{
 		lookup: func(ctx context.Context, eid string) (api.Element, error) {
 			return api.Element{
-				ID: eid, Name: "S5032-RTR-01", HWID: "HW1",
+				ID: eid, Name: "S7020-RTR-01", HWID: "HW1",
 				Model: "ion3000", Software: "6.3.1", Connected: true,
 			}, nil
 		},
@@ -30,10 +30,10 @@ func TestRunElementSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if gotPrompt != "S5032-RTR-01#" {
-		t.Errorf("prompt = %q, want %q", gotPrompt, "S5032-RTR-01#")
+	if gotPrompt != "S7020-RTR-01#" {
+		t.Errorf("prompt = %q, want %q", gotPrompt, "S7020-RTR-01#")
 	}
-	if got.ElementID != "123" || got.Name != "S5032-RTR-01" || !got.Connected {
+	if got.ElementID != "123" || got.Name != "S7020-RTR-01" || !got.Connected {
 		t.Errorf("result = %+v", got)
 	}
 	if len(got.Commands) != 1 || got.Commands[0].Output != "5 days" {
@@ -96,5 +96,25 @@ func TestRunElementReportsAFailedSession(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "element 123: run:") {
 		t.Errorf("err = %q, want the element id in the message", err)
+	}
+}
+
+func TestAFailedSessionKeepsTheIONsStatusAndWhatRan(t *testing.T) {
+	f := &fakeClient{
+		lookup: func(context.Context, string) (api.Element, error) {
+			return api.Element{Name: "ion1", Model: "ion 1200-s", Software: "6.4.1", Connected: true}, nil
+		},
+		session: func(context.Context, string, string, string, string, []string) ([]ioncli.CommandOutput, error) {
+			return []ioncli.CommandOutput{{Command: "uptime", Output: "up 3 days"}}, errors.New(`read after "dump device status": EOF`)
+		},
+	}
+	var got Result
+	for ev := range RunStream(context.Background(), testOpts(), []Target{{ElementID: "123", Client: f, User: "u", Pass: "p"}}) {
+		if ev.Done {
+			got = ev.Result
+		}
+	}
+	if got.Error == "" || got.ElementID != "123" || got.Name != "ion1" || got.Model != "ion 1200-s" || !got.Connected || len(got.Commands) != 1 {
+		t.Errorf("result = %+v, want the error with the ION's status and what ran before it", got)
 	}
 }

@@ -53,14 +53,6 @@ func RGBOf(spec string) ([3]uint8, bool) {
 	}
 }
 
-func HexOf(spec string) string {
-	c, ok := RGBOf(spec)
-	if !ok {
-		return ""
-	}
-	return HexFromRGB(c)
-}
-
 func HexFromRGB(c [3]uint8) string {
 	return fmt.Sprintf("#%02x%02x%02x", c[0], c[1], c[2])
 }

@@ -1,0 +1,14 @@
+keys:
+  alt+E: edit-yaml
+
+screens:
+  elements:
+    f: filter
+    "/": none
+    alt+d: offline-only
+
+actions:
+  offline-only:
+    - set:
+        filter: offline
+    - status: offline elements only

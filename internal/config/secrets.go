@@ -26,7 +26,7 @@ func SecretsWarning(s Secrets) string {
 	case "file":
 		return "plaintext file — no OS keyring available"
 	case "memory":
-		return "in memory — nothing is kept past this run"
+		return "in memory — none of it is kept past this run"
 	}
 	return "OS keyring"
 }
@@ -43,8 +43,10 @@ type keyringSecrets struct{}
 
 func (keyringSecrets) Backend() string { return "keyring" }
 
+func probeKey(pid int) string { return fmt.Sprintf("probe-%d", pid) }
+
 func (keyringSecrets) probe() error {
-	const k = "probe"
+	k := probeKey(os.Getpid())
 	if err := keyring.Set(keyringService, k, "1"); err != nil {
 		return err
 	}

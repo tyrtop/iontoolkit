@@ -1,0 +1,156 @@
+name: Placeholder Tour
+
+pages:
+  - name: welcome
+    box: yes
+    text:
+      - placeholder - a box, shown over whatever page you are on.
+      - A box shows a message; it does not ask you to do anything.
+      - ""
+      - enter to accept it
+
+  - name: the-menu
+    go: menu
+    text:
+      - placeholder - the bar, on the menu the tutorial just moved to
+      - enter to accept
+
+  - name: open-the-list
+    text:
+      - placeholder - the bar, waiting for you to do the thing
+      - enter on Elements, which opens the list and moves the page on
+    keys: [enter]
+    stop: enter
+
+  - name: the-list
+    text:
+      - placeholder - the bar again; all you do here is read it
+      - enter to accept
+
+  - name: open-the-filter
+    text:
+      - placeholder - press / to open the filter
+    keys: [/]
+    stop: /
+
+  - name: type-a-name
+    text:
+      - placeholder - type part of an element name, then press enter
+    keys: [typing, backspace, enter]
+    stop: enter
+
+  - name: parked
+    show: no
+    text:
+      - "placeholder - show: no keeps this page in the file and out of the run"
+      - no key accepts it, because it is never shown
+
+  - name: tick-a-row
+    text:
+      - placeholder - space to tick a row
+    keys: [space, up, down]
+    stop: space
+
+  - name: switch-to-batch
+    text:
+      - placeholder - alt+m for the next mode, which is batch
+    keys: [alt+m]
+    stop: alt+m
+
+  - name: open-the-command-box
+    text:
+      - placeholder - enter opens the box a batch command goes in
+    keys: [enter]
+    stop: enter
+
+  - name: run-a-command
+    text:
+      - placeholder - type uptime, then enter to run it
+    keys: [typing, backspace, enter]
+    stop: enter
+
+  - name: switch-to-data
+    text:
+      - placeholder - esc back to the list, then alt+m for rich-data mode
+    keys: [esc, alt+m]
+    stop: alt+m
+
+  - name: open-a-data-tab
+    text:
+      - placeholder - enter on an element to read the portal on it
+    keys: [up, down, enter]
+    stop: enter
+
+  - name: switch-to-shell
+    text:
+      - placeholder - ctrl+] back to the list, then alt+m for shell mode
+    keys: ["ctrl+]", alt+m]
+    stop: alt+m
+
+  - name: open-a-shell
+    text:
+      - placeholder - enter on an element to open a shell on it
+    keys: [up, down, enter]
+    stop: enter
+
+  - name: open-the-favourites
+    text:
+      - placeholder - alt+f for the favourite slots
+    keys: [alt+f]
+    stop: alt+f
+
+  - name: find-settings
+    text:
+      - placeholder - esc, ctrl+] to the list, esc to the menu, then Settings
+    keys: [esc, "ctrl+]", up, down, enter]
+    stop: enter
+
+  - name: find-the-theme-section
+    text:
+      - placeholder - down to Theme
+    keys: [up, down]
+    stop: down
+
+  - name: find-the-macros
+    text:
+      - placeholder - esc to the menu, then Macros
+    keys: [esc, up, down, enter]
+    stop: enter
+
+  - name: back-to-the-menu
+    text:
+      - placeholder - esc back to the menu
+    keys: [esc]
+    stop: esc
+
+  - name: jump-to-the-list
+    go: elements
+    text:
+      - placeholder - from here on the tutorial goes to each page itself
+      - the element list, opened without you asking. enter to accept
+
+  - name: jump-to-settings
+    go: settings
+    text:
+      - placeholder - settings, opened by the tutorial
+      - enter to accept
+
+  - name: jump-to-the-theme-section
+    go: theme-section
+    text:
+      - placeholder - settings, on the Theme section
+      - enter to accept
+
+  - name: jump-to-the-macros
+    go: macros
+    text:
+      - placeholder - the macro page
+      - enter to accept
+
+  - name: done
+    box: yes
+    go: menu
+    text:
+      - placeholder - the closing box, back at the menu
+      - ""
+      - enter to finish

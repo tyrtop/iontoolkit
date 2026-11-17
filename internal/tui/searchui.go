@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"tyrtop.com/iontk/internal/runtime"
 
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
@@ -15,16 +16,7 @@ import (
 	"tyrtop.com/iontk/internal/ui"
 )
 
-type TenantLoad struct {
-	Tenant string
-	Count  int
-	Note   string
-	Err    error
-	Warn   bool
-	Done   bool
-}
-
-func DrainTenants(ctx context.Context, events <-chan TenantLoad, total int) {
+func DrainTenants(ctx context.Context, events <-chan runtime.TenantLoad, total int) {
 	opts := []tea.ProgramOption{
 		tea.WithContext(ctx),
 		tea.WithOutput(os.Stderr),
@@ -39,7 +31,7 @@ func DrainTenants(ctx context.Context, events <-chan TenantLoad, total int) {
 }
 
 type loadModel struct {
-	events <-chan TenantLoad
+	events <-chan runtime.TenantLoad
 	total  int
 
 	started  []inflight
@@ -53,10 +45,10 @@ type loadModel struct {
 	done     bool
 }
 
-type loadMsg TenantLoad
+type loadMsg runtime.TenantLoad
 type loadClosedMsg struct{}
 
-func newLoadModel(events <-chan TenantLoad, total int) loadModel {
+func newLoadModel(events <-chan runtime.TenantLoad, total int) loadModel {
 	s := spinner.New()
 	s.Style = ui.StyleSpinner
 	return loadModel{
@@ -77,7 +69,7 @@ func (m loadModel) Init() tea.Cmd {
 	return tea.Batch(waitForLoad(m.events), m.spinner.Tick)
 }
 
-func waitForLoad(ch <-chan TenantLoad) tea.Cmd {
+func waitForLoad(ch <-chan runtime.TenantLoad) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {
@@ -94,7 +86,7 @@ func (m loadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case loadMsg:
-		ev := TenantLoad(msg)
+		ev := runtime.TenantLoad(msg)
 		if !ev.Done {
 			m.started = append(m.started, inflight{element: ev.Tenant, started: time.Now()})
 			return m, waitForLoad(m.events)

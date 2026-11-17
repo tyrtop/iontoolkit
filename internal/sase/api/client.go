@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+	"tyrtop.com/iontk/internal/endpoint"
 )
 
 // strata expects a browser UA in the header.
@@ -17,15 +18,22 @@ const browserUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, li
 type Client struct {
 	client   *http.Client
 	wsClient *http.Client
-	limiter  *rate.Limiter
-	verbose  bool
+
+	writerOnce sync.Once
+	writer     *http.Client
+	limiter    *rate.Limiter
+	verbose    bool
+
+	paceMu   sync.Mutex
+	ceiling  rate.Limit
+	burst    int
+	heldTill time.Time
+	cutAt    time.Time
 
 	tokenMu        sync.RWMutex
 	token          string
 	expires        time.Time
 	refreshStopped bool
-
-	profileBase string
 
 	dialMu sync.RWMutex
 	dial   DialPolicy
@@ -36,6 +44,15 @@ type Client struct {
 	src       TokenSource
 	tokenErrs chan error
 	mintMu    sync.Mutex
+	stop      context.CancelFunc
+}
+
+func (s *Client) Rate() float64 { return float64(s.limiter.Limit()) }
+
+func (s *Client) Close() {
+	if s != nil && s.stop != nil {
+		s.stop()
+	}
 }
 
 func (s *Client) TokenGood(need time.Duration) bool {
@@ -73,26 +90,28 @@ func NewClient(client, wsClient *http.Client, token string, verbose bool, rps fl
 		client:   client,
 		wsClient: wsClient,
 		limiter:  rate.NewLimiter(rate.Limit(rps), burst),
+		ceiling:  rate.Limit(rps),
+		burst:    burst,
 		token:    token,
 		verbose:  verbose,
 	}
 }
 
-func (s *Client) ElementRecord(ctx context.Context, eid string) ([]byte, Element, error) {
-	body, err := s.get(ctx, "element "+eid, ElementURL(eid))
+func (s *Client) LookupElement(ctx context.Context, eid string) (Element, error) {
+	_, _, el, err := s.elementRecord(ctx, batch, eid)
+	return el, err
+}
+
+func (s *Client) elementRecord(ctx context.Context, set *endpoint.Set, eid string) ([]byte, string, Element, error) {
+	body, url, err := s.getNamed(ctx, "element "+eid, set, "element", vars{"element_id": eid})
 	if err != nil {
-		return nil, Element{}, err
+		return nil, url, Element{}, err
 	}
 	var el Element
 	if err := json.Unmarshal(body, &el); err != nil {
-		return body, Element{}, fmt.Errorf("element %s: json decode: %w", eid, err)
+		return body, url, Element{}, fmt.Errorf("element %s: json decode: %w", eid, err)
 	}
-	return body, el, nil
-}
-
-func (s *Client) LookupElement(ctx context.Context, eid string) (Element, error) {
-	_, el, err := s.ElementRecord(ctx, eid)
-	return el, err
+	return body, url, el, nil
 }
 
 func (s *Client) getToken() string {
@@ -130,6 +149,8 @@ func NewServiceAccountClient(ctx context.Context, client, wsClient *http.Client,
 		client:    client,
 		wsClient:  wsClient,
 		limiter:   rate.NewLimiter(rate.Limit(rps), burst),
+		ceiling:   rate.Limit(rps),
+		burst:     burst,
 		verbose:   verbose,
 		src:       serviceAccount{client: client, id: id, secret: secret, tsg: tsg},
 		tokenErrs: make(chan error, 1),
@@ -141,7 +162,9 @@ func NewServiceAccountClient(ctx context.Context, client, wsClient *http.Client,
 	if margin >= ttl {
 		return nil, fmt.Errorf("refresh margin %s is not shorter than token lifetime %s", margin, ttl)
 	}
-	go s.refreshLoop(ctx, ttl, margin)
+	loop, stop := context.WithCancel(ctx)
+	s.stop = stop
+	go s.refreshLoop(loop, ttl, margin)
 	return s, nil
 }
 
@@ -150,6 +173,8 @@ func NewTokenSourceClient(ctx context.Context, client, wsClient *http.Client, sr
 		client:    client,
 		wsClient:  wsClient,
 		limiter:   rate.NewLimiter(rate.Limit(rps), burst),
+		ceiling:   rate.Limit(rps),
+		burst:     burst,
 		verbose:   verbose,
 		src:       src,
 		tokenErrs: make(chan error, 1),
@@ -161,6 +186,23 @@ func NewTokenSourceClient(ctx context.Context, client, wsClient *http.Client, sr
 	if margin >= ttl {
 		return nil, fmt.Errorf("refresh margin %s is not shorter than token lifetime %s", margin, ttl)
 	}
-	go s.refreshLoop(ctx, ttl, margin)
+	loop, stop := context.WithCancel(ctx)
+	s.stop = stop
+	go s.refreshLoop(loop, ttl, margin)
 	return s, nil
+}
+
+// the cloudgenix SDK gives every call 240s
+const WriteTimeout = 240 * time.Second
+
+func (s *Client) httpFor(write bool) *http.Client {
+	if !write || s.client.Timeout == 0 || s.client.Timeout >= WriteTimeout {
+		return s.client
+	}
+	s.writerOnce.Do(func() {
+		w := *s.client
+		w.Timeout = WriteTimeout
+		s.writer = &w
+	})
+	return s.writer
 }

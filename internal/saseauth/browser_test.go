@@ -16,10 +16,7 @@ import (
 	"time"
 )
 
-// packaged builds first, chromium-browser last: on Ubuntu 24.04 that name is a
-// snap shim, and a snap Chromium on a CI runner is how the v0.5.0 release died
-// -- chromedp waited out its whole budget and said only "context deadline
-// exceeded". CI images also forbid the user namespaces its sandbox would need.
+// chromium-browser last: a snap shim on Ubuntu 24.04 that hangs chromedp
 func findChrome(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
@@ -62,10 +59,10 @@ func fakeAuthServer(t *testing.T, redirect func(state string) string) (*httptest
 	t.Helper()
 	var form url.Values
 	mux := http.NewServeMux()
-	mux.HandleFunc("/authorize", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/am/oauth2/authorize", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, redirect(r.URL.Query().Get("state")), http.StatusFound)
 	})
-	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/am/oauth2/access_token", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		form = r.PostForm
 		w.Header().Set("Content-Type", "application/json")
@@ -79,22 +76,21 @@ func fakeAuthServer(t *testing.T, redirect func(state string) string) (*httptest
 func TestLoginCapturesCodeFromRedirect(t *testing.T) {
 	chrome := findChrome(t)
 	srv, form := fakeAuthServer(t, func(state string) string {
-		return RedirectURI + "?code=captured-code&state=" + state
+		return RedirectURI() + "?code=captured-code&state=" + state
 	})
 
 	opt := Options{
-		Chrome:       chrome,
-		NoSandbox:    true,
-		AuthorizeURL: srv.URL + "/authorize",
-		TokenURL:     srv.URL + "/token",
-		Client:       srv.Client(),
-		Timeout:      90 * time.Second,
+		Chrome:    chrome,
+		NoSandbox: true,
+		Host:      srv.URL,
+		Client:    srv.Client(),
+		Timeout:   90 * time.Second,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	tok, err := login(ctx, "1984021017", opt, true)
+	tok, err := login(ctx, "1900000017", opt, true)
 	if err != nil {
 		t.Fatalf("login() error = %v", err)
 	}
@@ -115,19 +111,18 @@ func TestLoginCapturesCodeFromRedirect(t *testing.T) {
 func TestLoginRejectsMismatchedState(t *testing.T) {
 	chrome := findChrome(t)
 	srv, _ := fakeAuthServer(t, func(string) string {
-		return RedirectURI + "?code=captured-code&state=not-the-one-we-sent"
+		return RedirectURI() + "?code=captured-code&state=not-the-one-we-sent"
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	_, err := login(ctx, "123", Options{
-		Chrome:       chrome,
-		NoSandbox:    true,
-		AuthorizeURL: srv.URL + "/authorize",
-		TokenURL:     srv.URL + "/token",
-		Client:       srv.Client(),
-		Timeout:      90 * time.Second,
+		Chrome:    chrome,
+		NoSandbox: true,
+		Host:      srv.URL,
+		Client:    srv.Client(),
+		Timeout:   90 * time.Second,
 	}, true)
 	if err == nil {
 		t.Fatal("login() error = nil, want a state mismatch error")
@@ -140,19 +135,18 @@ func TestLoginRejectsMismatchedState(t *testing.T) {
 func TestLoginSurfacesAuthorizationServerError(t *testing.T) {
 	chrome := findChrome(t)
 	srv, _ := fakeAuthServer(t, func(string) string {
-		return RedirectURI + "?error=login_required&error_description=no+session"
+		return RedirectURI() + "?error=login_required&error_description=no+session"
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	_, err := login(ctx, "123", Options{
-		Chrome:       chrome,
-		NoSandbox:    true,
-		AuthorizeURL: srv.URL + "/authorize",
-		TokenURL:     srv.URL + "/token",
-		Client:       srv.Client(),
-		Timeout:      90 * time.Second,
+		Chrome:    chrome,
+		NoSandbox: true,
+		Host:      srv.URL,
+		Client:    srv.Client(),
+		Timeout:   90 * time.Second,
 	}, true)
 	if err == nil {
 		t.Fatal("login() error = nil, want the login_required error")
@@ -168,10 +162,10 @@ func TestSignInSurvivesRestart(t *testing.T) {
 	var mu sync.Mutex
 	var grants []string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/authorize", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, RedirectURI+"?code=the-code&state="+r.URL.Query().Get("state"), http.StatusFound)
+	mux.HandleFunc("/am/oauth2/authorize", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, RedirectURI()+"?code=the-code&state="+r.URL.Query().Get("state"), http.StatusFound)
 	})
-	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/am/oauth2/access_token", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		mu.Lock()
 		grants = append(grants, r.PostFormValue("grant_type"))
@@ -196,14 +190,13 @@ func TestSignInSurvivesRestart(t *testing.T) {
 	var saved string
 	profile := t.TempDir()
 
-	first := NewSource("1984021017", "", Options{
-		Chrome:       chrome,
-		NoSandbox:    true,
-		DataDir:      profile,
-		AuthorizeURL: srv.URL + "/authorize",
-		TokenURL:     srv.URL + "/token",
-		Client:       srv.Client(),
-		Timeout:      90 * time.Second,
+	first := NewSource("1900000017", "", Options{
+		Chrome:    chrome,
+		NoSandbox: true,
+		DataDir:   profile,
+		Host:      srv.URL,
+		Client:    srv.Client(),
+		Timeout:   90 * time.Second,
 	}, func(rt string) error { saved = rt; return nil })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -217,7 +210,7 @@ func TestSignInSurvivesRestart(t *testing.T) {
 	}
 
 	noBrowser := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/token" {
+		if r.URL.Path != "/am/oauth2/access_token" {
 			t.Errorf("the restarted session reached %s, want only the token endpoint", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -226,10 +219,10 @@ func TestSignInSurvivesRestart(t *testing.T) {
 	}))
 	defer noBrowser.Close()
 
-	second := NewSource("1984021017", saved, Options{
-		DataDir:  profile,
-		TokenURL: noBrowser.URL + "/token",
-		Client:   noBrowser.Client(),
+	second := NewSource("1900000017", saved, Options{
+		DataDir: profile,
+		Host:    noBrowser.URL,
+		Client:  noBrowser.Client(),
 	}, func(rt string) error { saved = rt; return nil })
 
 	tok, ttl, err := second.Token(ctx)
@@ -259,18 +252,18 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 	var scopes []string
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/authorize", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/am/oauth2/authorize", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		mu.Lock()
 		prompts = append(prompts, q.Get("prompt"))
 		scopes = append(scopes, q.Get("scope"))
 		mu.Unlock()
-		http.Redirect(w, r, RedirectURI+"?code=c&state="+q.Get("state"), http.StatusFound)
+		http.Redirect(w, r, RedirectURI()+"?code=c&state="+q.Get("state"), http.StatusFound)
 	})
-	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/am/oauth2/access_token", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"access_token":"at","refresh_token":"rt","expires_in":899}`))
 	})
-	mux.HandleFunc("/tenancy", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/tenancy/v1/tenant_service_groups", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(tenancyBody))
 	})
 	srv := httptest.NewServer(mux)
@@ -278,19 +271,18 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 
 	profile := t.TempDir()
 	opt := Options{
-		Chrome:       chrome,
-		NoSandbox:    true,
-		DataDir:      profile,
-		AuthorizeURL: srv.URL + "/authorize",
-		TokenURL:     srv.URL + "/token",
-		Client:       srv.Client(),
-		Timeout:      90 * time.Second,
+		Chrome:    chrome,
+		NoSandbox: true,
+		DataDir:   profile,
+		Host:      srv.URL,
+		Client:    srv.Client(),
+		Timeout:   90 * time.Second,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	d, err := Discover(ctx, opt, srv.URL+"/tenancy")
+	d, err := Discover(ctx, opt)
 	if err != nil {
 		t.Fatalf("Discover() error = %v", err)
 	}
@@ -298,7 +290,7 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 		t.Fatalf("Discover() found %d tenants, want 4", len(d.Tenants))
 	}
 
-	for _, tsg := range []string{"1984021017", "1538107912"} {
+	for _, tsg := range []string{"1900000017", "1500000012"} {
 		src := NewSource(tsg, "", opt, nil)
 		tok, _, err := src.Token(ctx)
 		if err != nil {
@@ -325,10 +317,10 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 	if !strings.Contains(scopes[0], "tsg_id:none") {
 		t.Errorf("discovery scope = %q, want it tenant-less", scopes[0])
 	}
-	if !strings.Contains(scopes[1], "tsg_id:1984021017") {
+	if !strings.Contains(scopes[1], "tsg_id:1900000017") {
 		t.Errorf("second scope = %q, want the chosen tenant", scopes[1])
 	}
-	if !strings.Contains(scopes[2], "tsg_id:1538107912") {
+	if !strings.Contains(scopes[2], "tsg_id:1500000012") {
 		t.Errorf("third scope = %q, want the other tenant", scopes[2])
 	}
 }
@@ -354,7 +346,7 @@ func TestARefusedSilentLegIsNotLaunchedAgain(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	if _, err := LoginSilent(ctx, "1984021017", opt); err == nil {
+	if _, err := LoginSilent(ctx, "1900000017", opt); err == nil {
 		t.Fatal("LoginSilent() succeeded with a browser that cannot start")
 	}
 	first := launches()
@@ -362,7 +354,7 @@ func TestARefusedSilentLegIsNotLaunchedAgain(t *testing.T) {
 		t.Fatalf("the browser was never launched, so this test proves nothing")
 	}
 
-	_, err := LoginSilent(ctx, "1984021017", opt)
+	_, err := LoginSilent(ctx, "1900000017", opt)
 	if !errors.Is(err, ErrNoSession) {
 		t.Errorf("second LoginSilent() error = %v, want it to wrap ErrNoSession", err)
 	}
@@ -371,7 +363,7 @@ func TestARefusedSilentLegIsNotLaunchedAgain(t *testing.T) {
 			"prompt=none does not start answering differently on its own", got, first)
 	}
 
-	if _, err := LoginSilent(ctx, "1538107912", opt); err == nil {
+	if _, err := LoginSilent(ctx, "1500000012", opt); err == nil {
 		t.Fatal("LoginSilent() succeeded for the other tenant")
 	}
 	if got := launches(); got <= first {

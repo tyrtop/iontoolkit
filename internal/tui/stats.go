@@ -43,16 +43,16 @@ func (m tuiModel) statsPane() string {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 
-	sessions := fmt.Sprintf("sessions %d", m.sessions.Count())
-	if n := m.sessions.DetachedCount(); n > 0 {
+	sessions := fmt.Sprintf("sessions %d", m.sessions().Count())
+	if n := m.sessions().DetachedCount(); n > 0 {
 		sessions += fmt.Sprintf(" +%d detached", n)
 	}
 
 	parts := []string{
 		sessions,
-		fmt.Sprintf("elements %d/%d", len(m.matches), len(m.all)),
+		fmt.Sprintf("elements %d/%d", len(m.matched()), len(m.rows())),
 	}
-	if c := m.pool.get(m.tenant.TSGID); c != nil {
+	if c := m.pool().Get(m.tenant().TSGID); c != nil {
 		if left, ok := c.TokenLeft(); ok {
 			parts = append(parts, "token "+ui.Age(left))
 		}

@@ -252,24 +252,6 @@ func TestNormalizeOrientation(t *testing.T) {
 	}
 }
 
-func TestNextOrientationCyclesThroughEveryOrientation(t *testing.T) {
-	seen := map[string]bool{}
-	o := OrientION
-	for range orientations {
-		seen[o] = true
-		o = NextOrientation(o)
-	}
-	if o != OrientION {
-		t.Errorf("cycling returned to %q, want to wrap around to %q", o, OrientION)
-	}
-	if len(seen) != len(orientations) {
-		t.Errorf("cycle visited %d orientations, want all %d", len(seen), len(orientations))
-	}
-	if got := NextOrientation("sideways"); got != OrientION {
-		t.Errorf("NextOrientation(%q) = %q, want the fallback %q", "sideways", got, OrientION)
-	}
-}
-
 func TestNewSinkFallsBackToIONFirst(t *testing.T) {
 	var buf bytes.Buffer
 	fill(NewSink(&buf, FormatCSV, WithOrientation("sideways")), t)
