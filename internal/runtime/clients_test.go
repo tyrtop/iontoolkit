@@ -48,7 +48,7 @@ func TestAPooledClientWhoseSignInDiesIsMarkedAndItsRunsStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := New()
-	rt.UseTenant(config.Tenant{Name: "Tractor Supply", TSGID: "111"})
+	rt.UseTenant(config.Tenant{Name: "Trident Supply", TSGID: "111"})
 	rt.Clients().Set("111", c)
 	select {
 	case <-rt.Clients().Gone(c):
@@ -69,7 +69,7 @@ func TestASignInLostOnAnotherTenantDoesNotMarkTheOneInUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := New()
-	rt.UseTenant(config.Tenant{Name: "Tractor Supply", TSGID: "111"})
+	rt.UseTenant(config.Tenant{Name: "Trident Supply", TSGID: "111"})
 	rt.Clients().Set("222", c)
 	select {
 	case <-rt.Clients().Gone(c):
@@ -94,7 +94,7 @@ func TestADroppedClientStopsRefreshingAndReportsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := New()
-	rt.UseTenant(config.Tenant{Name: "Tractor Supply", TSGID: "111"})
+	rt.UseTenant(config.Tenant{Name: "Trident Supply", TSGID: "111"})
 	rt.Clients().Set("111", c)
 	rt.Clients().Drop("111")
 	time.Sleep(time.Second)

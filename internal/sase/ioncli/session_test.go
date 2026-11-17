@@ -2,7 +2,7 @@ package ioncli
 
 import "testing"
 
-const testPrompt = "S5032-RTR-01"
+const testPrompt = "S7020-RTR-01"
 
 func repaint(line string) string {
 	return "\x1b[J\x1b[2K\r\x1b[31m" + testPrompt + "\x1b[0m" + line
@@ -16,7 +16,7 @@ func TestStrip(t *testing.T) {
 		"full prompt repaint":     {repaint(" dump"), "\r" + testPrompt + " dump"},
 		"256-color":               {"\x1b[38;5;196mX\x1b[0m", "X"},
 		"no escapes":              {"plain text", "plain text"},
-		"OSC title survives":      {"\x1b]0;S5032\x07Up", "\x1b]0;S5032\x07Up"},
+		"OSC title survives":      {"\x1b]0;S7020\x07Up", "\x1b]0;S7020\x07Up"},
 		"charset select survives": {"\x1b(BUp", "\x1b(BUp"},
 
 		"truncated CSI survives": {"Up\x1b[", "Up\x1b["},
@@ -37,11 +37,11 @@ func TestClean(t *testing.T) {
 		raw, prompt, cmd, want string
 	}{
 		"real: dump interface status, double repaint": {
-			raw: "\x1b[J\x1b[2K\r\x1b[31mS5032-RTR-01#\x1b[0m dump interface status 4" +
-				"\x1b[J\x1b[2K\r\x1b[31mS5032-RTR-01#\x1b[0m dump interface status 4\r\n" +
+			raw: "\x1b[J\x1b[2K\r\x1b[31mS7020-RTR-01#\x1b[0m dump interface status 4" +
+				"\x1b[J\x1b[2K\r\x1b[31mS7020-RTR-01#\x1b[0m dump interface status 4\r\n" +
 				"Interface\t: 4 \r\nDevice\t\t: e382 \r\nState\t\t: down\r\n\r\n" +
-				"\x1b[J\x1b[2K\r\x1b[31mS5032-RTR-01#\x1b[0m  \b",
-			prompt: "S5032-RTR-01#",
+				"\x1b[J\x1b[2K\r\x1b[31mS7020-RTR-01#\x1b[0m  \b",
+			prompt: "S7020-RTR-01#",
 			cmd:    "dump interface status 4",
 			want:   "Interface\t: 4\nDevice\t\t: e382\nState\t\t: down",
 		},

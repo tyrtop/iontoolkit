@@ -83,10 +83,10 @@ login from the keyring, so --cmd needs none of these once one is signed in.`,
   iontk batch run -e 1234567890 -c "dump interface status 1"   batch, one element
   iontk batch run -f sites.txt -c "dump device status" -n 25   batch, many elements
   iontk fleet search store-0100                                list matching elements
-  iontk batch run --search "s5024 ion 1200" -c uptime          batch, searched elements
-  iontk workflow site-report --site S0272                      dry run a workflow
-  iontk workflow site-report --site S0272 --doit               send its writes
-  iontk workflow ./site-report --site S0272                    one not installed`,
+  iontk batch run --search "s7010 ion 1200" -c uptime          batch, searched elements
+  iontk workflow site-report --site S0270                      dry run a workflow
+  iontk workflow site-report --site S0270 --doit               send its writes
+  iontk workflow ./site-report --site S0270                    one not installed`,
 
 	Args:          cobra.NoArgs,
 	SilenceUsage:  true,
@@ -165,6 +165,7 @@ func init() {
 	pf.BoolVarP(&app.Defaults.Verbose, "verbose", "v", app.Defaults.Verbose, "Print request details, rate limit headers and the error from each attempt")
 	pf.BoolVar(&flagNoProgress, "no-progress", false, "Don't show the batch progress bar or the spinner")
 	pf.BoolVar(&app.Defaults.AllowWrites, "allow-writes", app.Defaults.AllowWrites, "Allow CLI commands that aren't read-only")
+	_ = pf.MarkDeprecated("allow-writes", "use --doit on the command that writes")
 	pf.StringVar(&flagTenant, "tenant", "", "Saved tenant to use, by `name` (overrides the environment)")
 	pf.BoolVar(&app.Debug, "debug", false, "Use a temporary config with no saved tenants, and keep secrets in memory only")
 	pf.StringVar(&flagFixtures, "fixtures", "", "Run against fake tenants, elements and CLI answers from a YAML `file` instead of real hardware")
@@ -238,11 +239,14 @@ func startLogging(words []string) {
 
 var workflowAliases = map[string]string{}
 
+var askedWorkflow string
+
 func workflowByPath(words []string) error {
 	if len(words) < 2 || words[0] != "workflow" {
 		return nil
 	}
 	if p := words[1]; p != "." && p != ".." && !strings.ContainsRune(p, filepath.Separator) {
+		askedWorkflow = p
 		return nil
 	}
 	w, err := workflow.LoadOne(words[1])

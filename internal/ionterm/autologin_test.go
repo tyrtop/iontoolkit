@@ -12,7 +12,7 @@ func TestAutologinSendsUserThenPassword(t *testing.T) {
 		t.Error("sent something before the login prompt")
 	}
 
-	got, ok := a.feed([]byte("028201-011790-4565 login: "))
+	got, ok := a.feed([]byte("000001-000002-0002 login: "))
 	if !ok || got != "ops\r" {
 		t.Fatalf("login step sent %q ok=%v, want ops", got, ok)
 	}

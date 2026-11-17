@@ -26,6 +26,10 @@ func main() {
 		os.Exit(1)
 	}
 	buildTree()
+	if err := missingWorkflow(rootCmd); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)

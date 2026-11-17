@@ -72,10 +72,10 @@ func (f *fakeRuntime) exec(c script.Call) ([]string, any, error) {
 	f.calls = append(f.calls, c)
 	switch c.Name {
 	case "site.read":
-		if c.Args["site"] != "S0272" {
+		if c.Args["site"] != "S0270" {
 			return nil, nil, fmt.Errorf("no site %s", c.Args["site"])
 		}
-		return nil, map[string]any{"id": "s1", "name": "S0272"}, nil
+		return nil, map[string]any{"id": "s1", "name": "S0270"}, nil
 	case "site.make":
 		w := script.Write{Method: "POST", Path: "/sdwan/v4.9/api/sites", Body: map[string]any{"name": c.Args["name"]}}
 		return []string{"make site " + c.Args["name"]}, made{Name: c.Args["name"], ID: "dry-run-1", writes: []script.Write{w}}, nil
@@ -99,18 +99,18 @@ func TestARunGathersTheWritesOfWhatItRan(t *testing.T) {
 	w := loadNewSite(t)
 	f := &fakeRuntime{}
 	var live []string
-	res, err := w.Run(context.Background(), map[string]string{"site": "S0272"},
+	res, err := w.Run(context.Background(), map[string]string{"site": "S0270"},
 		Host{Exec: f.exec, OnStatus: func(s string) { live = append(live, s) }}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.calls) != 2 || f.calls[1].Args["name"] != "S0272-REPL" {
+	if len(f.calls) != 2 || f.calls[1].Args["name"] != "S0270-REPL" {
 		t.Errorf("calls = %+v, want the required helper and the default suffix applied", f.calls)
 	}
 	if len(res.Writes) != 1 || res.Writes[0].Method != "POST" || res.DoIt {
 		t.Errorf("result = %+v, want the write site.make planned", res)
 	}
-	if strings.Join(live, "|") != "site S0272-REPL is dry-run-1|dry run" || len(res.Status) != 2 {
+	if strings.Join(live, "|") != "site S0270-REPL is dry-run-1|dry run" || len(res.Status) != 2 {
 		t.Errorf("status as it happened = %v, result = %v", live, res.Status)
 	}
 }
@@ -119,7 +119,7 @@ func TestDoItReachesTheScript(t *testing.T) {
 	w := loadNewSite(t)
 	f := &fakeRuntime{}
 	var live []string
-	res, err := w.Run(context.Background(), map[string]string{"site": "S0272"},
+	res, err := w.Run(context.Background(), map[string]string{"site": "S0270"},
 		Host{Exec: f.exec, OnStatus: func(s string) { live = append(live, s) }}, true)
 	if err != nil || !res.DoIt || strings.Contains(strings.Join(live, "|"), "dry run") {
 		t.Errorf("Run() = %+v, %v; said %v", res, err, live)
@@ -143,7 +143,7 @@ func TestInputsAreCheckedBeforeAnythingRuns(t *testing.T) {
 	}{
 		{"missing", map[string]string{}, "site is required"},
 		{"pattern", map[string]string{"site": "store 12"}, "does not match"},
-		{"unknown", map[string]string{"site": "S0272", "serial": "x"}, "serial is not an input"},
+		{"unknown", map[string]string{"site": "S0270", "serial": "x"}, "serial is not an input"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -153,8 +153,8 @@ func TestInputsAreCheckedBeforeAnythingRuns(t *testing.T) {
 			}
 		})
 	}
-	got, err := w.CheckInputs(map[string]string{"site": " S0272 "})
-	if err != nil || got["site"] != "S0272" || got["suffix"] != "-REPL" {
+	got, err := w.CheckInputs(map[string]string{"site": " S0270 "})
+	if err != nil || got["site"] != "S0270" || got["suffix"] != "-REPL" {
 		t.Errorf("CheckInputs() = %v, %v", got, err)
 	}
 }
@@ -197,11 +197,11 @@ func TestRunsComeFromYAMLJSONOrCSV(t *testing.T) {
 		os.WriteFile(p, []byte(body), 0o600)
 		return p
 	}
-	want := `[{"rtr01_serial":"028201-004589-4901","site":"S5037"},{"rtr01_serial":"0272","site":"S5038"}]`
+	want := `[{"rtr01_serial":"000001-000001-0001","site":"S7030"},{"rtr01_serial":"0270","site":"S7040"}]`
 	for _, f := range []string{
-		write("a.yaml", "- site: S5037\n  rtr01_serial: 028201-004589-4901\n- site: S5038\n  rtr01_serial: 0272\n"),
-		write("a.json", `[{"site":"S5037","rtr01_serial":"028201-004589-4901"},{"site":"S5038","rtr01_serial":"0272"}]`),
-		write("a.csv", "site, rtr01_serial\n# a comment\nS5037,028201-004589-4901\nS5038, 0272\n"),
+		write("a.yaml", "- site: S7030\n  rtr01_serial: 000001-000001-0001\n- site: S7040\n  rtr01_serial: 0270\n"),
+		write("a.json", `[{"site":"S7030","rtr01_serial":"000001-000001-0001"},{"site":"S7040","rtr01_serial":"0270"}]`),
+		write("a.csv", "site, rtr01_serial\n# a comment\nS7030,000001-000001-0001\nS7040, 0270\n"),
 	} {
 		runs, err := ReadRuns(f)
 		got, _ := json.Marshal(runs)
@@ -368,5 +368,37 @@ func TestAWorkflowOfStepsLoadsItsStepsAndTheirEndpoints(t *testing.T) {
 		if _, err := LoadOne(folder(t, root, tt.name, files)); err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("%s: LoadOne() = %v, want %q", tt.name, err, tt.want)
 		}
+	}
+}
+
+func TestAWorkflowCallsAMasterEndpointItDoesNotDeclare(t *testing.T) {
+	dir := folder(t, t.TempDir(), "plain", map[string]string{
+		ManifestName: "title: Plain\n",
+		"main.lua":   "return function(ctx) end\n",
+	})
+	w, err := LoadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := w.Endpoint("sites")
+	if !ok || e.Path != "/sdwan/v4.13/api/sites" {
+		t.Errorf("sites = %+v, %v; want the master list's", e, ok)
+	}
+	if len(w.Calls()) != 0 {
+		t.Errorf("it lists %d endpoints of its own, want none", len(w.Calls()))
+	}
+}
+
+func TestAWorkflowsOwnEndpointWinsOverTheMasterList(t *testing.T) {
+	dir := folder(t, t.TempDir(), "pinned", map[string]string{
+		ManifestName: "title: Pinned\nendpoints:\n  - name: sites\n    path: /sdwan/v4.5/api/sites\n",
+		"main.lua":   "return function(ctx) end\n",
+	})
+	w, err := LoadOne(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := w.Endpoint("sites"); e.Path != "/sdwan/v4.5/api/sites" {
+		t.Errorf("sites = %s, want the workflow's own v4.5", e.Path)
 	}
 }

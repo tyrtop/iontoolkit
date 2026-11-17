@@ -25,8 +25,8 @@ func TestCacheRoundTrip(t *testing.T) {
 		TSGID:     "1234",
 		FetchedAt: time.Now().Add(-90 * time.Minute),
 		Elements: []api.Element{
-			{ID: "1", Name: "S0103-RTR-01", Model: "ion 2000", Connected: true},
-			{ID: "2", Name: "S0103-RTR-02", Model: "ion 9000"},
+			{ID: "1", Name: "S0110-RTR-01", Model: "ion 2000", Connected: true},
+			{ID: "2", Name: "S0110-RTR-02", Model: "ion 9000"},
 		},
 	}
 	if err := s.SaveCache(want); err != nil {
@@ -40,7 +40,7 @@ func TestCacheRoundTrip(t *testing.T) {
 	if got == nil {
 		t.Fatal("cache came back nil")
 	}
-	if len(got.Elements) != 2 || got.Elements[0].Name != "S0103-RTR-01" {
+	if len(got.Elements) != 2 || got.Elements[0].Name != "S0110-RTR-01" {
 		t.Errorf("elements = %+v", got.Elements)
 	}
 	if !got.Elements[0].Connected || got.Elements[1].Connected {

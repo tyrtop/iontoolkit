@@ -170,7 +170,7 @@ func waitForWorkflow(ch <-chan tea.Msg) tea.Cmd {
 }
 
 func (m tuiModel) onWorkflowLine(msg wfLineMsg) (tea.Model, tea.Cmd) {
-	m.wf.lines = append(m.wf.lines, string(msg))
+	m.wf.lines = append(m.wf.lines, strings.Split(string(msg), "\n")...)
 	return m, waitForWorkflow(m.wf.events)
 }
 

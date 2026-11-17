@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"tyrtop.com/iontk/internal/config"
 	"tyrtop.com/iontk/internal/runtime"
+	"tyrtop.com/iontk/internal/script"
 	"tyrtop.com/iontk/internal/workflow"
 )
 
@@ -51,7 +53,7 @@ func measureRuntime(t *testing.T) *runtime.Runtime {
 
 func TestAWorkflowRunIsKeptWithWhatItReturned(t *testing.T) {
 	rt := measureRuntime(t)
-	if _, _, err := exec(rt, WorkflowPrefix+"measure", map[string]string{"router": "S5037-RTR-01", "tenant": "Acme Co"}, nil, false); err != nil {
+	if _, _, err := exec(rt, WorkflowPrefix+"measure", map[string]string{"router": "S7030-RTR-01", "tenant": "Acme Co"}, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	runs := rt.Runs()
@@ -61,7 +63,7 @@ func TestAWorkflowRunIsKeptWithWhatItReturned(t *testing.T) {
 	r := runs[0]
 	data, _ := json.Marshal(r.Data)
 	if r.Workflow != "measure" || r.Tenant != "Acme Co" || r.TSG != "t1" || r.Inputs["interface"] != "3" || r.Error != "" ||
-		strings.Join(r.Status, "|") != "measured S5037-RTR-01" || string(data) != `{"mbps":192.69,"router":"S5037-RTR-01"}` {
+		strings.Join(r.Status, "|") != "measured S7030-RTR-01" || string(data) != `{"mbps":192.69,"router":"S7030-RTR-01"}` {
 		t.Errorf("kept %+v with data %q", r, data)
 	}
 
@@ -88,5 +90,38 @@ func TestEveryRunFromAFileOfInputsIsKeptInFileOrder(t *testing.T) {
 	}
 	if runs[0].Error != "" || !strings.Contains(runs[1].Error, "no router called S0000-RTR-01") || runs[2].Data == nil {
 		t.Errorf("kept %+v, want the middle run's failure beside the other two's results", runs)
+	}
+}
+
+const waiterMain = `
+return function(ctx)
+  local b = ctx.budget("1m")
+  b:tick("1s", "the claim of " .. ctx.input.router)
+  ctx.status("resume " .. tostring(ctx.resume))
+end
+`
+
+func TestRunsFromAFileStopAtAWaitAndResumeLikeOneRun(t *testing.T) {
+	rt := measureRuntime(t)
+	os.WriteFile(filepath.Join(WorkflowsFolder, "measure", "main.lua"), []byte(waiterMain), 0o600)
+	ReloadCommands(rt)
+	file := filepath.Join(t.TempDir(), "routers.csv")
+	os.WriteFile(file, []byte("router,tenant\nS0001-RTR-01,Acme Co\nS0002-RTR-01,Acme Co\n"), 0o600)
+
+	c := &runtime.Call{Args: map[string]string{EachInput: file}, ExitOnWait: true, Out: func(string) {}}
+	err := rt.Exec(c, WorkflowPrefix+"measure")
+	runs := rt.Runs()
+	if !errors.As(err, new(*script.Waiting)) || len(runs) != 2 || runs[0].Waiting != "the claim of S0001-RTR-01" || runs[1].Error != "" {
+		t.Fatalf("err %v, runs %+v; want both runs stopped at their wait", err, runs)
+	}
+
+	c = &runtime.Call{Args: map[string]string{EachInput: file}, Resume: true, Out: func(string) {}}
+	if err := rt.Exec(c, WorkflowPrefix+"measure"); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rt.Runs() {
+		if strings.Join(r.Status, "|") != "resume true" {
+			t.Errorf("run %s said %q, want it to be a resumed run", r.Inputs["router"], r.Status)
+		}
 	}
 }

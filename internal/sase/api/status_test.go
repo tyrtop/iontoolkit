@@ -13,7 +13,7 @@ import (
 
 // trimmed from an ion 1200-s answer of 2026-10-18, ids changed
 const elementStatusBody = `{
-  "id": "1655828640836018896",
+  "id": "1000000000000000001",
   "_etag": 50647,
   "_created_on_utc": 16558286408360188,
   "site_id": "16",

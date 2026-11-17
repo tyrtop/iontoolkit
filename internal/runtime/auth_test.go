@@ -10,11 +10,11 @@ import (
 func TestPicksStartWithTheFleetAndBecomeIt(t *testing.T) {
 	rt, st := withConfig(t)
 	rt.Config().Tenants = []config.Tenant{
-		{Name: "Tractor Supply", TSGID: "111", Auth: config.AuthBrowser, Added: true},
+		{Name: "Trident Supply", TSGID: "111", Auth: config.AuthBrowser, Added: true},
 		{Name: "Old Co", TSGID: "333", Auth: config.AuthBrowser, Added: true},
 	}
 	rt.UseTenant(rt.Config().Tenants[1])
-	rt.SetDiscovered([]saseauth.Tenant{{ID: "111", Name: "Tractor Supply"}, {ID: "222", Name: "Niagara"}, {ID: "333", Name: "Old Co"}})
+	rt.SetDiscovered([]saseauth.Tenant{{ID: "111", Name: "Trident Supply"}, {ID: "222", Name: "Norwood"}, {ID: "333", Name: "Old Co"}})
 	if !rt.Picked("111") || !rt.Picked("333") || rt.Picked("222") {
 		t.Fatalf("picks at start: %d", rt.PickedCount())
 	}
@@ -28,7 +28,7 @@ func TestPicksStartWithTheFleetAndBecomeIt(t *testing.T) {
 	if !cfg.IsAdded("111") || !cfg.IsAdded("222") || cfg.IsAdded("333") {
 		t.Errorf("fleet = %+v", cfg.AddedTenants())
 	}
-	if cur, _ := rt.Tenant(); cur.TSGID != "111" || cfg.LastTenant != "Tractor Supply" {
+	if cur, _ := rt.Tenant(); cur.TSGID != "111" || cfg.LastTenant != "Trident Supply" {
 		t.Errorf("in use %+v, last %q; want the first picked, as the one in use left the fleet", cur, cfg.LastTenant)
 	}
 	if len(rt.Discovered()) != 0 || rt.PickedCount() != 0 {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"tyrtop.com/iontk/internal/endpoint"
 	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/workflow"
 )
@@ -22,16 +23,35 @@ type listedEndpoint struct {
 
 func endpointsCommand() runtime.Command {
 	return runtime.Command{
-		Name: "endpoints.list", Help: "the endpoints a workflow calls, each with the workflow it comes from",
-		Args: []runtime.Arg{{Name: "workflow", Help: "Workflow name, or the path to one", Required: true}},
+		Name: "endpoints.list", Help: "the endpoints iontk knows by name, or with workflow= the ones that workflow declares itself",
+		Args: []runtime.Arg{
+			{Name: "workflow", Help: "Workflow name, or the path to one"},
+			{Name: "q", Help: "Only names or paths holding this text"},
+		},
 		Run: func(rt *runtime.Runtime, c *runtime.Call) error {
-			w, err := findWorkflow(rt, c.Arg("workflow"))
-			if err != nil {
-				return err
+			var out []listedEndpoint
+			if name := c.Arg("workflow"); name != "" {
+				w, err := findWorkflow(rt, name)
+				if err != nil {
+					return err
+				}
+				for _, e := range w.Calls() {
+					out = append(out, listedEndpoint{Name: e.Name, Method: e.Method, Host: e.Host, Path: e.Path, In: e.In, From: w.From(e.Name)})
+				}
+			} else {
+				m := endpoint.Master()
+				for _, e := range m.All() {
+					out = append(out, listedEndpoint{Name: e.Name, Method: e.Method, Path: e.Path, From: m.Name})
+				}
 			}
-			out := make([]listedEndpoint, 0, len(w.Calls()))
-			for _, e := range w.Calls() {
-				out = append(out, listedEndpoint{Name: e.Name, Method: e.Method, Host: e.Host, Path: e.Path, In: e.In, From: w.From(e.Name)})
+			if q := strings.ToLower(c.Arg("q")); q != "" {
+				kept := out[:0]
+				for _, e := range out {
+					if strings.Contains(strings.ToLower(e.Name), q) || strings.Contains(strings.ToLower(e.Path), q) {
+						kept = append(kept, e)
+					}
+				}
+				out = kept
 			}
 			b, err := yaml.Marshal(out)
 			if err != nil {

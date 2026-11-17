@@ -84,7 +84,7 @@ func TestTwoRunsOnOneTenantKeepEachOtherSignedIn(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	const tsg = "1984021017"
+	const tsg = "1900000017"
 	st := testStore(t)
 	if err := st.Secrets.Set(config.RefreshTokenKey(tsg), "rt1"); err != nil {
 		t.Fatal(err)
@@ -111,11 +111,11 @@ func TestTwoRunsOnOneTenantKeepEachOtherSignedIn(t *testing.T) {
 
 func TestBrowserSourceReusesStoredRefreshToken(t *testing.T) {
 	st := testStore(t)
-	if err := st.Secrets.Set(config.RefreshTokenKey("1984021017"), "stored-rt"); err != nil {
+	if err := st.Secrets.Set(config.RefreshTokenKey("1900000017"), "stored-rt"); err != nil {
 		t.Fatalf("seed refresh token: %v", err)
 	}
 
-	src := BrowserSource(Flags{TSGID: "1984021017"}, nil, st)
+	src := BrowserSource(Flags{TSGID: "1900000017"}, nil, st)
 	if got := src.RefreshToken(); got != "stored-rt" {
 		t.Errorf("RefreshToken() = %q, want %q", got, "stored-rt")
 	}
@@ -123,15 +123,15 @@ func TestBrowserSourceReusesStoredRefreshToken(t *testing.T) {
 
 func TestBrowserSourcePersistsRotatedToken(t *testing.T) {
 	st := testStore(t)
-	src := BrowserSource(Flags{TSGID: "1984021017"}, nil, st)
+	src := BrowserSource(Flags{TSGID: "1900000017"}, nil, st)
 	if got := src.RefreshToken(); got != "" {
 		t.Errorf("RefreshToken() = %q, want empty with nothing stored", got)
 	}
 
-	if err := st.Secrets.Set(config.RefreshTokenKey("1984021017"), "rotated"); err != nil {
+	if err := st.Secrets.Set(config.RefreshTokenKey("1900000017"), "rotated"); err != nil {
 		t.Fatalf("Set() error = %v", err)
 	}
-	again := BrowserSource(Flags{TSGID: "1984021017"}, nil, st)
+	again := BrowserSource(Flags{TSGID: "1900000017"}, nil, st)
 	if got := again.RefreshToken(); got != "rotated" {
 		t.Errorf("RefreshToken() = %q, want %q to be read back", got, "rotated")
 	}
@@ -357,8 +357,8 @@ func TestFixturesSeedTenantsThatResolveWithoutASignIn(t *testing.T) {
 
 func TestATenantWithNoSignInReadsTheSameWhateverTheAccountCredentialDid(t *testing.T) {
 	const (
-		good = "1984021017"
-		bad  = "1538107912"
+		good = "1900000017"
+		bad  = "1500000012"
 	)
 
 	tests := []struct {

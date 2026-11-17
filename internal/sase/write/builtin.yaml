@@ -2,8 +2,6 @@ writes:
   - name: interface
     title: Interface
     endpoints:
-      - name: interfaces
-        path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces
       # no HAR yet shows the portal saving an interface; PUT is a guess
       - name: interface
         method: PUT

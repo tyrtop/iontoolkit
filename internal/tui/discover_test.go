@@ -14,9 +14,9 @@ import (
 )
 
 var discoveredTenants = []saseauth.Tenant{
-	{ID: "1643707006", Name: "CIS root"},
-	{ID: "1538107912", Name: "NIAGARA BOTTLING, LLC-145595"},
-	{ID: "1984021017", Name: "Tractor Supply Co.", ParentID: "1750385018", Depth: 2},
+	{ID: "1600000006", Name: "Core root"},
+	{ID: "1500000012", Name: "NORWOOD BOTTLING, LLC-100001"},
+	{ID: "1900000017", Name: "Trident Supply Co.", ParentID: "1700000018", Depth: 2},
 }
 
 func discoverModel(t *testing.T) tuiModel {
@@ -128,12 +128,12 @@ func TestDiscoveryLandsOnTheWorkingSetPicker(t *testing.T) {
 func TestTenantChoicesMergeDiscoveredAndSaved(t *testing.T) {
 	m := discoverModel(t)
 	seedKnown(t, m,
-		config.KnownTenant{TSGID: "1643707006", Name: "CIS root"},
-		config.KnownTenant{TSGID: "1984021017", Name: "Tractor Supply Co."},
+		config.KnownTenant{TSGID: "1600000006", Name: "Core root"},
+		config.KnownTenant{TSGID: "1900000017", Name: "Trident Supply Co."},
 	)
 	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 		{Name: "Legacy Co", TSGID: "999", Auth: config.AuthServiceAccount, ClientID: "svc"},
-		{Name: "Tractor Supply Co.", TSGID: "1984021017", Auth: config.AuthBrowser},
+		{Name: "Trident Supply Co.", TSGID: "1900000017", Auth: config.AuthBrowser},
 	}})
 
 	got := m.tenantChoices()
@@ -145,23 +145,23 @@ func TestTenantChoicesMergeDiscoveredAndSaved(t *testing.T) {
 	for _, c := range got {
 		byTSG[c.tsg] = c
 	}
-	if c := byTSG["1643707006"]; !c.known || c.saved {
-		t.Errorf("CIS root = %+v, want discovered and not yet saved", c)
+	if c := byTSG["1600000006"]; !c.known || c.saved {
+		t.Errorf("Core root = %+v, want discovered and not yet saved", c)
 	}
-	if c := byTSG["1984021017"]; !c.known || !c.saved {
-		t.Errorf("Tractor Supply = %+v, want both discovered and saved", c)
+	if c := byTSG["1900000017"]; !c.known || !c.saved {
+		t.Errorf("Trident Supply = %+v, want both discovered and saved", c)
 	}
 	if c := byTSG["999"]; c.known || !c.saved {
 		t.Errorf("Legacy Co = %+v, want saved only", c)
 	}
-	if got[0].name != "CIS root" {
+	if got[0].name != "Core root" {
 		t.Errorf("first choice = %q, want the list sorted by name", got[0].name)
 	}
 }
 
 func TestUsingADiscoveredTenantCreatesItsRecordLazily(t *testing.T) {
 	m := discoverModel(t)
-	seedKnown(t, m, config.KnownTenant{TSGID: "1984021017", Name: "Tractor Supply Co."})
+	seedKnown(t, m, config.KnownTenant{TSGID: "1900000017", Name: "Trident Supply Co."})
 	m.phase = phaseSwitch
 	m.switchCursor = 0
 
@@ -175,13 +175,13 @@ func TestUsingADiscoveredTenantCreatesItsRecordLazily(t *testing.T) {
 		t.Fatalf("config holds %d tenants, want the used one recorded", len(got.cfg().Tenants))
 	}
 	saved := got.cfg().Tenants[0]
-	if saved.TSGID != "1984021017" || saved.Name != "Tractor Supply Co." {
+	if saved.TSGID != "1900000017" || saved.Name != "Trident Supply Co." {
 		t.Errorf("saved = %+v, want the portal's name and id", saved)
 	}
 	if !saved.UsesBrowser() {
 		t.Errorf("Auth = %q, want a discovered tenant to be browser-backed", saved.Auth)
 	}
-	if !got.hasTenant() || got.tenant().TSGID != "1984021017" {
+	if !got.hasTenant() || got.tenant().TSGID != "1900000017" {
 		t.Error("the chosen tenant did not become active")
 	}
 	if got.cfg().LastTenant != saved.Name {
@@ -335,20 +335,20 @@ func TestMenuIsOneEntryPerThing(t *testing.T) {
 func TestRenderTenantList(t *testing.T) {
 	m := discoverModel(t)
 	seedKnown(t, m,
-		config.KnownTenant{TSGID: "1643707006", Name: "CIS root"},
-		config.KnownTenant{TSGID: "1984021017", Name: "Tractor Supply Co."},
+		config.KnownTenant{TSGID: "1600000006", Name: "Core root"},
+		config.KnownTenant{TSGID: "1900000017", Name: "Trident Supply Co."},
 	)
 	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
 		{Name: "Legacy Co", TSGID: "999", Auth: config.AuthServiceAccount},
 	}})
-	m.runtime().UseTenant(config.Tenant{Name: "CIS root", TSGID: "1643707006"})
+	m.runtime().UseTenant(config.Tenant{Name: "Core root", TSGID: "1600000006"})
 	m.phase = phaseSwitch
 
 	out := plain(m.viewSwitch())
 	for _, want := range []string{
 		"3 tenants",
 		"from Ben Hall <ben@example.test>",
-		"CIS root", "1643707006", "(current)",
+		"Core root", "1600000006", "(current)",
 		"Legacy Co", "(service account)",
 		"enter use", "r re-list",
 	} {
@@ -462,10 +462,10 @@ func TestSwitchingActuallyFetchesForTheNewTenant(t *testing.T) {
 func TestAddingATenantFetchesEvenBesideAFreshlyCachedOne(t *testing.T) {
 	m := discoverModel(t)
 	m.runtime().SetDiscovered(discoveredTenants)
-	pickOnly(&m, "1643707006", "1984021017")
+	pickOnly(&m, "1600000006", "1900000017")
 
 	if err := m.store().SaveCache(&config.ElementCache{
-		TSGID: "1643707006", FetchedAt: time.Now().Add(-2 * time.Minute),
+		TSGID: "1600000006", FetchedAt: time.Now().Add(-2 * time.Minute),
 		Elements: []api.Element{{ID: "e1", Name: "s0001-rtr-01"}},
 	}); err != nil {
 		t.Fatalf("SaveCache() error = %v", err)
@@ -686,17 +686,17 @@ func TestRenderTheServiceAccountPage(t *testing.T) {
 func TestABrowserTenantIsNeverListedAsAServiceAccount(t *testing.T) {
 	m := serviceModel(t)
 	m.cfg().Tenants = []config.Tenant{
-		{Name: "Tractor Supply", TSGID: "111", Auth: config.AuthBrowser, Added: true},
+		{Name: "Trident Supply", TSGID: "111", Auth: config.AuthBrowser, Added: true},
 	}
 	m.runtime().UseTenant(m.cfg().Tenants[0])
 
 	for _, c := range m.switchChoices() {
-		if c.name == "Tractor Supply" {
+		if c.name == "Trident Supply" {
 			t.Errorf("a browser tenant is on the service account page: %+v", c)
 		}
 	}
 	out := plain(m.viewSwitch())
-	if strings.Contains(out, "Tractor Supply") {
+	if strings.Contains(out, "Trident Supply") {
 		t.Errorf("the page lists it:\n%s", out)
 	}
 	if got := m.switchRows(); got != 1 {
@@ -711,8 +711,8 @@ func TestThePickWarmsEveryTenantSoOneSignInLasts(t *testing.T) {
 	m := multiModel(t)
 	m.runtime().MarkBrowserSignedIn()
 	m.runtime().SetDiscovered([]saseauth.Tenant{
-		{ID: "111", Name: "Tractor Supply"},
-		{ID: "222", Name: "Niagara Bottling"},
+		{ID: "111", Name: "Trident Supply"},
+		{ID: "222", Name: "Norwood Bottling"},
 	})
 	pickOnly(&m, "111", "222")
 	m.spinner = ui.NewSpinner("")
@@ -732,7 +732,7 @@ func TestThePickWarmsEveryTenantSoOneSignInLasts(t *testing.T) {
 
 func TestThePickDoesNotWarmWithoutABrowserSignIn(t *testing.T) {
 	m := multiModel(t)
-	m.runtime().SetDiscovered([]saseauth.Tenant{{ID: "111", Name: "Tractor Supply"}})
+	m.runtime().SetDiscovered([]saseauth.Tenant{{ID: "111", Name: "Trident Supply"}})
 	pickOnly(&m, "111")
 
 	next, _ := m.saveTenantPick()
@@ -764,7 +764,7 @@ func TestAWarmFailureIsRecordedWithoutKillingTheSignIn(t *testing.T) {
 	if mm.rt.TokenDead() != "" {
 		t.Errorf("tokenDead = %q; one tenant refusing must not mark the whole sign-in dead", mm.rt.TokenDead())
 	}
-	if !strings.Contains(mm.status, "Niagara Bottling") {
+	if !strings.Contains(mm.status, "Norwood Bottling") {
 		t.Errorf("status = %q, want it to name the tenant that failed", mm.status)
 	}
 	if mm.phase == phaseWarming {

@@ -292,7 +292,7 @@ words must all match the name, site, model, software, tenant or state.
 
 iontk batch run --search runs commands on what a query matches instead.`,
 	Example: `  iontk fleet search store-0100
-  iontk fleet search "s5024 ion 1200" --format json`,
+  iontk fleet search "s7010 ion 1200" --format json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(flagCommands) > 0 {

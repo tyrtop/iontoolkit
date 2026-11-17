@@ -15,7 +15,7 @@ func TestRunElementSuccess(t *testing.T) {
 	f := &fakeClient{
 		lookup: func(ctx context.Context, eid string) (api.Element, error) {
 			return api.Element{
-				ID: eid, Name: "S5032-RTR-01", HWID: "HW1",
+				ID: eid, Name: "S7020-RTR-01", HWID: "HW1",
 				Model: "ion3000", Software: "6.3.1", Connected: true,
 			}, nil
 		},
@@ -30,10 +30,10 @@ func TestRunElementSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if gotPrompt != "S5032-RTR-01#" {
-		t.Errorf("prompt = %q, want %q", gotPrompt, "S5032-RTR-01#")
+	if gotPrompt != "S7020-RTR-01#" {
+		t.Errorf("prompt = %q, want %q", gotPrompt, "S7020-RTR-01#")
 	}
-	if got.ElementID != "123" || got.Name != "S5032-RTR-01" || !got.Connected {
+	if got.ElementID != "123" || got.Name != "S7020-RTR-01" || !got.Connected {
 		t.Errorf("result = %+v", got)
 	}
 	if len(got.Commands) != 1 || got.Commands[0].Output != "5 days" {

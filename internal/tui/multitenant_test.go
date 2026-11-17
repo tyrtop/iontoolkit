@@ -19,8 +19,8 @@ func multiModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := discoverModel(t)
 	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
-		{Name: "Tractor Supply", TSGID: "111", Auth: config.AuthBrowser, Added: true},
-		{Name: "Niagara Bottling", TSGID: "222", Auth: config.AuthBrowser, Added: true},
+		{Name: "Trident Supply", TSGID: "111", Auth: config.AuthBrowser, Added: true},
+		{Name: "Norwood Bottling", TSGID: "222", Auth: config.AuthBrowser, Added: true},
 	}})
 	m.runtime().UseTenant(m.cfg().Tenants[0])
 	m.runtime().ForgetSelection()
@@ -34,7 +34,7 @@ func multiModel(t *testing.T) tuiModel {
 func TestElementsFromSeveralTenantsAreOneList(t *testing.T) {
 	m := multiModel(t)
 
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{
 		{ID: "a", Name: "s0100-rtr-01"},
 		{ID: "b", Name: "s0100-rtr-02"},
 	})
@@ -45,7 +45,7 @@ func TestElementsFromSeveralTenantsAreOneList(t *testing.T) {
 		t.Error("the tenant column showed with only one tenant loaded")
 	}
 
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{
 		{ID: "c", Name: "ord-gw-01"},
 	})
 	if len(m.rows()) != 3 {
@@ -55,7 +55,7 @@ func TestElementsFromSeveralTenantsAreOneList(t *testing.T) {
 		t.Error("the tenant column did not show with two tenants loaded")
 	}
 
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{
 		{ID: "a", Name: "s0100-rtr-01"},
 	})
 	if len(m.rows()) != 2 {
@@ -65,15 +65,15 @@ func TestElementsFromSeveralTenantsAreOneList(t *testing.T) {
 	for _, r := range m.rows() {
 		tenants = append(tenants, r.Tenant)
 	}
-	if !strings.Contains(strings.Join(tenants, ","), "Niagara") {
+	if !strings.Contains(strings.Join(tenants, ","), "Norwood") {
 		t.Errorf("the other tenant's elements were dropped: %v", tenants)
 	}
 }
 
 func TestSameElementIDInTwoTenantsStaysDistinct(t *testing.T) {
 	m := multiModel(t)
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "same", Name: "a"}})
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "same", Name: "b"}})
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{{ID: "same", Name: "a"}})
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{{ID: "same", Name: "b"}})
 
 	if len(m.rows()) != 2 {
 		t.Fatalf("got %d elements, want both kept", len(m.rows()))
@@ -97,9 +97,9 @@ func TestSameElementIDInTwoTenantsStaysDistinct(t *testing.T) {
 
 func TestDeviceCredentialsComeFromTheElementsTenant(t *testing.T) {
 	m := multiModel(t)
-	m.cfg().Tenants[0].Users = []config.IONUser{{Name: "tsc-ops", Default: true}}
+	m.cfg().Tenants[0].Users = []config.IONUser{{Name: "ion-ops", Default: true}}
 	m.cfg().Tenants[1].Users = []config.IONUser{{Name: "nb-ops", Default: true}}
-	if err := m.store().Secrets.Set(config.IONPassKey("111", "tsc-ops"), "pass-111"); err != nil {
+	if err := m.store().Secrets.Set(config.IONPassKey("111", "ion-ops"), "pass-111"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := m.store().Secrets.Set(config.IONPassKey("222", "nb-ops"), "pass-222"); err != nil {
@@ -107,7 +107,7 @@ func TestDeviceCredentialsComeFromTheElementsTenant(t *testing.T) {
 	}
 
 	a := m.credsFor("111")
-	if a.User != "tsc-ops" || a.Pass != "pass-111" {
+	if a.User != "ion-ops" || a.Pass != "pass-111" {
 		t.Errorf("creds for 111 = %+v, want that tenant's own login", a)
 	}
 	b := m.credsFor("222")
@@ -219,7 +219,7 @@ func TestRefreshSkipsTenantsWithNoCredentialRatherThanFailing(t *testing.T) {
 	if got.pendingTenants() != 1 {
 		t.Errorf("pendingTenants = %d, want only the usable tenant counted", got.pendingTenants())
 	}
-	if !strings.Contains(got.status, "Niagara") {
+	if !strings.Contains(got.status, "Norwood") {
 		t.Errorf("status = %q, want the skipped tenant named", got.status)
 	}
 }
@@ -250,7 +250,7 @@ func TestAggregateFinishesOnlyWhenEveryTenantHasAnswered(t *testing.T) {
 	m.setCacheState(cacheUpdating)
 
 	mm := land(t, m, runtime.Load{
-		TSG: "111", Tenant: "Tractor Supply",
+		TSG: "111", Tenant: "Trident Supply",
 		Elements: []api.Element{{ID: "a", Name: "s0100-rtr-01"}},
 	})
 	m = mm.(tuiModel)
@@ -262,7 +262,7 @@ func TestAggregateFinishesOnlyWhenEveryTenantHasAnswered(t *testing.T) {
 	}
 
 	mm = land(t, m, runtime.Load{
-		TSG: "222", Tenant: "Niagara Bottling",
+		TSG: "222", Tenant: "Norwood Bottling",
 		Elements: []api.Element{{ID: "c", Name: "ord-gw-01"}},
 	})
 	m = mm.(tuiModel)
@@ -280,12 +280,12 @@ func TestOneTenantFailingDoesNotLoseTheOthers(t *testing.T) {
 	m.runtime().SetPending(2)
 
 	mm := land(t, m, runtime.Load{
-		TSG: "111", Tenant: "Tractor Supply",
+		TSG: "111", Tenant: "Trident Supply",
 		Elements: []api.Element{{ID: "a", Name: "s0100-rtr-01"}},
 	})
 	m = mm.(tuiModel)
 	mm = land(t, m, runtime.Load{
-		TSG: "222", Tenant: "Niagara Bottling",
+		TSG: "222", Tenant: "Norwood Bottling",
 		Err: errTokenTest,
 	})
 	got := mm.(tuiModel)
@@ -293,7 +293,7 @@ func TestOneTenantFailingDoesNotLoseTheOthers(t *testing.T) {
 	if len(got.rows()) != 1 {
 		t.Errorf("got %d elements, want the healthy tenant's kept", len(got.rows()))
 	}
-	if !strings.Contains(got.status, "Niagara") {
+	if !strings.Contains(got.status, "Norwood") {
 		t.Errorf("status = %q, want the failing tenant named", got.status)
 	}
 	if got.cacheState() != cacheUpdated {
@@ -307,7 +307,7 @@ func TestATenantTheAccountCannotReachIsNotCalledASignInProblem(t *testing.T) {
 	m.runtime().SetPending(2)
 
 	mm := land(t, m, runtime.Load{
-		TSG: "111", Tenant: "Tractor Supply",
+		TSG: "111", Tenant: "Trident Supply",
 		Elements: []api.Element{{ID: "a", Name: "s0100-rtr-01"}},
 	})
 	m = mm.(tuiModel)
@@ -372,7 +372,7 @@ func TestATenantRejectingTheTokenRoutesToSignIn(t *testing.T) {
 	m.runtime().SetPending(1)
 
 	mm := land(t, m, runtime.Load{
-		TSG: "111", Tenant: "Tractor Supply",
+		TSG: "111", Tenant: "Trident Supply",
 		Err: errAuthTest,
 	})
 	got := mm.(tuiModel)
@@ -383,10 +383,10 @@ func TestATenantRejectingTheTokenRoutesToSignIn(t *testing.T) {
 
 func TestFilterNarrowsByTenant(t *testing.T) {
 	m := multiModel(t)
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
 
-	m.filter.SetValue("niagara")
+	m.filter.SetValue("norwood")
 	m.applyFilter()
 	if len(m.matched()) != 1 {
 		t.Fatalf("tenant filter matched %d, want 1", len(m.matched()))
@@ -401,17 +401,17 @@ func TestRenderCrossTenantElementList(t *testing.T) {
 	m.width, m.height = 110, 30
 	m.spinner = ui.NewSpinner("")
 	m.runtime().MergeSites(map[string]string{"111/s1": "Site 0100", "222/s9": "ORD"})
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{
 		{ID: "a", Name: "s0100-rtr-01", SiteID: "s1", Model: "ion1200", Connected: true},
 	})
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{
 		{ID: "c", Name: "ord-gw-01", SiteID: "s9", Model: "ion3200", Connected: true},
 	})
 	m = withFleet(m, cacheUpdated, 2, time.Now())
 	m.phase = phasePicking
 
 	out := plain(m.viewPicking())
-	for _, want := range []string{"s0100-rtr-01", "ord-gw-01", "Tractor Supply", "Niagara Bottling", "tenant"} {
+	for _, want := range []string{"s0100-rtr-01", "ord-gw-01", "Trident Supply", "Norwood Bottling", "tenant"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the element list is missing %q:\n%s", want, out)
 		}
@@ -491,8 +491,8 @@ func TestDefaultModeSettingPersistsAndApplies(t *testing.T) {
 
 func TestSettingsChecklistControlsTheAggregate(t *testing.T) {
 	m := multiModel(t)
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
 	m.phase = phaseSettings
 	m.setSection = secTenants
 	m.setFocus = focusContent
@@ -595,18 +595,18 @@ func TestTheTenantColumnCanAppearAndDisappear(t *testing.T) {
 	m := multiModel(t)
 	m.width, m.height = 110, 30
 
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a", Name: "one"}})
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c", Name: "two"}})
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{{ID: "a", Name: "one"}})
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{{ID: "c", Name: "two"}})
 	if !(tenantCountOf(m) > 1) {
 		t.Fatal("two tenants did not produce a tenant column")
 	}
 
-	mergeForTest(&m, "222", "Niagara Bottling", nil)
+	mergeForTest(&m, "222", "Norwood Bottling", nil)
 	if tenantCountOf(m) > 1 {
 		t.Error("the tenant column stayed after the second tenant emptied")
 	}
 
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c", Name: "two"}})
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{{ID: "c", Name: "two"}})
 	if !(tenantCountOf(m) > 1) {
 		t.Error("the tenant column did not come back")
 	}
@@ -659,16 +659,16 @@ func TestTenantSelectOpensTheTenantList(t *testing.T) {
 
 func TestScopeLabelDescribesWhatIsLoaded(t *testing.T) {
 	m := multiModel(t)
-	if got := m.scopeLabel(); got != "Tractor Supply" {
+	if got := m.scopeLabel(); got != "Trident Supply" {
 		t.Errorf("scopeLabel() = %q, want the current tenant with nothing loaded", got)
 	}
 
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a"}})
-	if got := m.scopeLabel(); got != "Tractor Supply" {
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{{ID: "a"}})
+	if got := m.scopeLabel(); got != "Trident Supply" {
 		t.Errorf("scopeLabel() = %q, want the single tenant named", got)
 	}
 
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c"}})
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{{ID: "c"}})
 	if got := m.scopeLabel(); got != "2 tenants" {
 		t.Errorf("scopeLabel() = %q, want a count rather than one tenant's name", got)
 	}
@@ -682,16 +682,16 @@ func TestScopeLabelDescribesWhatIsLoaded(t *testing.T) {
 func TestWorkingSetPickerStartsFromWhatIsAlreadyAdded(t *testing.T) {
 	m := discoverModel(t)
 	m.runtime().UseConfig(m.store(), &config.Config{Tenants: []config.Tenant{
-		{Name: "CIS root", TSGID: "1643707006", Auth: config.AuthBrowser, Added: true},
-		{Name: "Tractor Supply Co.", TSGID: "1984021017", Auth: config.AuthBrowser},
+		{Name: "Core root", TSGID: "1600000006", Auth: config.AuthBrowser, Added: true},
+		{Name: "Trident Supply Co.", TSGID: "1900000017", Auth: config.AuthBrowser},
 	}})
 	m.runtime().SetDiscovered(discoveredTenants)
 
 	next, _ := m.startTenantPick()
-	if !next.rt.Picked("1643707006") {
+	if !next.rt.Picked("1600000006") {
 		t.Error("a tenant already in the set did not start ticked, so re-listing would drop it")
 	}
-	if next.rt.Picked("1984021017") {
+	if next.rt.Picked("1900000017") {
 		t.Error("a tenant with a record but not added started ticked")
 	}
 	if next.phase != phaseTenantPick {
@@ -726,10 +726,10 @@ func TestPickingTheWorkingSet(t *testing.T) {
 	for _, t := range added {
 		ids[t.TSGID] = true
 	}
-	if !ids["1643707006"] || !ids["1984021017"] {
+	if !ids["1600000006"] || !ids["1900000017"] {
 		t.Errorf("working set = %+v, want the two ticked tenants", added)
 	}
-	if got.cfg().IsAdded("1538107912") {
+	if got.cfg().IsAdded("1500000012") {
 		t.Error("an unticked tenant ended up in the set")
 	}
 	if got.phase != phaseMenu {
@@ -782,11 +782,11 @@ func TestPickerSelectAllToggles(t *testing.T) {
 func TestSearchSpansTheWholeWorkingSet(t *testing.T) {
 	m := multiModel(t)
 	m.setAuthMode(authBrowser)
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{
 		{ID: "a", Name: "s0100-rtr-01"},
 		{ID: "b", Name: "s0200-rtr-01"},
 	})
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{
 		{ID: "c", Name: "s0100-gw-01"},
 	})
 
@@ -872,8 +872,8 @@ func TestRefreshNoteGivesFeedback(t *testing.T) {
 func TestTenantRowsDoNotShiftWithSelection(t *testing.T) {
 	m := discoverModel(t)
 	seedKnown(t, m,
-		config.KnownTenant{TSGID: "1643707006", Name: "CIS root"},
-		config.KnownTenant{TSGID: "1538107912", Name: "NIAGARA BOTTLING, LLC-145595"},
+		config.KnownTenant{TSGID: "1600000006", Name: "Core root"},
+		config.KnownTenant{TSGID: "1500000012", Name: "NORWOOD BOTTLING, LLC-100001"},
 	)
 	m.width, m.height = 100, 30
 	m.phase = phaseSwitch
@@ -888,7 +888,7 @@ func TestTenantRowsDoNotShiftWithSelection(t *testing.T) {
 	}
 
 	first := plain(m.viewSwitch())
-	a1, b1 := columnOf(first, "1643707006"), columnOf(first, "1538107912")
+	a1, b1 := columnOf(first, "1600000006"), columnOf(first, "1500000012")
 	if a1 < 0 || b1 < 0 {
 		t.Fatalf("ids missing from the list:\n%s", first)
 	}
@@ -898,7 +898,7 @@ func TestTenantRowsDoNotShiftWithSelection(t *testing.T) {
 
 	m.switchCursor = 1
 	second := plain(m.viewSwitch())
-	if a2, b2 := columnOf(second, "1643707006"), columnOf(second, "1538107912"); a2 != a1 || b2 != b1 {
+	if a2, b2 := columnOf(second, "1600000006"), columnOf(second, "1500000012"); a2 != a1 || b2 != b1 {
 		t.Errorf("ids moved when the cursor did: %d,%d then %d,%d\n%s", a1, b1, a2, b2, second)
 	}
 }
@@ -909,14 +909,14 @@ func TestRenderWorkingSetPicker(t *testing.T) {
 	m.runtime().SetIdentity(saseauth.Identity{Name: "Ben Hall", Email: "ben@example.test"})
 	m.width, m.height = 100, 30
 	next, _ := m.startTenantPick()
-	next.rt.TogglePick("1984021017")
+	next.rt.TogglePick("1900000017")
 	next.pickCursor = 1
 
 	out := plain(next.viewTenantPick())
 	for _, want := range []string{
 		"signed in as Ben Hall <ben@example.test>",
 		"searching spans all of them",
-		"CIS root", "1643707006",
+		"Core root", "1600000006",
 		"[x]", "[ ]",
 		"1 picked", "space pick", "ctrl+a all",
 	} {
@@ -930,34 +930,34 @@ func TestRenderWorkingSetPicker(t *testing.T) {
 func credsModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := multiModel(t)
-	m.cfg().Tenants[0].Users = []config.IONUser{{Name: "tsc-ops", Default: true}, {Name: "tsc-ro"}}
+	m.cfg().Tenants[0].Users = []config.IONUser{{Name: "ion-ops", Default: true}, {Name: "ion-ro"}}
 	m.cfg().Tenants[1].Users = []config.IONUser{{Name: "nb-ops", Default: true}}
 	for _, seed := range []struct{ tsg, user, pass string }{
-		{"111", "tsc-ops", "pw-tsc-ops"},
-		{"111", "tsc-ro", "pw-tsc-ro"},
+		{"111", "ion-ops", "pw-ion-ops"},
+		{"111", "ion-ro", "pw-ion-ro"},
 		{"222", "nb-ops", "pw-nb"},
 	} {
 		if err := m.store().Secrets.Set(config.IONPassKey(seed.tsg, seed.user), seed.pass); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{{ID: "a", Name: "s0100-rtr-01"}})
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{{ID: "c", Name: "ord-gw-01"}})
 	return m
 }
 
 func TestRunAsIsChosenPerTenant(t *testing.T) {
 	m := credsModel(t)
 
-	if got := m.runAsFor("111"); got != "tsc-ops" {
+	if got := m.runAsFor("111"); got != "ion-ops" {
 		t.Errorf("runAsFor(111) = %q, want the default", got)
 	}
 	if got := m.runAsFor("222"); got != "nb-ops" {
 		t.Errorf("runAsFor(222) = %q, want the default", got)
 	}
 
-	m.runtime().SetRunAs("111", "tsc-ro")
-	if got := m.runAsFor("111"); got != "tsc-ro" {
+	m.runtime().SetRunAs("111", "ion-ro")
+	if got := m.runAsFor("111"); got != "ion-ro" {
 		t.Errorf("runAsFor(111) = %q, want the chosen user", got)
 	}
 	if got := m.runAsFor("222"); got != "nb-ops" {
@@ -965,7 +965,7 @@ func TestRunAsIsChosenPerTenant(t *testing.T) {
 	}
 
 	a := m.credsFor("111")
-	if a.User != "tsc-ro" || a.Pass != "pw-tsc-ro" {
+	if a.User != "ion-ro" || a.Pass != "pw-ion-ro" {
 		t.Errorf("credsFor(111) = %+v, want the chosen user's pair", a)
 	}
 	b := m.credsFor("222")
@@ -974,7 +974,7 @@ func TestRunAsIsChosenPerTenant(t *testing.T) {
 	}
 
 	m.runtime().SetRunAs("111", "")
-	if got := m.runAsFor("111"); got != "tsc-ops" {
+	if got := m.runAsFor("111"); got != "ion-ops" {
 		t.Errorf("runAsFor(111) = %q, want the default back", got)
 	}
 }
@@ -998,7 +998,7 @@ func TestUsersPanelOpensOnTheHighlightedElementsTenant(t *testing.T) {
 	if got.usersTSG != "222" {
 		t.Errorf("usersTSG = %q, want the highlighted element's tenant", got.usersTSG)
 	}
-	if name := got.usersPanelTenant().Name; name != "Niagara Bottling" {
+	if name := got.usersPanelTenant().Name; name != "Norwood Bottling" {
 		t.Errorf("panel tenant = %q, want the highlighted element's", name)
 	}
 }
@@ -1028,23 +1028,23 @@ func TestUsersPanelActsOnItsOwnTenant(t *testing.T) {
 	m.phase = phaseUsers
 	m.usersTSG = "222"
 	m.runtime().ReplaceTenant(m.cfg().Tenants[0])
-	m.runtime().SetIONUser("tsc-ops")
+	m.runtime().SetIONUser("ion-ops")
 
 	mm, _ := m.onUsersKey("enter")
 	got := mm.(tuiModel)
 	if got.runAsFor("222") != "nb-ops" {
 		t.Errorf("runAsFor(222) = %q, want nb-ops", got.runAsFor("222"))
 	}
-	if got.ionUser() != "tsc-ops" {
+	if got.ionUser() != "ion-ops" {
 		t.Errorf("ionUser = %q, want the browsed tenant's user untouched", got.ionUser())
 	}
-	if !strings.Contains(got.status, "Niagara Bottling") {
+	if !strings.Contains(got.status, "Norwood Bottling") {
 		t.Errorf("status = %q, want the tenant named", got.status)
 	}
 
 	mm, _ = m.onUsersKey("p")
 	pw := mm.(tuiModel)
-	if pw.formTenantName != "Niagara Bottling" {
+	if pw.formTenantName != "Norwood Bottling" {
 		t.Errorf("formTenantName = %q, want the panel's tenant", pw.formTenantName)
 	}
 	if pw.formUserName != "nb-ops" {
@@ -1071,13 +1071,13 @@ func TestPasswordPromptAsksForEveryTenantInTheSelection(t *testing.T) {
 	if got.phase != phasePassword {
 		t.Fatalf("phase = %v, want the credential prompt", got.phase)
 	}
-	if got.formTenantName != "Niagara Bottling" {
+	if got.formTenantName != "Norwood Bottling" {
 		t.Errorf("formTenantName = %q, want the tenant that is actually missing one", got.formTenantName)
 	}
 	if got.formTenantTSG != "222" {
 		t.Errorf("formTenantTSG = %q, want 222", got.formTenantTSG)
 	}
-	if !strings.Contains(got.formTitle, "Niagara Bottling") {
+	if !strings.Contains(got.formTitle, "Norwood Bottling") {
 		t.Errorf("title = %q, want the right tenant named", got.formTitle)
 	}
 }
@@ -1085,7 +1085,7 @@ func TestPasswordPromptAsksForEveryTenantInTheSelection(t *testing.T) {
 func TestPasswordIsSavedAgainstTheTenantThatWasAsked(t *testing.T) {
 	m := credsModel(t)
 	m.runtime().ReplaceTenant(m.cfg().Tenants[0])
-	m.runtime().SetIONUser("tsc-ops")
+	m.runtime().SetIONUser("ion-ops")
 
 	target := m.cfg().Tenants[1]
 	mm, _ := m.openPasswordForm(target, "nb-ops")
@@ -1101,24 +1101,24 @@ func TestPasswordIsSavedAgainstTheTenantThatWasAsked(t *testing.T) {
 	if v, _ := got.store().Secrets.Get(config.IONPassKey("111", "nb-ops")); v != "" {
 		t.Errorf("password leaked into the browsed tenant: %q", v)
 	}
-	if got.tenant().Name != "Tractor Supply" {
+	if got.tenant().Name != "Trident Supply" {
 		t.Errorf("tenant = %q, want the browsed tenant unchanged", got.tenant().Name)
 	}
-	if got.ionUser() != "tsc-ops" {
+	if got.ionUser() != "ion-ops" {
 		t.Errorf("ionUser = %q, want it unchanged", got.ionUser())
 	}
 }
 
 func TestSessionsUseEachTenantsOwnLogin(t *testing.T) {
 	m := credsModel(t)
-	m.runtime().SetRunAs("111", "tsc-ro")
+	m.runtime().SetRunAs("111", "ion-ro")
 
 	a := m.credsFor("111")
 	b := m.credsFor("222")
 	if a.User == b.User || a.Pass == b.Pass {
 		t.Errorf("both tenants resolved to the same login: %+v and %+v", a, b)
 	}
-	if a.Pass != "pw-tsc-ro" {
+	if a.Pass != "pw-ion-ro" {
 		t.Errorf("credsFor(111).Pass = %q, want the chosen user's", a.Pass)
 	}
 }
@@ -1131,12 +1131,12 @@ func TestRenderPerTenantUsersPanel(t *testing.T) {
 	m.spinner = ui.NewSpinner("")
 
 	out := plain(m.viewUsers())
-	for _, want := range []string{"ion users", "Niagara Bottling", "of 2 tenants", "nb-ops", "←→ tenant"} {
+	for _, want := range []string{"ion users", "Norwood Bottling", "of 2 tenants", "nb-ops", "←→ tenant"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the users panel is missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "tsc-ops") {
+	if strings.Contains(out, "ion-ops") {
 		t.Errorf("the panel shows another tenant's users:\n%s", out)
 	}
 	t.Log("\n" + m.viewUsers())
@@ -1272,7 +1272,7 @@ func TestCrossTenantBatchRefusesWhenATenantHasNoLogin(t *testing.T) {
 	if got.phase == phaseRunning {
 		t.Error("the run started with a tenant that has no login")
 	}
-	if !strings.Contains(got.status, "Niagara Bottling") {
+	if !strings.Contains(got.status, "Norwood Bottling") {
 		t.Errorf("status = %q, want the tenant without a login named", got.status)
 	}
 }
@@ -1296,7 +1296,7 @@ func TestBatchAcrossTenantsAfterSuppliedPasswords(t *testing.T) {
 	if prompt.phase != phasePassword {
 		t.Fatalf("phase = %v, want the credential prompt", prompt.phase)
 	}
-	if prompt.formTenantName != "Niagara Bottling" {
+	if prompt.formTenantName != "Norwood Bottling" {
 		t.Fatalf("prompting for %q, want the tenant that is missing one", prompt.formTenantName)
 	}
 
@@ -1549,7 +1549,7 @@ func TestAFailedConnectionIsReportedNotSwallowed(t *testing.T) {
 		}
 		if failed, ok := msg.(sessionErrMsg); ok {
 			next, _ := m.Update(failed)
-			if got := next.(tuiModel).status; !strings.Contains(got, "Niagara Bottling") {
+			if got := next.(tuiModel).status; !strings.Contains(got, "Norwood Bottling") {
 				t.Errorf("status = %q, want the tenant named", got)
 			}
 			return

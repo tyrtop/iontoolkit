@@ -419,22 +419,36 @@ func runRows(rt *runtime.Runtime, c *runtime.Call, w workflow.Workflow, each str
 			}
 			defer func() { <-slots }()
 			say(tags[i], workflow.Describe(run))
-			one := &runtime.Call{Ctx: c.Ctx, DoIt: c.DoIt, Out: func(l string) { say(tags[i], l) }}
-			if errs[i] = runPlaced(rt, one, w, input, i); errs[i] != nil {
+			one := &runtime.Call{Ctx: c.Ctx, DoIt: c.DoIt, ExitOnWait: c.ExitOnWait, Resume: c.Resume,
+				Out: func(l string) { say(tags[i], l) }}
+			errs[i] = runPlaced(rt, one, w, input, i)
+			switch {
+			case errors.As(errs[i], new(*script.Waiting)):
+				say(tags[i], errs[i].Error())
+			case errs[i] != nil:
 				say(tags[i], "failed: "+errs[i].Error())
 			}
 		}()
 	}
 	wg.Wait()
-	var failed []string
+	var failed, waiting []string
 	for i, err := range errs {
-		if err != nil {
+		switch {
+		case errors.As(err, new(*script.Waiting)):
+			waiting = append(waiting, tags[i])
+		case err != nil:
 			failed = append(failed, tags[i])
 		}
 	}
 	c.Say("")
+	if len(waiting) > 0 {
+		c.Say("%d of %d runs are waiting: %s", len(waiting), len(runs), strings.Join(waiting, ", "))
+	}
 	if len(failed) > 0 {
 		return fmt.Errorf("%d of %d runs failed: %s", len(failed), len(runs), strings.Join(failed, ", "))
+	}
+	if len(waiting) > 0 {
+		return &script.Waiting{What: fmt.Sprintf("%d of %d runs", len(waiting), len(runs))}
 	}
 	c.Say("%d run(s) done", len(runs))
 	return nil

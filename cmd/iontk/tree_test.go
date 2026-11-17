@@ -133,3 +133,14 @@ func TestAWorkflowIsNamedOrAPath(t *testing.T) {
 		t.Fatalf("workflow <path> is not the workflow: %v %v", c.Name(), err)
 	}
 }
+
+func TestAWorkflowNameThatIsNotThereIsSaidSo(t *testing.T) {
+	t.Cleanup(func() { askedWorkflow = "" })
+	if err := workflowByPath([]string{"workflow", "nope", "--site", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	err := missingWorkflow(tree(strings.NewReader("")))
+	if err == nil || !strings.Contains(err.Error(), "no workflow is called nope") {
+		t.Errorf("err = %v, want it to name the workflow that isn't there", err)
+	}
+}

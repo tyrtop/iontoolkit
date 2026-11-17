@@ -236,3 +236,11 @@ func TestTheWorkflowFormLinesUpItsFieldsAndLeavesOutTheRunsFile(t *testing.T) {
 		t.Fatalf("no field lines:\n%s", out)
 	}
 }
+
+func TestAWorkflowLineOfSeveralLinesIsShownAsSeveral(t *testing.T) {
+	m := tuiModel{}
+	mm, _ := m.onWorkflowLine(wfLineMsg("Active: true\nPeer Connected: true"))
+	if got := mm.(tuiModel).wf.lines; len(got) != 2 || got[1] != "Peer Connected: true" {
+		t.Errorf("lines = %q, want one entry per line of output", got)
+	}
+}

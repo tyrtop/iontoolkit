@@ -273,18 +273,18 @@ func TestPasteReachesFocusedInput(t *testing.T) {
 	t.Run("filter only when focused", func(t *testing.T) {
 		m := base
 		m.phase = phasePicking
-		m.runtime().SetElements([]elementRow{{Element: api.Element{ID: "1", Name: "S0103-RTR-01"}, TSG: "1"}})
+		m.runtime().SetElements([]elementRow{{Element: api.Element{ID: "1", Name: "S0110-RTR-01"}, TSG: "1"}})
 
-		mm, _ := m.Update(tea.PasteMsg{Content: "103"})
+		mm, _ := m.Update(tea.PasteMsg{Content: "110"})
 		if got := mm.(tuiModel).filter.Value(); got != "" {
 			t.Errorf("unfocused filter took the paste: %q", got)
 		}
 
 		m.filterOn = true
 		m.filter.Focus()
-		mm, _ = m.Update(tea.PasteMsg{Content: "103"})
+		mm, _ = m.Update(tea.PasteMsg{Content: "110"})
 		m2 := mm.(tuiModel)
-		if got := m2.filter.Value(); got != "103" {
+		if got := m2.filter.Value(); got != "110" {
 			t.Errorf("focused filter = %q, want 103", got)
 		}
 		if len(m2.matched()) != 1 {

@@ -188,6 +188,20 @@ func buildTree() {
 	aliasWorkflowPaths(rootCmd)
 }
 
+func missingWorkflow(root *cobra.Command) error {
+	if askedWorkflow == "" || askedWorkflow == "help" {
+		return nil
+	}
+	if wf := child(root, "workflow"); wf != nil && child(wf, askedWorkflow) != nil {
+		return nil
+	}
+	problems := cliRuntime().Warnings()
+	if len(problems) == 0 {
+		return fmt.Errorf("no workflow is called %s", askedWorkflow)
+	}
+	return fmt.Errorf("no workflow is called %s; these didn't load: %s", askedWorkflow, strings.Join(problems, "; "))
+}
+
 func aliasWorkflowPaths(root *cobra.Command) {
 	wf := child(root, "workflow")
 	if wf == nil {

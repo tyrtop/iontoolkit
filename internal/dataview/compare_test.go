@@ -10,8 +10,8 @@ import (
 
 const dumpInterfaceStatus4 = `Interface	: 4
 Device		: e382
-ID		: 1724777596590008596
-MAC Address	: 04:47:2a:18:0e:05
+ID		: 1000000000000000596
+MAC Address	: 02:00:00:00:00:05
 State		: down
 Last Change	: 2026-07-18 13:35:26.686 (2190h12m13s ago)
 Status		: Not connected
@@ -24,7 +24,7 @@ func TestCLIHelpersReadDeviceOutput(t *testing.T) {
 		want string
 	}{
 		{"a key and its value", `{{ kv .out "State" }}`, "down"},
-		{"a key holding a space", `{{ kv .out "MAC Address" }}`, "04:47:2a:18:0e:05"},
+		{"a key holding a space", `{{ kv .out "MAC Address" }}`, "02:00:00:00:00:05"},
 		{"a key that is a prefix of another", `{{ kv .out "Status" }}`, "Not connected"},
 		{"a key the firmware did not print", `{{ kv .out "Speed" }}`, ""},
 		{"case does not matter", `{{ kv .out "state" }}`, "down"},

@@ -46,7 +46,7 @@ func TestScopeFor(t *testing.T) {
 		tsg  string
 		want string
 	}{
-		{"with tsg", "1984021017", "openid profile email tsg_id:1984021017"},
+		{"with tsg", "1900000017", "openid profile email tsg_id:1900000017"},
 		{"empty tsg", "", "openid profile email tsg_id:none"},
 	}
 	for _, tt := range tests {

@@ -43,8 +43,8 @@ func (f *fakePortal) Send(_ context.Context, method, path string, body []byte) (
 func twoStores() *fakePortal {
 	return &fakePortal{
 		elements: map[string]api.Element{
-			"e1": {ID: "e1", Name: "S0224-RTR-01", SiteID: "s1"},
-			"e2": {ID: "e2", Name: "S0272-RTR-01", SiteID: "s2"},
+			"e1": {ID: "e1", Name: "S0220-RTR-01", SiteID: "s1"},
+			"e2": {ID: "e2", Name: "S0270-RTR-01", SiteID: "s2"},
 		},
 		bodies: map[string]string{
 			"/sdwan/v4.21/api/sites/s1/elements/e1/interfaces": `{"items":[
@@ -72,13 +72,13 @@ func TestAWriteRunShowsEveryChangeBeforeSendingAny(t *testing.T) {
 		[]string{"1"}, map[string]string{"description": "uplink"})
 
 	if n := Changes(all); n != 1 {
-		t.Errorf("%d changes, want only S0224's interface 1: %+v", n, all)
+		t.Errorf("%d changes, want only S0220's interface 1: %+v", n, all)
 	}
-	if all[0].Element != "S0224-RTR-01" || all[0].Plans[0].Changes[0].From != "old" {
-		t.Errorf("S0224 = %+v", all[0])
+	if all[0].Element != "S0220-RTR-01" || all[0].Plans[0].Changes[0].From != "old" {
+		t.Errorf("S0220 = %+v", all[0])
 	}
-	if all[1].Element != "S0272-RTR-01" || !all[1].Plans[0].Empty() {
-		t.Errorf("S0272 = %+v, want its interface 1 planned and already so", all[1])
+	if all[1].Element != "S0270-RTR-01" || !all[1].Plans[0].Empty() {
+		t.Errorf("S0270 = %+v, want its interface 1 planned and already so", all[1])
 	}
 	if !strings.Contains(all[2].Err, "404") {
 		t.Errorf("e9 = %+v, want its read's 404", all[2])
@@ -106,7 +106,7 @@ func TestApplySendsOnlyWhatChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(p.sent) != 2 {
-		t.Fatalf("sent %d, want S0224's two interfaces and not S0272's unchanged one:\n%s", len(p.sent), strings.Join(p.sent, "\n"))
+		t.Fatalf("sent %d, want S0220's two interfaces and not S0270's unchanged one:\n%s", len(p.sent), strings.Join(p.sent, "\n"))
 	}
 	if !strings.HasPrefix(p.sent[0], "PUT /sdwan/v4.21/api/sites/s1/elements/e1/interfaces/i1 ") ||
 		!strings.Contains(p.sent[0], `"description":"uplink"`) || !strings.Contains(p.sent[0], `"used_for":"public"`) {
@@ -128,12 +128,12 @@ func TestMatchByAnyField(t *testing.T) {
 
 func TestPlansReadAsLines(t *testing.T) {
 	all := []ElementPlans{
-		{Element: "S0224-RTR-01", Plans: []Plan{{Label: "1", Changes: []Change{{Field: "description", From: "old", To: "uplink"}}}}},
-		{Element: "S0272-RTR-01", Plans: []Plan{{Label: "1"}}},
+		{Element: "S0220-RTR-01", Plans: []Plan{{Label: "1", Changes: []Change{{Field: "description", From: "old", To: "uplink"}}}}},
+		{Element: "S0270-RTR-01", Plans: []Plan{{Label: "1"}}},
 		{Element: "e9", Err: "element e9: 404"},
 	}
 	got := strings.Join(PlanLines(all), "\n")
-	for _, want := range []string{"S0224-RTR-01", "description    old → uplink", "1  (already so)", "! element e9: 404"} {
+	for _, want := range []string{"S0220-RTR-01", "description    old → uplink", "1  (already so)", "! element e9: 404"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lines lack %q:\n%s", want, got)
 		}

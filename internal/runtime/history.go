@@ -467,7 +467,7 @@ func historyCommands() []Command {
 				if err != nil {
 					return err
 				}
-				return rt.sayBatch(c, events)
+				return rt.sayBatch(c, rows, events)
 			},
 		},
 	}

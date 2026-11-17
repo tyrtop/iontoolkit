@@ -11,16 +11,16 @@ import (
 
 func fleet() ([]Element, search.SiteMap) {
 	el := func(id, name, site, model string) Element {
-		return Element{Element: api.Element{ID: id, Name: name, SiteID: site, Model: model, Connected: true}, TSG: "t1", Tenant: "Tractor Supply"}
+		return Element{Element: api.Element{ID: id, Name: name, SiteID: site, Model: model, Connected: true}, TSG: "t1", Tenant: "Trident Supply"}
 	}
 	return []Element{
-			el("1", "S0224-RTR-01", "s224", "ion 1200-s"),
-			el("2", "S0224-RTR-02", "s224", "ion 1200-s"),
-			el("3", "S0272-RTR-01", "s272", "ion 2000"),
-			el("4", "S0272-RTR-02", "s272", "ion 2000"),
-			el("5", "S0282-RTR-01", "s282", "ion 2000"),
+			el("1", "S0220-RTR-01", "s224", "ion 1200-s"),
+			el("2", "S0220-RTR-02", "s224", "ion 1200-s"),
+			el("3", "S0270-RTR-01", "s272", "ion 2000"),
+			el("4", "S0270-RTR-02", "s272", "ion 2000"),
+			el("5", "S0280-RTR-01", "s282", "ion 2000"),
 		}, search.SiteMap{
-			"t1/s224": "S0224", "t1/s272": "S0272", "t1/s282": "S0282",
+			"t1/s224": "S0220", "t1/s272": "S0270", "t1/s282": "S0280",
 		}
 }
 
@@ -90,16 +90,16 @@ func TestEveryListBehaviourIsACommand(t *testing.T) {
 func TestFilterAndCursor(t *testing.T) {
 	rt := loaded(t)
 	run(t, rt, "list.filter", "ion", "2000")
-	if got := names(rt.List().Rows); got != "S0272-RTR-01 S0272-RTR-02 S0282-RTR-01" {
+	if got := names(rt.List().Rows); got != "S0270-RTR-01 S0270-RTR-02 S0280-RTR-01" {
 		t.Errorf("rows = %s", got)
 	}
 	run(t, rt, "list.cursor", "bottom")
 	run(t, rt, "list.cursor", "down")
-	if cur, _ := rt.Current(); cur.Name != "S0282-RTR-01" {
+	if cur, _ := rt.Current(); cur.Name != "S0280-RTR-01" {
 		t.Errorf("cursor past the end landed on %s", cur.Name)
 	}
-	run(t, rt, "list.filter", "s0272")
-	if cur, _ := rt.Current(); cur.Name != "S0272-RTR-02" || rt.List().Cursor != 1 {
+	run(t, rt, "list.filter", "s0270")
+	if cur, _ := rt.Current(); cur.Name != "S0270-RTR-02" || rt.List().Cursor != 1 {
 		t.Errorf("a narrower filter left the cursor on %s (%d)", cur.Name, rt.List().Cursor)
 	}
 	run(t, rt, "list.cursor", "-5")
@@ -109,7 +109,7 @@ func TestFilterAndCursor(t *testing.T) {
 	if err := rt.Run("list.cursor", nil, "sideways"); err == nil {
 		t.Error("list.cursor took sideways")
 	}
-	if err := rt.Run("list.filter", map[string]string{"query": "S0224"}); err != nil || names(rt.List().Rows) != "S0224-RTR-01 S0224-RTR-02" {
+	if err := rt.Run("list.filter", map[string]string{"query": "S0220"}); err != nil || names(rt.List().Rows) != "S0220-RTR-01 S0220-RTR-02" {
 		t.Errorf("filter by arg: %v %s", err, names(rt.List().Rows))
 	}
 }
@@ -119,20 +119,20 @@ func TestSelectionClearAndUndo(t *testing.T) {
 	run(t, rt, "list.toggle")
 	run(t, rt, "list.cursor", "+2")
 	run(t, rt, "list.toggle")
-	if got := names(rt.Targets()); got != "S0224-RTR-01 S0272-RTR-01" {
+	if got := names(rt.Targets()); got != "S0220-RTR-01 S0270-RTR-01" {
 		t.Errorf("targets = %s", got)
 	}
 
 	run(t, rt, "list.show-selected")
-	if got := names(rt.List().Rows); got != "S0224-RTR-01 S0272-RTR-01" {
+	if got := names(rt.List().Rows); got != "S0220-RTR-01 S0270-RTR-01" {
 		t.Errorf("show-selected rows = %s", got)
 	}
 	run(t, rt, "list.toggle")
-	if got := names(rt.List().Rows); got != "S0224-RTR-01 S0272-RTR-01" {
+	if got := names(rt.List().Rows); got != "S0220-RTR-01 S0270-RTR-01" {
 		t.Errorf("unselecting while showing the selection moved the rows under the cursor: %s", got)
 	}
 	run(t, rt, "list.filter")
-	if got := names(rt.List().Rows); got != "S0272-RTR-01" {
+	if got := names(rt.List().Rows); got != "S0270-RTR-01" {
 		t.Errorf("the next filter kept the unselected row: %s", got)
 	}
 
@@ -144,7 +144,7 @@ func TestSelectionClearAndUndo(t *testing.T) {
 		t.Error("with nothing selected, the target is not the row under the cursor")
 	}
 	run(t, rt, "list.undo-clear")
-	if !rt.List().ShowSelected || names(rt.List().Rows) != "S0272-RTR-01" || rt.Status() != "restored 1 selected" {
+	if !rt.List().ShowSelected || names(rt.List().Rows) != "S0270-RTR-01" || rt.Status() != "restored 1 selected" {
 		t.Errorf("undo: %+v, status %q", rt.List(), rt.Status())
 	}
 	run(t, rt, "list.undo-clear")
@@ -155,7 +155,7 @@ func TestSelectionClearAndUndo(t *testing.T) {
 
 func TestSelectMatchesTogglesThemAll(t *testing.T) {
 	rt := loaded(t)
-	run(t, rt, "list.filter", "S0272")
+	run(t, rt, "list.filter", "S0270")
 	run(t, rt, "list.select-matches")
 	if len(rt.List().Selected) != 2 {
 		t.Errorf("selected %v", rt.List().Selected)
@@ -242,7 +242,7 @@ func TestRowsAreOrderedAndSiteNamesMatch(t *testing.T) {
 	rows, _ := fleet()
 	rows[0], rows[4] = rows[4], rows[0]
 	rt.SetElements(rows)
-	if got := names(rt.Elements()); got != "S0224-RTR-01 S0224-RTR-02 S0272-RTR-01 S0272-RTR-02 S0282-RTR-01" {
+	if got := names(rt.Elements()); got != "S0220-RTR-01 S0220-RTR-02 S0270-RTR-01 S0270-RTR-02 S0280-RTR-01" {
 		t.Errorf("order = %s", got)
 	}
 	run(t, rt, "list.filter", "nashville")
@@ -250,7 +250,7 @@ func TestRowsAreOrderedAndSiteNamesMatch(t *testing.T) {
 		t.Error("a site name matched before any were known")
 	}
 	rt.MergeSites(map[string]string{"t1/s282": "Nashville Hub"})
-	if names(rt.List().Rows) != "S0282-RTR-01" {
+	if names(rt.List().Rows) != "S0280-RTR-01" {
 		t.Errorf("after the names arrived: %s", names(rt.List().Rows))
 	}
 	rt.ClearSites()

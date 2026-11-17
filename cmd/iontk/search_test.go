@@ -26,8 +26,8 @@ func searchStore(t *testing.T) *config.Store {
 
 	st := &config.Store{Root: t.TempDir(), Secrets: config.NewMemorySecrets()}
 	if err := st.SaveConfig(&config.Config{Tenants: []config.Tenant{
-		{Name: "Tractor Supply", TSGID: "111", Added: true},
-		{Name: "Niagara Bottling", TSGID: "222", Added: true},
+		{Name: "Trident Supply", TSGID: "111", Added: true},
+		{Name: "Norwood Bottling", TSGID: "222", Added: true},
 		{Name: "Kroger", TSGID: "333"},
 	}}); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
@@ -72,7 +72,7 @@ func findIn(t *testing.T, st *config.Store, query string) (runtime.Found, string
 
 func TestSearchScopeIsTheWorkingSet(t *testing.T) {
 	rt := searchRuntime(t, searchStore(t))
-	if names := runtime.TenantNames(mustScope(t, rt)); names != "Tractor Supply, Niagara Bottling" {
+	if names := runtime.TenantNames(mustScope(t, rt)); names != "Trident Supply, Norwood Bottling" {
 		t.Errorf("scope = %q, want both added tenants and not the unadded one", names)
 	}
 	flagTenant = "Kroger"
@@ -81,7 +81,7 @@ func TestSearchScopeIsTheWorkingSet(t *testing.T) {
 	}
 	flagTenant = ""
 	app.Defaults.TSGID = "222"
-	if names := runtime.TenantNames(mustScope(t, rt)); names != "Niagara Bottling" {
+	if names := runtime.TenantNames(mustScope(t, rt)); names != "Norwood Bottling" {
 		t.Errorf("scope = %q, want --tsg to narrow the set", names)
 	}
 	if _, err := rt.SearchScope("", "999"); err == nil {
@@ -130,7 +130,7 @@ func TestSearchAnswersFromAFreshCacheWithoutDialling(t *testing.T) {
 func TestSearchSaysWhenAnswerIsFromAStaleCache(t *testing.T) {
 	st := searchStore(t)
 	if err := st.SaveConfig(&config.Config{Tenants: []config.Tenant{
-		{Name: "Tractor Supply", TSGID: "111", Added: true},
+		{Name: "Trident Supply", TSGID: "111", Added: true},
 	}}); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
@@ -168,10 +168,10 @@ func TestAnUnreachableTenantDoesNotSinkTheSearch(t *testing.T) {
 	if len(found.Hits) != 1 {
 		t.Fatalf("matched %d, want the one element the reachable tenant holds", len(found.Hits))
 	}
-	if !strings.Contains(log, "Niagara Bottling: unreachable") {
+	if !strings.Contains(log, "Norwood Bottling: unreachable") {
 		t.Errorf("an unreachable tenant was not reported:\n%s", log)
 	}
-	if !strings.Contains(log, "Tractor Supply: 1 elements") {
+	if !strings.Contains(log, "Trident Supply: 1 elements") {
 		t.Errorf("the reachable tenant was not reported:\n%s", log)
 	}
 }
@@ -198,7 +198,7 @@ func TestResultsKeepTenantOrderThoughTenantsLoadTogether(t *testing.T) {
 func TestAStaleAnswerIsMarkedForRetryNotTakenAsGood(t *testing.T) {
 	st := searchStore(t)
 	if err := st.SaveConfig(&config.Config{Tenants: []config.Tenant{
-		{Name: "Tractor Supply", TSGID: "111", Added: true, Auth: config.AuthBrowser},
+		{Name: "Trident Supply", TSGID: "111", Added: true, Auth: config.AuthBrowser},
 	}}); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
@@ -228,7 +228,7 @@ func TestRenewAsksBeforeOpeningABrowser(t *testing.T) {
 				t.Error("renew() = true after a refusal, want nothing reloaded")
 			}
 			out := log.String()
-			for _, want := range []string{"expired", "[y/N]", "Tractor Supply", "Niagara Bottling"} {
+			for _, want := range []string{"expired", "[y/N]", "Trident Supply", "Norwood Bottling"} {
 				if !strings.Contains(out, want) {
 					t.Errorf("the question is missing %q:\n%s", want, out)
 				}
@@ -255,7 +255,7 @@ func TestAScriptIsToldWhatToRunRatherThanAsked(t *testing.T) {
 func TestTenantsNeedingACredentialAreNamedWithTheWayOut(t *testing.T) {
 	st := searchStore(t)
 	if err := st.SaveConfig(&config.Config{Tenants: []config.Tenant{
-		{Name: "Tractor Supply", TSGID: "111", Added: true, Auth: config.AuthBrowser},
+		{Name: "Trident Supply", TSGID: "111", Added: true, Auth: config.AuthBrowser},
 	}}); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
@@ -289,10 +289,10 @@ func twoTenantHits() []runtime.Hit {
 	a := api.Element{ID: "e1", Name: "s0100-rtr-01", SiteID: "s1", Model: "ion 1200", Connected: true}
 	b := api.Element{ID: "e3", Name: "ord-gw-01", Model: "ion 3200"}
 	return []runtime.Hit{
-		{Element: a, Tenant: config.Tenant{Name: "Tractor Supply", TSGID: "111"},
-			Record: search.Of(a, "111", "Tractor Supply", sites)},
-		{Element: b, Tenant: config.Tenant{Name: "Niagara Bottling", TSGID: "222"},
-			Record: search.Of(b, "222", "Niagara Bottling", sites)},
+		{Element: a, Tenant: config.Tenant{Name: "Trident Supply", TSGID: "111"},
+			Record: search.Of(a, "111", "Trident Supply", sites)},
+		{Element: b, Tenant: config.Tenant{Name: "Norwood Bottling", TSGID: "222"},
+			Record: search.Of(b, "222", "Norwood Bottling", sites)},
 	}
 }
 

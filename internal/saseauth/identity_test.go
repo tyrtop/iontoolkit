@@ -28,9 +28,9 @@ func TestIdentityFromTokens(t *testing.T) {
 			"email":       "ben.hall@example.test",
 			"sub":         "1c2b96ea-cde3-4b78-95b9-7d90841ed50e",
 		}),
-		AccessToken:  jwt(t, map[string]any{"tsg_id": "1984021017", "sub": "1c2b96ea"}),
+		AccessToken:  jwt(t, map[string]any{"tsg_id": "1900000017", "sub": "1c2b96ea"}),
 		RefreshToken: jwt(t, map[string]any{"exp": float64(exp.Unix())}),
-		Scope:        "openid profile email tsg_id:1984021017",
+		Scope:        "openid profile email tsg_id:1900000017",
 		ExpiresIn:    899 * time.Second,
 	}
 
@@ -41,7 +41,7 @@ func TestIdentityFromTokens(t *testing.T) {
 	if id.Email != "ben.hall@example.test" {
 		t.Errorf("Email = %q", id.Email)
 	}
-	if id.TSG != "1984021017" {
+	if id.TSG != "1900000017" {
 		t.Errorf("TSG = %q, want it read from the access token", id.TSG)
 	}
 	if !id.SessionExpires.Equal(exp) {

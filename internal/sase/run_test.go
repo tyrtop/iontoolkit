@@ -72,7 +72,7 @@ func TestRunStreamDialsEachElementWithItsOwnLogin(t *testing.T) {
 	o.Username, o.Password = "should-not-be-used", "should-not-be-used"
 
 	targets := []Target{
-		{ElementID: "1", Client: rec, User: "tsc-ops", Pass: "pw-tsc"},
+		{ElementID: "1", Client: rec, User: "ion-ops", Pass: "pw-ion"},
 		{ElementID: "2", Client: rec, User: "nb-ops", Pass: "pw-nb"},
 	}
 
@@ -84,7 +84,7 @@ func TestRunStreamDialsEachElementWithItsOwnLogin(t *testing.T) {
 
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
-	if got := rec.seen["1"]; got != [2]string{"tsc-ops", "pw-tsc"} {
+	if got := rec.seen["1"]; got != [2]string{"ion-ops", "pw-ion"} {
 		t.Errorf("element 1 dialled with %v, want its own tenant's login", got)
 	}
 	if got := rec.seen["2"]; got != [2]string{"nb-ops", "pw-nb"} {

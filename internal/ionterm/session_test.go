@@ -149,7 +149,7 @@ func TestSessionRendersDeviceOutput(t *testing.T) {
 	m := NewManager()
 	t.Cleanup(m.CloseAll)
 
-	s, err := m.Open(context.Background(), d, "123", "S5032-RTR-01", 69, 24, Credentials{})
+	s, err := m.Open(context.Background(), d, "123", "S7020-RTR-01", 69, 24, Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestSessionRendersDeviceOutput(t *testing.T) {
 	})
 
 	screen := plain(s.Render())
-	if n := strings.Count(screen, "S5032-RTR-01#"); n > 2 {
+	if n := strings.Count(screen, "S7020-RTR-01#"); n > 2 {
 		t.Errorf("repaints did not collapse: %d prompts", n)
 	}
 	if strings.Contains(screen, "\x1b") {
@@ -862,8 +862,8 @@ func TestATerminalAttachedToASessionSeesItsBytesAndTypesStraightThrough(t *testi
 		t.Fatal(err)
 	}
 	out := s.Tap()
-	conn.feed <- []byte("S5032-RTR-01# ")
-	if got := <-out; string(got) != "S5032-RTR-01# " {
+	conn.feed <- []byte("S7020-RTR-01# ")
+	if got := <-out; string(got) != "S7020-RTR-01# " {
 		t.Errorf("tap got %q, want the device's bytes as they came", got)
 	}
 	if err := s.WriteRaw([]byte("dump\r\x1b[A")); err != nil {

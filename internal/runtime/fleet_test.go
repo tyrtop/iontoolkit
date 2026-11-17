@@ -310,14 +310,34 @@ func TestABatchRunsOnTheSelectionAndKeepsTheRecord(t *testing.T) {
 	}
 }
 
-func TestABatchRefusesAWriteUnlessWritesAreAllowed(t *testing.T) {
+func TestABatchWriteIsADryRunUnlessDoIt(t *testing.T) {
 	rt := deviceRuntime(t)
-	err := rt.Exec(&Call{Args: map[string]string{"cmd": "config system reboot"}}, "batch.run")
-	if err == nil || !strings.Contains(err.Error(), "not read-only") {
-		t.Errorf("a write ran: %v", err)
+	run(t, rt, "list.select-matches")
+	var said []string
+	call := func(doit bool) *Call {
+		return &Call{Ctx: context.Background(), Args: map[string]string{"cmd": "config system reboot"}, DoIt: doit,
+			Out: func(s string) { said = append(said, s) }}
+	}
+	if err := rt.Exec(call(false), "batch.run"); err != nil {
+		t.Fatalf("the dry run failed: %v", err)
 	}
 	if rt.Batch().Total() != 0 {
-		t.Error("a refused run was recorded")
+		t.Error("a dry run was recorded as a run")
+	}
+	if out := strings.Join(said, "\n"); !strings.Contains(out, "plan config system reboot on ") || !strings.Contains(out, "2 element(s), none sent") {
+		t.Errorf("said:\n%s", out)
+	}
+	_ = rt.Exec(call(true), "batch.run")
+	if rt.Batch().Total() != 2 {
+		t.Errorf("with DoIt the batch reached %d elements, want 2", rt.Batch().Total())
+	}
+}
+
+func TestStartBatchStillRefusesAWriteWithoutDoIt(t *testing.T) {
+	rt := deviceRuntime(t)
+	_, err := rt.StartBatch(context.Background(), []string{"config system reboot"}, rt.Elements())
+	if err == nil || !strings.Contains(err.Error(), "not read-only") {
+		t.Errorf("a write started: %v", err)
 	}
 }
 
@@ -425,6 +445,24 @@ func (d droppedSession) ToolkitSession(ctx context.Context, eid, prompt, user, p
 		return nil, errors.New("waiting for shell: i/o timeout")
 	}
 	return d.Client.ToolkitSession(ctx, eid, prompt, user, pass, cmds)
+}
+
+func TestABatchRunAnswersWithItsOwnResults(t *testing.T) {
+	rt := deviceRuntime(t)
+	els := rt.Elements()
+	c := &Call{Ctx: context.Background(), Args: map[string]string{"cmd": "dump device status", "elements": els[0].ID + "," + els[1].ID}}
+	c.Out = func(s string) {
+		if strings.HasPrefix(s, "== ") {
+			rt.BeginBatch(nil, []string{"another", "run's", "elements"})
+		}
+	}
+	if err := rt.Exec(c, "batch.run"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := c.Result.(Batch)
+	if b.Total() != 2 || b.Finished != 2 || len(b.Results) != 2 || b.Results[0].ElementID != els[0].ID || b.Results[1].ElementID != els[1].ID {
+		t.Errorf("batch = %+v, want this call's two elements whatever another run did", b)
+	}
 }
 
 func TestABatchKeepsWhatAnsweredWhenSomeElementsFail(t *testing.T) {

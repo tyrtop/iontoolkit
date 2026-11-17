@@ -2,15 +2,8 @@ kind: list
 name: Elements
 
 endpoints:
-  - name: elements
-    path: /sdwan/v3.2/api/elements
-  - name: sites
-    path: /sdwan/v4.13/api/sites
   - name: spokecluster_status
     path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters/{cluster_id}/status
-  - name: spokeclusters_status_query
-    method: POST
-    path: /sdwan/v2.0/api/spokeclusters/status/query
 
 columns:
   - name: caret

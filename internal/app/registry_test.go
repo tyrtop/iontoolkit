@@ -31,10 +31,10 @@ func (p *portal) GetJSON(_ context.Context, path string) ([]byte, error) {
 	case "/sdwan/v4.21/api/sites/s1/elements/e1/interfaces":
 		return []byte(`{"items":[{"id":"i1","name":"1","description":"old"},{"id":"i2","name":"2"}]}`), nil
 	case "/sdwan/v4.9/api/sites":
-		return []byte(`{"items":[{"id":"s1","name":"S0272"}]}`), nil
+		return []byte(`{"items":[{"id":"s1","name":"S0270"}]}`), nil
 	}
 	if path == "/sdwan/v4.9/api/sites/777" {
-		return []byte(`{"id":"777","name":"S0272-REPL","admin_state":"disabled"}`), nil
+		return []byte(`{"id":"777","name":"S0270-REPL","admin_state":"disabled"}`), nil
 	}
 	if strings.Contains(path, "/sites/777/") {
 		return []byte(`{"items":[]}`), nil
@@ -70,10 +70,10 @@ func registryRuntime(t *testing.T, workflows map[string]map[string]string) (*run
 	t.Cleanup(func() { WorkflowsFolder, WritesFile = "", "" })
 
 	rt := NewRuntime(st, cfg)
-	rt.SetElements([]runtime.Element{{Element: api.Element{ID: "e1", Name: "S0224-RTR-01", SiteID: "s1"}, TSG: "t1", Tenant: "Tractor Supply"}})
+	rt.SetElements([]runtime.Element{{Element: api.Element{ID: "e1", Name: "S0220-RTR-01", SiteID: "s1"}, TSG: "t1", Tenant: "Trident Supply"}})
 	p := &portal{}
 	rt.UsePortal(func(context.Context) (runtime.Portal, runtime.Tenant, error) {
-		return p, runtime.Tenant{TSG: "t1", Name: "Tractor Supply"}, nil
+		return p, runtime.Tenant{TSG: "t1", Name: "Trident Supply"}, nil
 	})
 	return rt, p, st
 }
@@ -115,12 +115,12 @@ func TestAWorkflowIsACommandWithItsInputsAsArguments(t *testing.T) {
 		t.Errorf("warnings = %q", w)
 	}
 
-	lines, res, err := exec(rt, "workflow.new-site", map[string]string{"site": "S0272"}, nil, false)
+	lines, res, err := exec(rt, "workflow.new-site", map[string]string{"site": "S0270"}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := strings.Join(lines, "\n")
-	if !strings.Contains(out, "planned S0272-REPL") || !strings.Contains(out, "dry run: 1 change(s)") || len(p.sent) != 0 {
+	if !strings.Contains(out, "planned S0270-REPL") || !strings.Contains(out, "dry run: 1 change(s)") || len(p.sent) != 0 {
 		t.Errorf("dry run said:\n%s\nsent %v", out, p.sent)
 	}
 	if r, ok := res.(workflow.Result); !ok || len(r.Writes) != 1 {
@@ -161,7 +161,7 @@ func TestWriteIsOneCommandForEveryFrontEnd(t *testing.T) {
 	if err != nil || len(p.sent) != 1 || p.sent[0] != "PUT /sdwan/v4.21/api/sites/s1/elements/e1/interfaces/i1" {
 		t.Errorf("doit: %v, sent %v\n%s", err, p.sent, strings.Join(lines, "\n"))
 	}
-	if b, _ := os.ReadFile(filepath.Join(st.Root, write.LogName)); !strings.Contains(string(b), "Tractor Supply") {
+	if b, _ := os.ReadFile(filepath.Join(st.Root, write.LogName)); !strings.Contains(string(b), "Trident Supply") {
 		t.Errorf("writes.log = %s", b)
 	}
 
@@ -189,23 +189,23 @@ func TestAWorkflowRunsOncePerEntryInAFileOfInputs(t *testing.T) {
 	os.WriteFile(WritesFile, []byte(strings.Replace(write.BuiltinYAML(), "    title: Interface\n", "    title: Interface\n    verified: true\n", 1)), 0o600)
 	ReloadWrites(rt)
 	runs := filepath.Join(t.TempDir(), "sites.csv")
-	os.WriteFile(runs, []byte("site,suffix\nS0272,\nS9999,-X\nS0272,-NEW\n"), 0o600)
+	os.WriteFile(runs, []byte("site,suffix\nS0270,\nS9999,-X\nS0270,-NEW\n"), 0o600)
 
 	lines, _, _ := exec(rt, "workflow.new-site", map[string]string{EachInput: runs, "suffix": "-FLAG"}, nil, false)
 	out := strings.Join(lines, "\n")
-	for _, want := range []string{"3 run(s), up to 10 at a time", "S0272 | site=S0272", "S9999 | site=S9999 suffix=-X", "S0272#2 | "} {
+	for _, want := range []string{"3 run(s), up to 10 at a time", "S0270 | site=S0270", "S9999 | site=S9999 suffix=-X", "S0270#2 | "} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the runs never said %q:\n%s", want, out)
 		}
 	}
 	if _, _, err := exec(rt, "workflow.new-site", map[string]string{EachInput: runs}, nil, true); err == nil ||
-		!strings.Contains(err.Error(), "both have site S0272") || len(p.sent) != 0 {
+		!strings.Contains(err.Error(), "both have site S0270") || len(p.sent) != 0 {
 		t.Errorf("a site twice with --doit: err %v, sent %v", err, p.sent)
 	}
 
 	os.WriteFile(runs, []byte("suffix\n-A\n-B\n"), 0o600)
-	refused, _, err := exec(rt, "workflow.new-site", map[string]string{EachInput: runs, "site": "S0272"}, nil, true)
-	if err == nil || !strings.Contains(err.Error(), "both have site S0272") || len(p.sent) != 0 {
+	refused, _, err := exec(rt, "workflow.new-site", map[string]string{EachInput: runs, "site": "S0270"}, nil, true)
+	if err == nil || !strings.Contains(err.Error(), "both have site S0270") || len(p.sent) != 0 {
 		t.Errorf("one site from the command line for two runs with --doit: err %v, sent %v", err, p.sent)
 	}
 	if strings.Contains(strings.Join(refused, "\n"), "run(s)") {
@@ -215,12 +215,12 @@ func TestAWorkflowRunsOncePerEntryInAFileOfInputs(t *testing.T) {
 	os.WriteFile(runs, []byte("- site: \"  \"\n  suffix: -A\n- suffix: -B\n"), 0o600)
 	yml := runs[:len(runs)-len(".csv")] + ".yaml"
 	os.Rename(runs, yml)
-	if _, _, err := exec(rt, "workflow.new-site", map[string]string{EachInput: yml, "site": "S0272"}, nil, true); err == nil ||
-		!strings.Contains(err.Error(), "both have site S0272") || len(p.sent) != 0 {
+	if _, _, err := exec(rt, "workflow.new-site", map[string]string{EachInput: yml, "site": "S0270"}, nil, true); err == nil ||
+		!strings.Contains(err.Error(), "both have site S0270") || len(p.sent) != 0 {
 		t.Errorf("a blank site in the file over one on the command line: err %v, sent %v", err, p.sent)
 	}
 
-	os.WriteFile(runs, []byte("site,suffix\nS0272,\nS9999,-X\n"), 0o600)
+	os.WriteFile(runs, []byte("site,suffix\nS0270,\nS9999,-X\n"), 0o600)
 	_, _, err = exec(rt, "workflow.new-site", map[string]string{EachInput: runs, "suffix": "-FLAG"}, nil, true)
 	if err == nil || !strings.Contains(err.Error(), "1 of 2 runs failed: S9999") {
 		t.Errorf("err = %v", err)
@@ -401,7 +401,7 @@ func TestAWriteAcrossTenantsGoesThroughEachTenantsPortal(t *testing.T) {
 	os.WriteFile(WritesFile, []byte(strings.Replace(write.BuiltinYAML(), "    title: Interface\n", "    title: Interface\n    verified: true\n", 1)), 0o600)
 	rt := NewRuntime(st, cfg)
 	rt.SetElements([]runtime.Element{
-		{Element: api.Element{ID: "e1", Name: "S0224-RTR-01", SiteID: "s1"}, TSG: "t1", Tenant: "Tractor Supply"},
+		{Element: api.Element{ID: "e1", Name: "S0220-RTR-01", SiteID: "s1"}, TSG: "t1", Tenant: "Trident Supply"},
 		{Element: api.Element{ID: "e2", Name: "S0300-RTR-01", SiteID: "s2"}, TSG: "t2", Tenant: "Other Co"},
 	})
 	wires := map[string]*tenantWire{"t1": {}, "t2": {}}
@@ -414,13 +414,13 @@ func TestAWriteAcrossTenantsGoesThroughEachTenantsPortal(t *testing.T) {
 		t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
 	}
 	if got := wires["t1"].sent; len(got) != 1 || !strings.Contains(got[0], "/sites/s1/elements/e1/") {
-		t.Errorf("Tractor Supply's portal was sent %v", got)
+		t.Errorf("Trident Supply's portal was sent %v", got)
 	}
 	if got := wires["t2"].sent; len(got) != 1 || !strings.Contains(got[0], "/sites/s2/elements/e2/") {
 		t.Errorf("Other Co's portal was sent %v", got)
 	}
 	log, _ := os.ReadFile(filepath.Join(root, write.LogName))
-	if !strings.Contains(string(log), "Tractor Supply") || !strings.Contains(string(log), "Other Co") {
+	if !strings.Contains(string(log), "Trident Supply") || !strings.Contains(string(log), "Other Co") {
 		t.Errorf("writes.log names one tenant: %s", log)
 	}
 }

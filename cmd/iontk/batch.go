@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"tyrtop.com/iontk/internal/output"
 	"tyrtop.com/iontk/internal/runtime"
 	"tyrtop.com/iontk/internal/sase"
-	"tyrtop.com/iontk/internal/sase/ioncli"
 	"tyrtop.com/iontk/internal/tui"
 )
 
@@ -55,10 +53,13 @@ func runBatch(ctx context.Context, sel selection) error {
 	if len(rows) == 0 {
 		rows = rt.KnownRows(ctx, sel.elements, func(l string) { fmt.Fprintln(os.Stderr, l) })
 	}
-	events, err := rt.StartBatch(ctx, cmds, rows)
-	if errors.Is(err, ioncli.ErrNotReadOnly) {
-		return fmt.Errorf("%w; override with --allow-writes or set allow_writes", err)
+	if rt.CheckCommands(cmds) != nil && !flagBatchDoit {
+		for _, line := range runtime.PlanBatch(cmds, rows) {
+			fmt.Println(line)
+		}
+		return nil
 	}
+	events, err := rt.StartBatchWith(ctx, cmds, rows, flagBatchDoit)
 	if err != nil {
 		return err
 	}

@@ -97,7 +97,7 @@ func runThings(t *testing.T, p *thingsPortal, resume bool) (string, error) {
 		t.Fatalf("the workflow did not load: %v", w)
 	}
 	rt.UsePortal(func(context.Context) (runtime.Portal, runtime.Tenant, error) {
-		return p, runtime.Tenant{TSG: "t1", Name: "Tractor Supply"}, nil
+		return p, runtime.Tenant{TSG: "t1", Name: "Trident Supply"}, nil
 	})
 	var lines []string
 	c := &runtime.Call{Ctx: context.Background(), DoIt: true, Resume: resume, Out: func(s string) { lines = append(lines, s) }}
@@ -209,7 +209,7 @@ func TestAWorkflowOfStepsRunsThemInOrderAndResumesAtTheRightOne(t *testing.T) {
 	}
 	run := func(rt *runtime.Runtime, p *thingsPortal, resume bool) (string, error) {
 		rt.UsePortal(func(context.Context) (runtime.Portal, runtime.Tenant, error) {
-			return p, runtime.Tenant{TSG: "t1", Name: "Tractor Supply"}, nil
+			return p, runtime.Tenant{TSG: "t1", Name: "Trident Supply"}, nil
 		})
 		var lines []string
 		c := &runtime.Call{Ctx: context.Background(), DoIt: true, Resume: resume, Out: func(s string) { lines = append(lines, s) }}

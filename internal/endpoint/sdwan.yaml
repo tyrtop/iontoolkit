@@ -1,0 +1,2965 @@
+endpoints:
+  - name: activeuserips_query
+    method: POST
+    path: /sdwan/v2.1/api/activeuserips/query
+  - name: anynetlinks_bulkoperations
+    method: POST
+    path: /sdwan/v4.0/api/sites/{site_id}/anynetlinks/bulkoperations
+  - name: anynetlinks_correlationevents
+    path: /sdwan/v2.2/api/anynetlinks/{anynetlink_id}/correlationevents
+  - name: anynetlinks_correlationevents_query
+    method: POST
+    path: /sdwan/v2.2/api/anynetlinks/correlationevents/query
+  - name: anynetlinks_query
+    method: POST
+    path: /sdwan/v4.0/api/anynetlinks/query
+  - name: apnprofiles
+    path: /sdwan/v2.0/api/apnprofiles
+  - name: apnprofiles.one
+    path: /sdwan/v2.0/api/apnprofiles/{apnprofile_id}
+  - name: apnprofiles.post
+    method: POST
+    path: /sdwan/v2.0/api/apnprofiles
+  - name: apnprofiles.put
+    method: PUT
+    path: /sdwan/v2.0/api/apnprofiles/{apnprofile_id}
+  - name: apnprofiles.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/apnprofiles/{apnprofile_id}
+  - name: apnprofiles_query
+    method: POST
+    path: /sdwan/v2.0/api/apnprofiles/query
+  - name: appacceleration_query
+    method: POST
+    path: /sdwan/v2.0/api/sites/appacceleration/query
+  - name: appaccelerationstatus
+    path: /sdwan/v2.0/api/sites/{site_id}/appaccelerationstatus
+  - name: appdefs
+    path: /sdwan/v2.6/api/appdefs
+  - name: appdefs.one
+    path: /sdwan/v2.6/api/appdefs/{appdef_id}
+  - name: appdefs.post
+    method: POST
+    path: /sdwan/v2.6/api/appdefs
+  - name: appdefs.put
+    method: PUT
+    path: /sdwan/v2.6/api/appdefs/{appdef_id}
+  - name: appdefs.delete
+    method: DELETE
+    path: /sdwan/v2.6/api/appdefs/{appdef_id}
+  - name: appdefs_overrides
+    path: /sdwan/v2.3/api/appdefs/{appdef_id}/overrides
+  - name: appdefs_overrides.one
+    path: /sdwan/v2.3/api/appdefs/{appdef_id}/overrides/{override_id}
+  - name: appdefs_overrides.post
+    method: POST
+    path: /sdwan/v2.3/api/appdefs/{appdef_id}/overrides
+  - name: appdefs_overrides.put
+    method: PUT
+    path: /sdwan/v2.3/api/appdefs/{appdef_id}/overrides/{override_id}
+  - name: appdefs_overrides.delete
+    method: DELETE
+    path: /sdwan/v2.3/api/appdefs/{appdef_id}/overrides/{override_id}
+  - name: appdefs_query
+    method: POST
+    path: /sdwan/v2.6/api/appdefs/query
+  - name: appdefs_version
+    path: /sdwan/v2.2/api/appdefs_version
+  - name: appdefs_version.one
+    path: /sdwan/v2.2/api/appdefs_version/{appdefs_version_id}
+  - name: appdefs_version.put
+    method: PUT
+    path: /sdwan/v2.2/api/appdefs_version/{appdefs_version_id}
+  - name: application_probe
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/application_probe
+  - name: application_probe.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/application_probe
+  - name: auditlog
+    path: /sdwan/v2.1/api/auditlog
+  - name: auditlog.one
+    path: /sdwan/v2.1/api/auditlog/{auditlog_id}
+  - name: auditlog_query
+    method: POST
+    path: /sdwan/v2.1/api/auditlog/query
+  - name: authtokens
+    path: /sdwan/v2.1/api/operators/{operator_id}/authtokens
+  - name: authtokens.one
+    path: /sdwan/v2.1/api/operators/{operator_id}/authtokens/{authtoken_id}
+  - name: authtokens.post
+    method: POST
+    path: /sdwan/v2.1/api/operators/{operator_id}/authtokens
+  - name: authtokens.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/operators/{operator_id}/authtokens/{authtoken_id}
+  - name: bandwidth_aggregates_monitor
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/aggregates/bandwidth
+  - name: base_permissions
+    path: /sdwan/v2.0/api/base_permissions
+  - name: base_roles
+    path: /sdwan/v2.0/api/base_roles
+  - name: bfdpeers
+    path: /sdwan/v3.0/api/sites/{site_id}/bfdpeers
+  - name: bgpconfigs
+    path: /sdwan/v2.5/api/sites/{site_id}/elements/{element_id}/bgpconfigs
+  - name: bgpconfigs.one
+    path: /sdwan/v2.5/api/sites/{site_id}/elements/{element_id}/bgpconfigs/{bgpconfig_id}
+  - name: bgpconfigs.put
+    method: PUT
+    path: /sdwan/v2.5/api/sites/{site_id}/elements/{element_id}/bgpconfigs/{bgpconfig_id}
+  - name: bgppeers
+    path: /sdwan/v3.0/api/sites/{site_id}/elements/{element_id}/bgppeers
+  - name: bgppeers.one
+    path: /sdwan/v3.0/api/sites/{site_id}/elements/{element_id}/bgppeers/{bgppeer_id}
+  - name: bgppeers.post
+    method: POST
+    path: /sdwan/v3.0/api/sites/{site_id}/elements/{element_id}/bgppeers
+  - name: bgppeers.put
+    method: PUT
+    path: /sdwan/v3.0/api/sites/{site_id}/elements/{element_id}/bgppeers/{bgppeer_id}
+  - name: bgppeers.patch
+    method: PATCH
+    path: /sdwan/v3.0/api/sites/{site_id}/elements/{element_id}/bgppeers
+  - name: bgppeers.delete
+    method: DELETE
+    path: /sdwan/v3.0/api/sites/{site_id}/elements/{element_id}/bgppeers/{bgppeer_id}
+  - name: bgppeers_advertisedprefixes
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/bgppeers/{bgppeer_id}/advertisedprefixes
+  - name: bgppeers_discoveredprefixes
+    path: /sdwan/v2.2/api/sites/{site_id}/elements/{element_id}/bgppeers/{bgppeer_id}/discoveredprefixes
+  - name: bgppeers_operations
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/bgppeers/{bgppeer_id}/operations
+  - name: bgppeers_query
+    method: POST
+    path: /sdwan/v3.0/api/sites/{site_id}/elements/{element_id}/bgppeers/query
+  - name: bgppeers_reachableprefixes
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/bgppeers/{bgppeer_id}/reachableprefixes
+  - name: bgppeers_status
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/bgppeers/status
+  - name: bgppeers_status_query
+    method: POST
+    path: /sdwan/v2.1/api/bgppeers/status/query
+  - name: bulkconfigurations_sitetemplates
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates/{sitetemplate_id}
+  - name: bulkconfigurations_sitetemplates.post
+    method: POST
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates
+  - name: bulkconfigurations_sitetemplates.put
+    method: PUT
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates/{sitetemplate_id}
+  - name: bulkconfigurations_sitetemplates.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates/{sitetemplate_id}
+  - name: bulkconfigurations_sitetemplates_clone
+    method: POST
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates/{sitetemplate_id}/clone
+  - name: bulkconfigurations_sitetemplates_deployments
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates/{sitetemplate_id}/deployments/{deployment_id}
+  - name: bulkconfigurations_sitetemplates_deployments.post
+    method: POST
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates/{sitetemplate_id}/deployments
+  - name: bulkconfigurations_sitetemplates_deployments.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates/{sitetemplate_id}/deployments/{deployment_id}
+  - name: bulkconfigurations_sitetemplates_deployments_query
+    method: POST
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates/deployments/query
+  - name: bulkconfigurations_sitetemplates_deployments_status
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates/{sitetemplate_id}/deployments/{deployment_id}/status
+  - name: bulkconfigurations_sitetemplates_query
+    method: POST
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates/query
+  - name: bulkconfigurations_sitetemplates_status
+    path: /sdwan/v2.0/api/bulkconfigurations/sitetemplates/{sitetemplate_id}/status
+  - name: bulkoperations
+    method: POST
+    path: /sdwan/v2.1/api/sites/bulkoperations
+  - name: cellular_module_firmware_status_query
+    method: POST
+    path: /sdwan/v2.0/api/cellular_module_firmware/status/query
+  - name: cellular_module_images
+    path: /sdwan/v2.1/api/cellular_module_images
+  - name: cellular_module_images.one
+    path: /sdwan/v2.1/api/cellular_module_images/{cellular_module_image_id}
+  - name: cellular_module_revoked_images
+    method: POST
+    path: /sdwan/v2.0/api/cellular_module_revoked_images
+  - name: cellular_modules_query
+    method: POST
+    path: /sdwan/v2.0/api/cellular_modules/query
+  - name: cellular_modules_sim_security
+    path: /sdwan/v2.0/api/elements/{element_id}/cellular_modules/{cellular_module_id}/sim_security
+  - name: cellular_modules_sim_security.one
+    path: /sdwan/v2.0/api/elements/{element_id}/cellular_modules/{cellular_module_id}/sim_security/{sim_security_id}
+  - name: cellular_modules_sim_security.put
+    method: PUT
+    path: /sdwan/v2.0/api/elements/{element_id}/cellular_modules/{cellular_module_id}/sim_security/{sim_security_id}
+  - name: cellular_modules_status_query
+    method: POST
+    path: /sdwan/v2.1/api/cellular_modules/status/query
+  - name: certificate_operations
+    method: POST
+    path: /sdwan/v2.0/api/elements/{element_id}/certificate_operations
+  - name: certificates
+    path: /sdwan/v2.0/api/entities/{entitie_id}/certificates
+  - name: certificates.put
+    method: PUT
+    path: /sdwan/v2.0/api/entities/{entitie_id}/certificates
+  - name: certificates.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/entities/{entitie_id}/certificates
+  - name: certificates_revoked
+    path: /sdwan/v2.0/api/certificates/revoked
+  - name: clients_base_roles
+    path: /sdwan/v2.0/api/clients/{client_id}/base_roles
+  - name: clients_login
+    method: POST
+    path: /sdwan/v2.0/api/clients/{client_id}/login
+  - name: clients_logout
+    method: POST
+    path: /sdwan/v2.0/api/logout
+  - name: clients_machines
+    path: /sdwan/v2.5/api/clients/{client_id}/machines
+  - name: clients_machines.one
+    path: /sdwan/v2.5/api/clients/{client_id}/machines/{machine_id}
+  - name: clients_machines_query
+    method: POST
+    path: /sdwan/v2.5/api/clients/{client_id}/machines/query
+  - name: clients_query
+    method: POST
+    path: /sdwan/v2.0/api/clients/query
+  - name: clients_reallocate
+    method: POST
+    path: /sdwan/v2.5/api/clients/{client_id}/machines/{machine_id}/reallocate
+  - name: clients_roles
+    path: /sdwan/v2.1/api/clients/{client_id}/roles
+  - name: clients_roles.one
+    path: /sdwan/v2.1/api/clients/{client_id}/roles/{role_id}
+  - name: cuid_status
+    path: /sdwan/v2.0/api/cuid/status
+  - name: demsiteconfigs
+    path: /sdwan/v2.0/api/sites/{site_id}/demsiteconfigs
+  - name: demsiteconfigs.one
+    path: /sdwan/v2.0/api/sites/{site_id}/demsiteconfigs/{demsiteconfig_id}
+  - name: demsiteconfigs.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/demsiteconfigs
+  - name: demsiteconfigs.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/demsiteconfigs/{demsiteconfig_id}
+  - name: demsiteconfigs.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/demsiteconfigs/{demsiteconfig_id}
+  - name: demsiteconfigs_query
+    method: POST
+    path: /sdwan/v2.0/api/demsiteconfigs/query
+  - name: demstatus
+    path: /sdwan/v2.0/api/sites/{site_id}/demstatus
+  - name: demstatus.one
+    path: /sdwan/v2.0/api/sites/{site_id}/demstatus/{demstatus_id}
+  - name: demstatus_query
+    method: POST
+    path: /sdwan/v2.0/api/demstatus/query
+  - name: deviceidconfigs
+    path: /sdwan/v2.1/api/sites/{site_id}/deviceidconfigs
+  - name: deviceidconfigs.one
+    path: /sdwan/v2.1/api/sites/{site_id}/deviceidconfigs/{deviceidconfig_id}
+  - name: deviceidconfigs.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/deviceidconfigs
+  - name: deviceidconfigs.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/deviceidconfigs/{deviceidconfig_id}
+  - name: deviceidconfigs_bulkdelete_snmpdiscoverystartnodes
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/deviceidconfigs/{deviceidconfig_id}/bulkdelete_snmpdiscoverystartnodes
+  - name: deviceidconfigs_query
+    method: POST
+    path: /sdwan/v2.0/api/deviceidconfigs/query
+  - name: deviceidconfigs_snmpdiscoverystartnodes
+    path: /sdwan/v2.0/api/sites/{site_id}/deviceidconfigs/{deviceidconfig_id}/snmpdiscoverystartnodes
+  - name: deviceidconfigs_snmpdiscoverystartnodes.one
+    path: /sdwan/v2.0/api/sites/{site_id}/deviceidconfigs/{deviceidconfig_id}/snmpdiscoverystartnodes/{snmpdiscoverystartnode_id}
+  - name: deviceidconfigs_snmpdiscoverystartnodes.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/deviceidconfigs/{deviceidconfig_id}/snmpdiscoverystartnodes
+  - name: deviceidconfigs_snmpdiscoverystartnodes.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/deviceidconfigs/{deviceidconfig_id}/snmpdiscoverystartnodes/{snmpdiscoverystartnode_id}
+  - name: deviceidconfigs_snmpdiscoverystartnodes.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/deviceidconfigs/{deviceidconfig_id}/snmpdiscoverystartnodes/{snmpdiscoverystartnode_id}
+  - name: deviceidprofiles
+    path: /sdwan/v2.0/api/deviceidprofiles
+  - name: deviceidprofiles.one
+    path: /sdwan/v2.0/api/deviceidprofiles/{deviceidprofile_id}
+  - name: deviceidprofiles.post
+    method: POST
+    path: /sdwan/v2.0/api/deviceidprofiles
+  - name: deviceidprofiles.put
+    method: PUT
+    path: /sdwan/v2.0/api/deviceidprofiles/{deviceidprofile_id}
+  - name: deviceidprofiles.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/deviceidprofiles/{deviceidprofile_id}
+  - name: deviceidprofiles_operations
+    method: POST
+    path: /sdwan/v2.0/api/deviceidprofiles/{deviceidprofile_id}/operations
+  - name: dhcpservers
+    path: /sdwan/v2.3/api/sites/{site_id}/dhcpservers
+  - name: dhcpservers.one
+    path: /sdwan/v2.3/api/sites/{site_id}/dhcpservers/{dhcpserver_id}
+  - name: dhcpservers.post
+    method: POST
+    path: /sdwan/v2.3/api/sites/{site_id}/dhcpservers
+  - name: dhcpservers.put
+    method: PUT
+    path: /sdwan/v2.3/api/sites/{site_id}/dhcpservers/{dhcpserver_id}
+  - name: dhcpservers.delete
+    method: DELETE
+    path: /sdwan/v2.3/api/sites/{site_id}/dhcpservers/{dhcpserver_id}
+  - name: directoryservices
+    path: /sdwan/v2.1/api/directoryservices
+  - name: directoryservices.post
+    method: POST
+    path: /sdwan/v2.1/api/directoryservices
+  - name: directoryservices.put
+    method: PUT
+    path: /sdwan/v2.1/api/directoryservices/{directoryservice_id}
+  - name: directoryservices.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/directoryservices/{directoryservice_id}
+  - name: directoryservices_deltasync
+    method: POST
+    path: /sdwan/v2.0/api/directoryservices/deltasync
+  - name: directoryservices_domainstatus
+    path: /sdwan/v2.0/api/directoryservices/{directoryservice_id}/domainstatus/{domainstatus_id}
+  - name: directoryservices_status
+    path: /sdwan/v2.0/api/directoryservices/status
+  - name: directoryservices_sync
+    method: POST
+    path: /sdwan/v2.0/api/directoryservices/sync
+  - name: directoryusergroups
+    path: /sdwan/v2.0/api/directoryusergroups
+  - name: directoryusergroups.one
+    path: /sdwan/v2.0/api/directoryusergroups/{directoryusergroup_id}
+  - name: directoryusergroups_query
+    method: POST
+    path: /sdwan/v2.0/api/directoryusergroups/query
+  - name: directoryusers
+    path: /sdwan/v2.1/api/directoryusers
+  - name: directoryusers.one
+    path: /sdwan/v2.1/api/directoryusers/{directoryuser_id}
+  - name: directoryusers_query
+    method: POST
+    path: /sdwan/v2.1/api/directoryusers/query
+  - name: dnssecuritycategories
+    path: /sdwan/v2.0/api/dnssecuritycategories
+  - name: dnssecuritycategories.one
+    path: /sdwan/v2.0/api/dnssecuritycategories/{dnssecuritycategorie_id}
+  - name: dnssecurityprofiles
+    path: /sdwan/v2.0/api/dnssecurityprofiles
+  - name: dnssecurityprofiles.one
+    path: /sdwan/v2.0/api/dnssecurityprofiles/{dnssecurityprofile_id}
+  - name: dnsserviceprofiles
+    path: /sdwan/v2.1/api/dnsserviceprofiles
+  - name: dnsserviceprofiles.one
+    path: /sdwan/v2.1/api/dnsserviceprofiles/{dnsserviceprofile_id}
+  - name: dnsserviceprofiles.post
+    method: POST
+    path: /sdwan/v2.1/api/dnsserviceprofiles
+  - name: dnsserviceprofiles.put
+    method: PUT
+    path: /sdwan/v2.1/api/dnsserviceprofiles/{dnsserviceprofile_id}
+  - name: dnsserviceprofiles.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/dnsserviceprofiles/{dnsserviceprofile_id}
+  - name: dnsserviceprofiles_query
+    method: POST
+    path: /sdwan/v2.1/api/dnsserviceprofiles/query
+  - name: dnsserviceroles
+    path: /sdwan/v2.0/api/dnsserviceroles
+  - name: dnsserviceroles.one
+    path: /sdwan/v2.0/api/dnsserviceroles/{dnsservicerole_id}
+  - name: dnsserviceroles.post
+    method: POST
+    path: /sdwan/v2.0/api/dnsserviceroles
+  - name: dnsserviceroles.put
+    method: PUT
+    path: /sdwan/v2.0/api/dnsserviceroles/{dnsservicerole_id}
+  - name: dnsserviceroles.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/dnsserviceroles/{dnsservicerole_id}
+  - name: dnsserviceroles_query
+    method: POST
+    path: /sdwan/v2.0/api/dnsserviceroles/query
+  - name: dnsservices
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/dnsservices
+  - name: dnsservices.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/dnsservices/{dnsservice_id}
+  - name: dnsservices.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/dnsservices
+  - name: dnsservices.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/dnsservices/{dnsservice_id}
+  - name: dnsservices.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/dnsservices/{dnsservice_id}
+  - name: dnsservices_query
+    method: POST
+    path: /sdwan/v2.0/api/dnsservices/query
+  - name: element_admin_state
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/admin_state
+  - name: element_bgppeers_status
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/bgppeers/{bgppeer_id}/status
+  - name: element_bulk_config_state_query
+    method: POST
+    path: /sdwan/v2.0/api/elements/bulk_config_state/query
+  - name: element_cellular_modules
+    path: /sdwan/v2.0/api/elements/{element_id}/cellular_modules
+  - name: element_cellular_modules.one
+    path: /sdwan/v2.0/api/elements/{element_id}/cellular_modules/{cellular_module_id}
+  - name: element_cellular_modules.put
+    method: PUT
+    path: /sdwan/v2.0/api/elements/{element_id}/cellular_modules/{cellular_module_id}
+  - name: element_cellular_modules_firmware
+    path: /sdwan/v2.0/api/elements/{element_id}/cellular_modules/{cellular_module_id}/firmware
+  - name: element_cellular_modules_firmware.put
+    method: PUT
+    path: /sdwan/v2.0/api/elements/{element_id}/cellular_modules/{cellular_module_id}/firmware
+  - name: element_cellular_modules_firmware_status
+    path: /sdwan/v2.0/api/elements/{element_id}/cellular_modules/{cellular_module_id}/firmware/status
+  - name: element_cellular_modules_status
+    path: /sdwan/v2.1/api/elements/{element_id}/cellular_modules/{cellular_module_id}/status
+  - name: element_correlationevents
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/correlationevents
+  - name: element_correlationevents_query
+    method: POST
+    path: /sdwan/v2.1/api/elements/correlationevents/query
+  - name: element_deviceidconfigs
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/deviceidconfigs
+  - name: element_deviceidconfigs.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/deviceidconfigs/{deviceidconfig_id}
+  - name: element_deviceidconfigs.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/deviceidconfigs
+  - name: element_deviceidconfigs.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/deviceidconfigs/{deviceidconfig_id}
+  - name: element_deviceidconfigs.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/deviceidconfigs/{deviceidconfig_id}
+  - name: element_extensions
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/extensions
+  - name: element_extensions.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/extensions/{extension_id}
+  - name: element_extensions.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/extensions
+  - name: element_extensions.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/extensions/{extension_id}
+  - name: element_extensions.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/extensions/{extension_id}
+  - name: element_extensions_query
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/extensions/query
+  - name: element_images
+    path: /sdwan/v2.4/api/element_images
+  - name: element_images.one
+    path: /sdwan/v2.4/api/element_images/{element_image_id}
+  - name: element_passages
+    path: /sdwan/v2.0/api/elements/{element_id}/passages
+  - name: element_passages.one
+    path: /sdwan/v2.0/api/elements/{element_id}/passages/{passage_id}
+  - name: element_passages.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/elements/{element_id}/passages/{passage_id}
+  - name: element_query
+    method: POST
+    path: /sdwan/v3.2/api/elements/query
+  - name: element_rquery
+    method: POST
+    path: /sdwan/v3.1/api/elements/rquery
+  - name: element_state
+    path: /sdwan/v2.0/api/elements/{element_id}/state
+  - name: element_state.put
+    method: PUT
+    path: /sdwan/v2.0/api/elements/{element_id}/state
+  - name: element_status
+    path: /sdwan/v2.6/api/elements/{element_id}/status
+  - name: element_toolkitsessions
+    method: DELETE
+    path: /sdwan/v2.0/api/elements/{element_id}/toolkitsessions/{toolkitsession_id}
+  - name: element_waninterfaces_state
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/waninterfaces/{waninterface_id}/state
+  - name: elementaccessconfigs
+    path: /sdwan/v2.3/api/elements/{element_id}/elementaccessconfigs
+  - name: elementaccessconfigs.one
+    path: /sdwan/v2.3/api/elements/{element_id}/elementaccessconfigs/{elementaccessconfig_id}
+  - name: elementaccessconfigs.post
+    method: POST
+    path: /sdwan/v2.3/api/elements/{element_id}/elementaccessconfigs
+  - name: elementaccessconfigs.put
+    method: PUT
+    path: /sdwan/v2.3/api/elements/{element_id}/elementaccessconfigs/{elementaccessconfig_id}
+  - name: elementaccessconfigs_query
+    method: POST
+    path: /sdwan/v2.3/api/elementaccessconfigs/query
+  - name: elementaccessstates
+    path: /sdwan/v2.0/api/elements/{element_id}/elementaccessstates
+  - name: elementmodels
+    path: /sdwan/v3.8/api/elementmodels
+  - name: elementpassageconfigs
+    path: /sdwan/v2.0/api/elements/{element_id}/elementpassageconfigs
+  - name: elementpassageconfigs.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/elements/{element_id}/elementpassageconfigs/{elementpassageconfig_id}
+  - name: elements
+    path: /sdwan/v3.2/api/elements
+  - name: elements.one
+    path: /sdwan/v3.2/api/elements/{element_id}
+  - name: elements.put
+    method: PUT
+    path: /sdwan/v3.2/api/elements/{element_id}
+  - name: elementsecurityzones
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/securityzones
+  - name: elementsecurityzones.one
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/securityzones/{securityzone_id}
+  - name: elementsecurityzones.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/securityzones
+  - name: elementsecurityzones.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/securityzones/{securityzone_id}
+  - name: elementsecurityzones.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/securityzones/{securityzone_id}
+  - name: elementsecurityzones_query
+    method: POST
+    path: /sdwan/v2.1/api/elementsecurityzones/query
+  - name: elementshells
+    path: /sdwan/v2.1/api/sites/{site_id}/elementshells
+  - name: elementshells.one
+    path: /sdwan/v2.1/api/sites/{site_id}/elementshells/{elementshell_id}
+  - name: elementshells.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/elementshells
+  - name: elementshells.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/elementshells/{elementshell_id}
+  - name: elementshells.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/sites/{site_id}/elementshells/{elementshell_id}
+  - name: elementshells_copy_element_configurations
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elementshells/{elementshell_id}/copy_element_configurations
+  - name: elementshells_copy_element_configurations_status
+    path: /sdwan/v2.0/api/sites/{site_id}/elementshells/{elementshell_id}/copy_element_configurations/status
+  - name: elementshells_interfaces
+    path: /sdwan/v2.4/api/sites/{site_id}/elementshells/{elementshell_id}/interfaces
+  - name: elementshells_interfaces.one
+    path: /sdwan/v2.4/api/sites/{site_id}/elementshells/{elementshell_id}/interfaces/{interface_id}
+  - name: elementshells_interfaces.post
+    method: POST
+    path: /sdwan/v2.4/api/sites/{site_id}/elementshells/{elementshell_id}/interfaces
+  - name: elementshells_interfaces.put
+    method: PUT
+    path: /sdwan/v2.4/api/sites/{site_id}/elementshells/{elementshell_id}/interfaces/{interface_id}
+  - name: elementshells_interfaces.delete
+    method: DELETE
+    path: /sdwan/v2.4/api/sites/{site_id}/elementshells/{elementshell_id}/interfaces/{interface_id}
+  - name: elementshells_query
+    method: POST
+    path: /sdwan/v2.1/api/elementshells/query
+  - name: elementsystemlimitprofiles
+    path: /sdwan/v2.0/api/elementsystemlimitprofiles
+  - name: elementsystemlimitprofiles.one
+    path: /sdwan/v2.0/api/elementsystemlimitprofiles/{elementsystemlimitprofile_id}
+  - name: elementsystemlimitprofiles.post
+    method: POST
+    path: /sdwan/v2.0/api/elementsystemlimitprofiles
+  - name: elementsystemlimitprofiles.put
+    method: PUT
+    path: /sdwan/v2.0/api/elementsystemlimitprofiles/{elementsystemlimitprofile_id}
+  - name: elementsystemlimitprofiles.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/elementsystemlimitprofiles/{elementsystemlimitprofile_id}
+  - name: elementsystemlimitprofiles_query
+    method: POST
+    path: /sdwan/v2.0/api/elementsystemlimitprofiles/query
+  - name: elementusers
+    path: /sdwan/v2.1/api/elementusers
+  - name: elementusers.one
+    path: /sdwan/v2.1/api/elementusers/{elementuser_id}
+  - name: elementusers.post
+    method: POST
+    path: /sdwan/v2.1/api/elementusers
+  - name: elementusers.put
+    method: PUT
+    path: /sdwan/v2.1/api/elementusers/{elementuser_id}
+  - name: elementusers.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/elementusers/{elementuser_id}
+  - name: elementusers_access
+    path: /sdwan/v2.1/api/elementusers/{elementuser_id}/access
+  - name: elementusers_access.one
+    path: /sdwan/v2.1/api/elementusers/{elementuser_id}/access/{access_id}
+  - name: elementusers_access.post
+    method: POST
+    path: /sdwan/v2.1/api/elementusers/{elementuser_id}/access
+  - name: elementusers_access.put
+    method: PUT
+    path: /sdwan/v2.1/api/elementusers/{elementuser_id}/access/{access_id}
+  - name: elementusers_access.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/elementusers/{elementuser_id}/access/{access_id}
+  - name: elementusers_password
+    path: /sdwan/v2.1/api/elementusers/{elementuser_id}/password
+  - name: enterpriseprefixset
+    path: /sdwan/v2.1/api/enterpriseprefixset
+  - name: enterpriseprefixset.put
+    method: PUT
+    path: /sdwan/v2.1/api/enterpriseprefixset
+  - name: entitlements
+    method: POST
+    path: /sdwan/v2.0/api/operators/{operator_id}/sessions/{session_id}/actionservice/appportal/api/v1/entitlements
+  - name: esp
+    path: /sdwan/v2.0/api/esp
+  - name: esp_operator_permissions
+    path: /sdwan/v2.0/api/operators/{operator_id}/clients/permissions
+  - name: esp_operator_permissions_client
+    path: /sdwan/v2.1/api/operators/{operator_id}/clients/{client_id}/permissions
+  - name: esp_operator_permissions_client.put
+    method: PUT
+    path: /sdwan/v2.1/api/operators/{operator_id}/clients/{client_id}/permissions
+  - name: esp_operator_permissions_client.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/operators/{operator_id}/clients/{client_id}/permissions
+  - name: eventcodes
+    path: /sdwan/v2.0/api/eventcodes
+  - name: eventcorrelationpolicyrules
+    path: /sdwan/v2.1/api/eventcorrelationpolicysets/{eventcorrelationpolicyset_id}/eventcorrelationpolicyrules
+  - name: eventcorrelationpolicyrules.one
+    path: /sdwan/v2.1/api/eventcorrelationpolicysets/{eventcorrelationpolicyset_id}/eventcorrelationpolicyrules/{eventcorrelationpolicyrule_id}
+  - name: eventcorrelationpolicyrules.post
+    method: POST
+    path: /sdwan/v2.1/api/eventcorrelationpolicysets/{eventcorrelationpolicyset_id}/eventcorrelationpolicyrules
+  - name: eventcorrelationpolicyrules.put
+    method: PUT
+    path: /sdwan/v2.1/api/eventcorrelationpolicysets/{eventcorrelationpolicyset_id}/eventcorrelationpolicyrules/{eventcorrelationpolicyrule_id}
+  - name: eventcorrelationpolicyrules.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/eventcorrelationpolicysets/{eventcorrelationpolicyset_id}/eventcorrelationpolicyrules/{eventcorrelationpolicyrule_id}
+  - name: eventcorrelationpolicyrules_query
+    method: POST
+    path: /sdwan/v2.1/api/eventcorrelationpolicyrules/query
+  - name: eventcorrelationpolicysets
+    path: /sdwan/v2.0/api/eventcorrelationpolicysets
+  - name: eventcorrelationpolicysets.one
+    path: /sdwan/v2.0/api/eventcorrelationpolicysets/{eventcorrelationpolicyset_id}
+  - name: eventcorrelationpolicysets.post
+    method: POST
+    path: /sdwan/v2.0/api/eventcorrelationpolicysets
+  - name: eventcorrelationpolicysets.put
+    method: PUT
+    path: /sdwan/v2.0/api/eventcorrelationpolicysets/{eventcorrelationpolicyset_id}
+  - name: eventcorrelationpolicysets.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/eventcorrelationpolicysets/{eventcorrelationpolicyset_id}
+  - name: eventcorrelationpolicysets_query
+    method: POST
+    path: /sdwan/v2.0/api/eventcorrelationpolicysets/query
+  - name: events
+    path: /sdwan/v2.4/api/events/{event_id}
+  - name: events.put
+    method: PUT
+    path: /sdwan/v2.4/api/events/{event_id}
+  - name: events_operations
+    method: POST
+    path: /sdwan/v2.0/api/events/operations
+  - name: events_query
+    method: POST
+    path: /sdwan/v3.7/api/events/query
+  - name: events_summary
+    method: POST
+    path: /sdwan/v2.1/api/events/summary
+  - name: externalcaconfigs
+    path: /sdwan/v2.0/api/externalcaconfigs
+  - name: externalcaconfigs.one
+    path: /sdwan/v2.0/api/externalcaconfigs/{externalcaconfig_id}
+  - name: externalcaconfigs.post
+    method: POST
+    path: /sdwan/v2.0/api/externalcaconfigs
+  - name: externalcaconfigs.put
+    method: PUT
+    path: /sdwan/v2.0/api/externalcaconfigs/{externalcaconfig_id}
+  - name: externalcaconfigs.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/externalcaconfigs/{externalcaconfig_id}
+  - name: fips_mode_change_operations
+    method: POST
+    path: /sdwan/v2.1/api/elements/{element_id}/fips_mode_change_operations
+  - name: flowexport_status
+    path: /sdwan/v2.0/api/sites/{site_id}/flowexport_status
+  - name: globalprefixfilters
+    path: /sdwan/v2.0/api/globalprefixfilters
+  - name: globalprefixfilters.one
+    path: /sdwan/v2.0/api/globalprefixfilters/{globalprefixfilter_id}
+  - name: globalprefixfilters.post
+    method: POST
+    path: /sdwan/v2.0/api/globalprefixfilters
+  - name: globalprefixfilters.put
+    method: PUT
+    path: /sdwan/v2.0/api/globalprefixfilters/{globalprefixfilter_id}
+  - name: globalprefixfilters.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/globalprefixfilters/{globalprefixfilter_id}
+  - name: globalprefixfilters_query
+    method: POST
+    path: /sdwan/v2.0/api/globalprefixfilters/query
+  - name: hardwarebypass
+    path: /sdwan/v2.0/api/elements/{element_id}/hardwarebypass
+  - name: hubcluster_status
+    path: /sdwan/v4.0/api/sites/{site_id}/hubclusters/{hubcluster_id}/status
+  - name: hubclustermember_status
+    path: /sdwan/v3.0/api/sites/{site_id}/hubclusters/{hubcluster_id}/hubclustermembers/{hubclustermember_id}/status
+  - name: hubclustermembers
+    path: /sdwan/v3.0/api/sites/{site_id}/hubclusters/{hubcluster_id}/hubclustermembers
+  - name: hubclustermembers.one
+    path: /sdwan/v3.0/api/sites/{site_id}/hubclusters/{hubcluster_id}/hubclustermembers/{hubclustermember_id}
+  - name: hubclustermembers.post
+    method: POST
+    path: /sdwan/v3.0/api/sites/{site_id}/hubclusters/{hubcluster_id}/hubclustermembers
+  - name: hubclustermembers.put
+    method: PUT
+    path: /sdwan/v3.0/api/sites/{site_id}/hubclusters/{hubcluster_id}/hubclustermembers/{hubclustermember_id}
+  - name: hubclustermembers.delete
+    method: DELETE
+    path: /sdwan/v3.0/api/sites/{site_id}/hubclusters/{hubcluster_id}/hubclustermembers/{hubclustermember_id}
+  - name: hubclusters
+    path: /sdwan/v4.0/api/sites/{site_id}/hubclusters
+  - name: hubclusters.one
+    path: /sdwan/v4.0/api/sites/{site_id}/hubclusters/{hubcluster_id}
+  - name: hubclusters.post
+    method: POST
+    path: /sdwan/v4.0/api/sites/{site_id}/hubclusters
+  - name: hubclusters.put
+    method: PUT
+    path: /sdwan/v4.0/api/sites/{site_id}/hubclusters/{hubcluster_id}
+  - name: hubclusters.delete
+    method: DELETE
+    path: /sdwan/v4.0/api/sites/{site_id}/hubclusters/{hubcluster_id}
+  - name: hubclusters_operations
+    method: POST
+    path: /sdwan/v4.0/api/sites/{site_id}/hubclusters/{hubcluster_id}/operations
+  - name: hubclusters_query
+    method: POST
+    path: /sdwan/v4.0/api/hubclusters/query
+  - name: idps
+    path: /sdwan/v3.3/api/idps
+  - name: idps.one
+    path: /sdwan/v3.3/api/idps/{idp_id}
+  - name: idps.put
+    method: PUT
+    path: /sdwan/v3.3/api/idps/{idp_id}
+  - name: idps.delete
+    method: DELETE
+    path: /sdwan/v3.3/api/idps/{idp_id}
+  - name: interface_authentication_status
+    path: /sdwan/v2.0/api/elements/{element_id}/interface_authentication/status
+  - name: interface_multicastigmpmemberships
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}/multicastigmpmemberships
+  - name: interface_multicastigmpmemberships.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}/multicastigmpmemberships/{multicastigmpmembership_id}
+  - name: interfaces
+    path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces
+  - name: interfaces.one
+    path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}
+  - name: interfaces.post
+    method: POST
+    path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces
+  - name: interfaces.put
+    method: PUT
+    path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}
+  - name: interfaces.delete
+    method: DELETE
+    path: /sdwan/v4.21/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}
+  - name: interfaces_correlationevents
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}/correlationevents
+  - name: interfaces_correlationevents_query
+    method: POST
+    path: /sdwan/v2.1/api/interfaces/correlationevents/query
+  - name: interfaces_multicaststatus
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}/multicaststatus
+  - name: interfaces_operations
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}/operations
+  - name: interfaces_query
+    method: POST
+    path: /sdwan/v4.21/api/interfaces/query
+  - name: interfaces_status
+    path: /sdwan/v3.9/api/sites/{site_id}/elements/{element_id}/interfaces/{interface_id}/status
+  - name: interfaces_status_query
+    method: POST
+    path: /sdwan/v2.0/api/interfaces/status/query
+  - name: iotdevicemappings
+    path: /sdwan/v2.0/api/iotdevicemappings/{iotdevicemapping_id}
+  - name: iotdevicemappings_query
+    method: POST
+    path: /sdwan/v2.0/api/iotdevicemappings/query
+  - name: iotdictionary
+    path: /sdwan/v2.0/api/iotdictionary
+  - name: iotdictionary.one
+    path: /sdwan/v2.0/api/iotdictionary/{iotdictionary_id}
+  - name: iotdictionary_query
+    method: POST
+    path: /sdwan/v2.0/api/iotdictionary/query
+  - name: iotservices
+    path: /sdwan/v2.0/api/iotservices
+  - name: iotservices.post
+    method: POST
+    path: /sdwan/v2.0/api/iotservices
+  - name: iotservices.put
+    method: PUT
+    path: /sdwan/v2.0/api/iotservices/{iotservice_id}
+  - name: ipfix
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/ipfix
+  - name: ipfix.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/ipfix/{ipfix_id}
+  - name: ipfix.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/ipfix
+  - name: ipfix.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/ipfix/{ipfix_id}
+  - name: ipfix.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/ipfix/{ipfix_id}
+  - name: ipfix_query
+    method: POST
+    path: /sdwan/v2.0/api/ipfix/query
+  - name: ipfixcollectorcontexts
+    path: /sdwan/v2.0/api/ipfixcollectorcontexts
+  - name: ipfixcollectorcontexts.one
+    path: /sdwan/v2.0/api/ipfixcollectorcontexts/{ipfixcollectorcontext_id}
+  - name: ipfixcollectorcontexts.post
+    method: POST
+    path: /sdwan/v2.0/api/ipfixcollectorcontexts
+  - name: ipfixcollectorcontexts.put
+    method: PUT
+    path: /sdwan/v2.0/api/ipfixcollectorcontexts/{ipfixcollectorcontext_id}
+  - name: ipfixcollectorcontexts.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/ipfixcollectorcontexts/{ipfixcollectorcontext_id}
+  - name: ipfixcollectorcontexts_query
+    method: POST
+    path: /sdwan/v2.0/api/ipfixcollectorcontexts/query
+  - name: ipfixfiltercontexts
+    path: /sdwan/v2.0/api/ipfixfiltercontexts
+  - name: ipfixfiltercontexts.one
+    path: /sdwan/v2.0/api/ipfixfiltercontexts/{ipfixfiltercontext_id}
+  - name: ipfixfiltercontexts.post
+    method: POST
+    path: /sdwan/v2.0/api/ipfixfiltercontexts
+  - name: ipfixfiltercontexts.put
+    method: PUT
+    path: /sdwan/v2.0/api/ipfixfiltercontexts/{ipfixfiltercontext_id}
+  - name: ipfixfiltercontexts.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/ipfixfiltercontexts/{ipfixfiltercontext_id}
+  - name: ipfixfiltercontexts_query
+    method: POST
+    path: /sdwan/v2.0/api/ipfixfiltercontexts/query
+  - name: ipfixglobalprefixes
+    path: /sdwan/v2.0/api/ipfixglobalprefixes
+  - name: ipfixglobalprefixes.one
+    path: /sdwan/v2.0/api/ipfixglobalprefixes/{ipfixglobalprefix_id}
+  - name: ipfixglobalprefixes.post
+    method: POST
+    path: /sdwan/v2.0/api/ipfixglobalprefixes
+  - name: ipfixglobalprefixes.put
+    method: PUT
+    path: /sdwan/v2.0/api/ipfixglobalprefixes/{ipfixglobalprefix_id}
+  - name: ipfixglobalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/ipfixglobalprefixes/{ipfixglobalprefix_id}
+  - name: ipfixglobalprefixes_query
+    method: POST
+    path: /sdwan/v2.0/api/ipfixglobalprefixes/query
+  - name: ipfixlocalprefixes_query
+    method: POST
+    path: /sdwan/v2.0/api/ipfixlocalprefixes/query
+  - name: ipfixprofiles
+    path: /sdwan/v2.0/api/ipfixprofiles
+  - name: ipfixprofiles.one
+    path: /sdwan/v2.0/api/ipfixprofiles/{ipfixprofile_id}
+  - name: ipfixprofiles.post
+    method: POST
+    path: /sdwan/v2.0/api/ipfixprofiles
+  - name: ipfixprofiles.put
+    method: PUT
+    path: /sdwan/v2.0/api/ipfixprofiles/{ipfixprofile_id}
+  - name: ipfixprofiles.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/ipfixprofiles/{ipfixprofile_id}
+  - name: ipfixprofiles_query
+    method: POST
+    path: /sdwan/v2.0/api/ipfixprofiles/query
+  - name: ipfixtemplates
+    path: /sdwan/v2.0/api/ipfixtemplates
+  - name: ipfixtemplates.one
+    path: /sdwan/v2.0/api/ipfixtemplates/{ipfixtemplate_id}
+  - name: ipfixtemplates.post
+    method: POST
+    path: /sdwan/v2.0/api/ipfixtemplates
+  - name: ipfixtemplates.put
+    method: PUT
+    path: /sdwan/v2.0/api/ipfixtemplates/{ipfixtemplate_id}
+  - name: ipfixtemplates.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/ipfixtemplates/{ipfixtemplate_id}
+  - name: ipfixtemplates_query
+    method: POST
+    path: /sdwan/v2.0/api/ipfixtemplates/query
+  - name: ipsecprofiles
+    path: /sdwan/v2.3/api/ipsecprofiles
+  - name: ipsecprofiles.one
+    path: /sdwan/v2.3/api/ipsecprofiles/{ipsecprofile_id}
+  - name: ipsecprofiles.post
+    method: POST
+    path: /sdwan/v2.3/api/ipsecprofiles
+  - name: ipsecprofiles.put
+    method: PUT
+    path: /sdwan/v2.3/api/ipsecprofiles/{ipsecprofile_id}
+  - name: ipsecprofiles.delete
+    method: DELETE
+    path: /sdwan/v2.3/api/ipsecprofiles/{ipsecprofile_id}
+  - name: ipsecprofiles_query
+    method: POST
+    path: /sdwan/v2.3/api/ipsecprofiles/query
+  - name: lannetworks
+    path: /sdwan/v3.3/api/sites/{site_id}/lannetworks
+  - name: lannetworks.one
+    path: /sdwan/v3.3/api/sites/{site_id}/lannetworks/{lannetwork_id}
+  - name: lannetworks.post
+    method: POST
+    path: /sdwan/v3.3/api/sites/{site_id}/lannetworks
+  - name: lannetworks.put
+    method: PUT
+    path: /sdwan/v3.3/api/sites/{site_id}/lannetworks/{lannetwork_id}
+  - name: lannetworks.delete
+    method: DELETE
+    path: /sdwan/v3.3/api/sites/{site_id}/lannetworks/{lannetwork_id}
+  - name: lannetworks_query
+    method: POST
+    path: /sdwan/v3.3/api/lannetworks/query
+  - name: licenses
+    path: /sdwan/v2.0/api/licenses
+  - name: lldp_neighbors_status
+    path: /sdwan/v2.0/api/elements/{element_id}/lldp_neighbors/status
+  - name: localprefixfilters
+    path: /sdwan/v2.0/api/localprefixfilters
+  - name: localprefixfilters.one
+    path: /sdwan/v2.0/api/localprefixfilters/{localprefixfilter_id}
+  - name: localprefixfilters.post
+    method: POST
+    path: /sdwan/v2.0/api/localprefixfilters
+  - name: localprefixfilters.put
+    method: PUT
+    path: /sdwan/v2.0/api/localprefixfilters/{localprefixfilter_id}
+  - name: localprefixfilters.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/localprefixfilters/{localprefixfilter_id}
+  - name: localprefixfilters_query
+    method: POST
+    path: /sdwan/v2.0/api/localprefixfilters/query
+  - name: localprefixset
+    path: /sdwan/v2.0/api/sites/{site_id}/localprefixset
+  - name: login
+    path: /sdwan/v2.0/api/login
+  - name: login.post
+    method: POST
+    path: /sdwan/v2.0/api/login
+  - name: logout
+    path: /sdwan/v2.0/api/logout
+  - name: mac_addresses_status
+    path: /sdwan/v2.0/api/elements/{element_id}/mac_addresses/status
+  - name: machine_cellular_modules
+    path: /sdwan/v2.0/api/machines/{machine_id}/cellular_modules
+  - name: machine_cellular_modules.one
+    path: /sdwan/v2.0/api/machines/{machine_id}/cellular_modules/{cellular_module_id}
+  - name: machine_cellular_modules_firmware
+    path: /sdwan/v2.0/api/machines/{machine_id}/cellular_modules/{cellular_module_id}/firmware
+  - name: machine_cellular_modules_firmware.put
+    method: PUT
+    path: /sdwan/v2.0/api/machines/{machine_id}/cellular_modules/{cellular_module_id}/firmware
+  - name: machine_cellular_modules_firmware_status
+    path: /sdwan/v2.0/api/machines/{machine_id}/cellular_modules/{cellular_module_id}/firmware/status
+  - name: machine_cellular_modules_status
+    path: /sdwan/v2.0/api/machines/{machine_id}/cellular_modules/{cellular_module_id}/status
+  - name: machine_state
+    path: /sdwan/v2.1/api/machines/{machine_id}/state
+  - name: machine_upgrade_query
+    method: POST
+    path: /sdwan/v2.0/api/machine_upgrade/query
+  - name: machines
+    path: /sdwan/v2.5/api/machines
+  - name: machines.one
+    path: /sdwan/v2.5/api/machines/{machine_id}
+  - name: machines_allocate_to_shell
+    method: POST
+    path: /sdwan/v2.0/api/machines/{machine_id}/allocate_to_shell
+  - name: machines_query
+    method: POST
+    path: /sdwan/v2.5/api/machines/query
+  - name: machines_software_status
+    path: /sdwan/v2.0/api/machines/{machine_id}/software/{software_id}/status
+  - name: machines_software_status.one
+    path: /sdwan/v2.0/api/machines/{machine_id}/software/{software_id}/status/{status_id}
+  - name: machinesystemstatus
+    path: /sdwan/v2.1/api/machines/{machine_id}/machinesystemstatus
+  - name: migratecbtoezb
+    path: /sdwan/v2.0/api/migratecbtoezb
+  - name: migratecbtoezb.post
+    method: POST
+    path: /sdwan/v2.0/api/migratecbtoezb
+  - name: monitor_aaa_client_metrics
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/aaa_client_metrics
+  - name: monitor_aaa_metrics
+    path: /sdwan/monitor/v2.0/api/monitor/aaa_metrics
+  - name: monitor_aaa_metrics.post
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/aaa_metrics
+  - name: monitor_aaa_metrics_topn
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/aaa_metrics/topn
+  - name: monitor_agg_bw_stats
+    path: /sdwan/monitor/v2.0/api/monitor/agg_bw_stats
+  - name: monitor_agg_bw_stats.post
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/agg_bw_stats
+  - name: monitor_aggregatebandwidth_query
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/aggregatebandwidth/query
+  - name: monitor_aggregates
+    path: /sdwan/monitor/v3.0/api/monitor/aggregates
+  - name: monitor_aggregates.post
+    method: POST
+    path: /sdwan/monitor/v3.0/api/monitor/aggregates
+  - name: monitor_aggregates_application_qos
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/aggregates/application/qos
+  - name: monitor_aggregates_healthscore
+    method: POST
+    path: /sdwan/monitor/v2.1/api/monitor/aggregates/healthscore
+  - name: monitor_aggregates_multicast_mroute
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/aggregates/multicast/mroute
+  - name: monitor_aggregates_multicast_wan_neighbor
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/aggregates/multicast/wan_neighbor
+  - name: monitor_aiops_aggregates
+    path: /sdwan/monitor/v2.1/api/monitor/aiops/aggregates
+  - name: monitor_aiops_aggregates.post
+    method: POST
+    path: /sdwan/monitor/v2.1/api/monitor/aiops/aggregates
+  - name: monitor_aiops_anomaly
+    path: /sdwan/monitor/v2.0/api/monitor/aiops/anomaly
+  - name: monitor_aiops_anomaly.post
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/aiops/anomaly
+  - name: monitor_aiops_forecast
+    path: /sdwan/monitor/v2.1/api/monitor/aiops/forecast
+  - name: monitor_aiops_forecast.post
+    method: POST
+    path: /sdwan/monitor/v2.1/api/monitor/aiops/forecast
+  - name: monitor_aiops_health
+    path: /sdwan/monitor/v2.0/api/monitor/aiops/health
+  - name: monitor_aiops_health.post
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/aiops/health
+  - name: monitor_aiops_object_stats
+    path: /sdwan/monitor/v2.1/api/monitor/aiops/object_stats
+  - name: monitor_aiops_object_stats.post
+    method: POST
+    path: /sdwan/monitor/v2.1/api/monitor/aiops/object_stats
+  - name: monitor_aiops_topn
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/aiops/topn
+  - name: monitor_app_acceleration
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/app_acceleration
+  - name: monitor_application_qos_metrics
+    path: /sdwan/monitor/v2.0/api/monitor/application/qos_metrics/{qos_metric_id}
+  - name: monitor_application_qos_metrics.post
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/application/qos_metrics
+  - name: monitor_application_users
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/application/users
+  - name: monitor_applicationstats_query
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/applicationstats/query
+  - name: monitor_applicationsummary_query
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/applicationsummary/query
+  - name: monitor_bulk_metrics
+    path: /sdwan/monitor/v2.0/api/monitor/bulk_metrics/{bulk_metric_id}
+  - name: monitor_bulk_metrics.post
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/bulk_metrics
+  - name: monitor_cellular_metrics
+    path: /sdwan/monitor/v2.1/api/monitor/cellular_metrics
+  - name: monitor_cellular_metrics.post
+    method: POST
+    path: /sdwan/monitor/v2.1/api/monitor/cellular_metrics
+  - name: monitor_cellular_metrics_topn
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/cellular_metrics/topn
+  - name: monitor_flows
+    method: POST
+    path: /sdwan/monitor/v3.13/api/monitor/flows
+  - name: monitor_insights
+    method: POST
+    path: /sdwan/v2.0/api/monitor/insights
+  - name: monitor_insightslist
+    method: POST
+    path: /sdwan/v2.0/api/monitor/insightslist
+  - name: monitor_lqm_point_metrics
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/lqm_point_metrics
+  - name: monitor_metrics
+    path: /sdwan/monitor/v2.7/api/monitor/metrics/{metric_id}
+  - name: monitor_metrics.post
+    method: POST
+    path: /sdwan/monitor/v2.7/api/monitor/metrics
+  - name: monitor_metrics_probes
+    path: /sdwan/monitor/v2.0/api/monitor/metrics/probes/{probe_id}
+  - name: monitor_metrics_probes.post
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/metrics/probes
+  - name: monitor_network_point_metrics
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/network_point_metrics
+  - name: monitor_network_point_metrics_bw
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/network_point_metrics_bw
+  - name: monitor_network_point_metrics_hs
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/network_point_metrics_hs
+  - name: monitor_object_stats
+    path: /sdwan/monitor/v2.7/api/monitor/object_stats
+  - name: monitor_object_stats.post
+    method: POST
+    path: /sdwan/monitor/v2.7/api/monitor/object_stats
+  - name: monitor_probe_point_metrics
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/probe_point_metrics
+  - name: monitor_qos_metrics
+    path: /sdwan/monitor/v2.0/api/monitor/qos_metrics
+  - name: monitor_qos_metrics.post
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/qos_metrics
+  - name: monitor_sys_metrics
+    path: /sdwan/monitor/v2.4/api/monitor/sys_metrics
+  - name: monitor_sys_metrics.post
+    method: POST
+    path: /sdwan/monitor/v2.4/api/monitor/sys_metrics
+  - name: monitor_sys_metrics_topn
+    method: POST
+    path: /sdwan/monitor/v2.1/api/monitor/sys_metrics/topn
+  - name: monitor_sys_point_metrics
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/sys_point_metrics
+  - name: monitor_topn
+    method: POST
+    path: /sdwan/monitor/v3.1/api/monitor/topn
+  - name: monitor_topn_traffic_vol_query
+    method: POST
+    path: /sdwan/monitor/v2.0/api/monitor/topn_traffic_vol/query
+  - name: mstp_instances
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/mstp_instances
+  - name: mstp_instances.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/mstp_instances/{mstp_instance_id}
+  - name: mstp_instances.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/mstp_instances
+  - name: mstp_instances.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/mstp_instances/{mstp_instance_id}
+  - name: mstp_instances.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/mstp_instances/{mstp_instance_id}
+  - name: mstp_instances_query
+    method: POST
+    path: /sdwan/v2.0/api/mstp_instances/query
+  - name: mstp_instances_status
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/mstp_instances/{mstp_instance_id}/status
+  - name: multicastdynamicrps
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/multicastdynamicrps
+  - name: multicastdynamicrps.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/multicastdynamicrps/{multicastdynamicrp_id}
+  - name: multicastdynamicrps_query
+    method: POST
+    path: /sdwan/v2.0/api/multicastdynamicrps/query
+  - name: multicastglobalconfigs
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/multicastglobalconfigs
+  - name: multicastglobalconfigs.one
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/multicastglobalconfigs/{multicastglobalconfig_id}
+  - name: multicastglobalconfigs.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/multicastglobalconfigs/{multicastglobalconfig_id}
+  - name: multicastigmpmemberships_query
+    method: POST
+    path: /sdwan/v2.0/api/multicastigmpmemberships/query
+  - name: multicastpeergroups
+    path: /sdwan/v2.1/api/multicastpeergroups
+  - name: multicastpeergroups.one
+    path: /sdwan/v2.1/api/multicastpeergroups/{multicastpeergroup_id}
+  - name: multicastpeergroups.post
+    method: POST
+    path: /sdwan/v2.1/api/multicastpeergroups
+  - name: multicastpeergroups.put
+    method: PUT
+    path: /sdwan/v2.1/api/multicastpeergroups/{multicastpeergroup_id}
+  - name: multicastpeergroups.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/multicastpeergroups/{multicastpeergroup_id}
+  - name: multicastprotocolparameters
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/multicastprotocolparameters
+  - name: multicastroutes
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/multicastroutes
+  - name: multicastroutes_query
+    method: POST
+    path: /sdwan/v2.0/api/multicastroutes/query
+  - name: multicastrps
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/multicastrps
+  - name: multicastrps.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/multicastrps/{multicastrp_id}
+  - name: multicastrps.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/multicastrps
+  - name: multicastrps.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/multicastrps/{multicastrp_id}
+  - name: multicastrps.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/multicastrps/{multicastrp_id}
+  - name: multicastrps_query
+    method: POST
+    path: /sdwan/v2.0/api/multicastrps/query
+  - name: multicastsourcesiderps
+    path: /sdwan/v2.0/api/sites/{site_id}/multicastsourcesiderps
+  - name: multicastsourcesiderps.one
+    path: /sdwan/v2.0/api/sites/{site_id}/multicastsourcesiderps/{multicastsourcesiderp_id}
+  - name: multicastsourcesiderps_query
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/multicastsourcesiderps/query
+  - name: multicastsourcesiteconfigs
+    path: /sdwan/v2.0/api/sites/{site_id}/multicastsourcesiteconfigs
+  - name: multicastsourcesiteconfigs.one
+    path: /sdwan/v2.0/api/sites/{site_id}/multicastsourcesiteconfigs/{multicastsourcesiteconfig_id}
+  - name: multicastsourcesiteconfigs.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/multicastsourcesiteconfigs
+  - name: multicastsourcesiteconfigs.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/multicastsourcesiteconfigs/{multicastsourcesiteconfig_id}
+  - name: multicastsourcesiteconfigs.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/multicastsourcesiteconfigs/{multicastsourcesiteconfig_id}
+  - name: multicaststatus_query
+    method: POST
+    path: /sdwan/v2.0/api/multicaststatus/query
+  - name: multicastwanstatus
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/multicastwanstatus
+  - name: multicastwanstatus.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/multicastwanstatus/{multicastwanstatus_id}
+  - name: multicastwanstatus_query
+    method: POST
+    path: /sdwan/v2.0/api/multicastwanstatus/query
+  - name: natglobalprefixes
+    path: /sdwan/v2.0/api/natglobalprefixes
+  - name: natglobalprefixes.one
+    path: /sdwan/v2.0/api/natglobalprefixes/{natglobalprefix_id}
+  - name: natglobalprefixes.post
+    method: POST
+    path: /sdwan/v2.0/api/natglobalprefixes
+  - name: natglobalprefixes.put
+    method: PUT
+    path: /sdwan/v2.0/api/natglobalprefixes/{natglobalprefix_id}
+  - name: natglobalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/natglobalprefixes/{natglobalprefix_id}
+  - name: natglobalprefixes_query
+    method: POST
+    path: /sdwan/v2.0/api/natglobalprefixes/query
+  - name: natlocalprefixes
+    path: /sdwan/v2.0/api/natlocalprefixes
+  - name: natlocalprefixes.one
+    path: /sdwan/v2.0/api/natlocalprefixes/{natlocalprefix_id}
+  - name: natlocalprefixes.post
+    method: POST
+    path: /sdwan/v2.0/api/natlocalprefixes
+  - name: natlocalprefixes.put
+    method: PUT
+    path: /sdwan/v2.0/api/natlocalprefixes/{natlocalprefix_id}
+  - name: natlocalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/natlocalprefixes/{natlocalprefix_id}
+  - name: natlocalprefixes_query
+    method: POST
+    path: /sdwan/v2.0/api/natlocalprefixes/query
+  - name: natpolicypools
+    path: /sdwan/v2.0/api/natpolicypools
+  - name: natpolicypools.one
+    path: /sdwan/v2.0/api/natpolicypools/{natpolicypool_id}
+  - name: natpolicypools.post
+    method: POST
+    path: /sdwan/v2.0/api/natpolicypools
+  - name: natpolicypools.put
+    method: PUT
+    path: /sdwan/v2.0/api/natpolicypools/{natpolicypool_id}
+  - name: natpolicypools.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/natpolicypools/{natpolicypool_id}
+  - name: natpolicypools_query
+    method: POST
+    path: /sdwan/v2.0/api/natpolicypools/query
+  - name: natpolicyrules
+    path: /sdwan/v2.0/api/natpolicysets/{natpolicyset_id}/natpolicyrules
+  - name: natpolicyrules.one
+    path: /sdwan/v2.0/api/natpolicysets/{natpolicyset_id}/natpolicyrules/{natpolicyrule_id}
+  - name: natpolicyrules.post
+    method: POST
+    path: /sdwan/v2.0/api/natpolicysets/{natpolicyset_id}/natpolicyrules
+  - name: natpolicyrules.put
+    method: PUT
+    path: /sdwan/v2.0/api/natpolicysets/{natpolicyset_id}/natpolicyrules/{natpolicyrule_id}
+  - name: natpolicyrules.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/natpolicysets/{natpolicyset_id}/natpolicyrules/{natpolicyrule_id}
+  - name: natpolicyrules_query
+    method: POST
+    path: /sdwan/v2.0/api/natpolicyrules/query
+  - name: natpolicysets
+    path: /sdwan/v2.0/api/natpolicysets
+  - name: natpolicysets.one
+    path: /sdwan/v2.0/api/natpolicysets/{natpolicyset_id}
+  - name: natpolicysets.post
+    method: POST
+    path: /sdwan/v2.0/api/natpolicysets
+  - name: natpolicysets.put
+    method: PUT
+    path: /sdwan/v2.0/api/natpolicysets/{natpolicyset_id}
+  - name: natpolicysets.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/natpolicysets/{natpolicyset_id}
+  - name: natpolicysets_query
+    method: POST
+    path: /sdwan/v2.0/api/natpolicysets/query
+  - name: natpolicysets_status
+    path: /sdwan/v2.0/api/natpolicysets/{natpolicyset_id}/status
+  - name: natpolicysetstacks
+    path: /sdwan/v2.0/api/natpolicysetstacks
+  - name: natpolicysetstacks.one
+    path: /sdwan/v2.0/api/natpolicysetstacks/{natpolicysetstack_id}
+  - name: natpolicysetstacks.post
+    method: POST
+    path: /sdwan/v2.0/api/natpolicysetstacks
+  - name: natpolicysetstacks.put
+    method: PUT
+    path: /sdwan/v2.0/api/natpolicysetstacks/{natpolicysetstack_id}
+  - name: natpolicysetstacks.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/natpolicysetstacks/{natpolicysetstack_id}
+  - name: natpolicysetstacks_query
+    method: POST
+    path: /sdwan/v2.0/api/natpolicysetstacks/query
+  - name: natzones
+    path: /sdwan/v2.0/api/natzones
+  - name: natzones.one
+    path: /sdwan/v2.0/api/natzones/{natzone_id}
+  - name: natzones.post
+    method: POST
+    path: /sdwan/v2.0/api/natzones
+  - name: natzones.put
+    method: PUT
+    path: /sdwan/v2.0/api/natzones/{natzone_id}
+  - name: natzones.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/natzones/{natzone_id}
+  - name: natzones_query
+    method: POST
+    path: /sdwan/v2.0/api/natzones/query
+  - name: networkcontexts
+    path: /sdwan/v2.0/api/networkcontexts
+  - name: networkcontexts.one
+    path: /sdwan/v2.0/api/networkcontexts/{networkcontext_id}
+  - name: networkcontexts.post
+    method: POST
+    path: /sdwan/v2.0/api/networkcontexts
+  - name: networkcontexts.put
+    method: PUT
+    path: /sdwan/v2.0/api/networkcontexts/{networkcontext_id}
+  - name: networkcontexts.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/networkcontexts/{networkcontext_id}
+  - name: networkcontexts_query
+    method: POST
+    path: /sdwan/v2.0/api/networkcontexts/query
+  - name: networkpolicyglobalprefixes
+    path: /sdwan/v2.1/api/networkpolicyglobalprefixes
+  - name: networkpolicyglobalprefixes.one
+    path: /sdwan/v2.1/api/networkpolicyglobalprefixes/{networkpolicyglobalprefix_id}
+  - name: networkpolicyglobalprefixes.post
+    method: POST
+    path: /sdwan/v2.1/api/networkpolicyglobalprefixes
+  - name: networkpolicyglobalprefixes.put
+    method: PUT
+    path: /sdwan/v2.1/api/networkpolicyglobalprefixes/{networkpolicyglobalprefix_id}
+  - name: networkpolicyglobalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/networkpolicyglobalprefixes/{networkpolicyglobalprefix_id}
+  - name: networkpolicyglobalprefixes_query
+    method: POST
+    path: /sdwan/v2.1/api/networkpolicyglobalprefixes/query
+  - name: networkpolicylocalprefixes_query
+    method: POST
+    path: /sdwan/v2.1/api/networkpolicylocalprefixes/query
+  - name: networkpolicyrules
+    path: /sdwan/v2.5/api/networkpolicysets/{networkpolicyset_id}/networkpolicyrules
+  - name: networkpolicyrules.one
+    path: /sdwan/v2.5/api/networkpolicysets/{networkpolicyset_id}/networkpolicyrules/{networkpolicyrule_id}
+  - name: networkpolicyrules.post
+    method: POST
+    path: /sdwan/v2.5/api/networkpolicysets/{networkpolicyset_id}/networkpolicyrules
+  - name: networkpolicyrules.put
+    method: PUT
+    path: /sdwan/v2.5/api/networkpolicysets/{networkpolicyset_id}/networkpolicyrules/{networkpolicyrule_id}
+  - name: networkpolicyrules.delete
+    method: DELETE
+    path: /sdwan/v2.5/api/networkpolicysets/{networkpolicyset_id}/networkpolicyrules/{networkpolicyrule_id}
+  - name: networkpolicyrules_query
+    method: POST
+    path: /sdwan/v2.5/api/networkpolicyrules/query
+  - name: networkpolicysets
+    path: /sdwan/v2.0/api/networkpolicysets
+  - name: networkpolicysets.one
+    path: /sdwan/v2.0/api/networkpolicysets/{networkpolicyset_id}
+  - name: networkpolicysets.post
+    method: POST
+    path: /sdwan/v2.0/api/networkpolicysets
+  - name: networkpolicysets.put
+    method: PUT
+    path: /sdwan/v2.0/api/networkpolicysets/{networkpolicyset_id}
+  - name: networkpolicysets.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/networkpolicysets/{networkpolicyset_id}
+  - name: networkpolicysets_query
+    method: POST
+    path: /sdwan/v2.0/api/networkpolicysets/query
+  - name: networkpolicysets_status
+    path: /sdwan/v2.0/api/networkpolicysets/{networkpolicyset_id}/status
+  - name: networkpolicysetstacks
+    path: /sdwan/v2.0/api/networkpolicysetstacks
+  - name: networkpolicysetstacks.one
+    path: /sdwan/v2.0/api/networkpolicysetstacks/{networkpolicysetstack_id}
+  - name: networkpolicysetstacks.post
+    method: POST
+    path: /sdwan/v2.0/api/networkpolicysetstacks
+  - name: networkpolicysetstacks.put
+    method: PUT
+    path: /sdwan/v2.0/api/networkpolicysetstacks/{networkpolicysetstack_id}
+  - name: networkpolicysetstacks.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/networkpolicysetstacks/{networkpolicysetstack_id}
+  - name: networkpolicysetstacks_query
+    method: POST
+    path: /sdwan/v2.0/api/networkpolicysetstacks/query
+  - name: networks_bulk_config_state_query
+    method: POST
+    path: /sdwan/v2.0/api/networks/bulk_config_state/query
+  - name: ngfwsecuritypolicyglobalprefixes
+    path: /sdwan/v2.1/api/ngfwsecuritypolicyglobalprefixes
+  - name: ngfwsecuritypolicyglobalprefixes.one
+    path: /sdwan/v2.1/api/ngfwsecuritypolicyglobalprefixes/{ngfwsecuritypolicyglobalprefix_id}
+  - name: ngfwsecuritypolicyglobalprefixes.post
+    method: POST
+    path: /sdwan/v2.1/api/ngfwsecuritypolicyglobalprefixes
+  - name: ngfwsecuritypolicyglobalprefixes.put
+    method: PUT
+    path: /sdwan/v2.1/api/ngfwsecuritypolicyglobalprefixes/{ngfwsecuritypolicyglobalprefix_id}
+  - name: ngfwsecuritypolicyglobalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/ngfwsecuritypolicyglobalprefixes/{ngfwsecuritypolicyglobalprefix_id}
+  - name: ngfwsecuritypolicyglobalprefixes_query
+    method: POST
+    path: /sdwan/v2.1/api/ngfwsecuritypolicyglobalprefixes/query
+  - name: ngfwsecuritypolicylocalprefixes
+    path: /sdwan/v2.0/api/ngfwsecuritypolicylocalprefixes
+  - name: ngfwsecuritypolicylocalprefixes.one
+    path: /sdwan/v2.0/api/ngfwsecuritypolicylocalprefixes/{ngfwsecuritypolicylocalprefix_id}
+  - name: ngfwsecuritypolicylocalprefixes.post
+    method: POST
+    path: /sdwan/v2.0/api/ngfwsecuritypolicylocalprefixes
+  - name: ngfwsecuritypolicylocalprefixes.put
+    method: PUT
+    path: /sdwan/v2.0/api/ngfwsecuritypolicylocalprefixes/{ngfwsecuritypolicylocalprefix_id}
+  - name: ngfwsecuritypolicylocalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/ngfwsecuritypolicylocalprefixes/{ngfwsecuritypolicylocalprefix_id}
+  - name: ngfwsecuritypolicylocalprefixes_query
+    method: POST
+    path: /sdwan/v2.1/api/ngfwsecuritypolicylocalprefixes/query
+  - name: ngfwsecuritypolicyrules
+    path: /sdwan/v2.3/api/ngfwsecuritypolicysets/{ngfwsecuritypolicyset_id}/ngfwsecuritypolicyrules
+  - name: ngfwsecuritypolicyrules.one
+    path: /sdwan/v2.3/api/ngfwsecuritypolicysets/{ngfwsecuritypolicyset_id}/ngfwsecuritypolicyrules/{ngfwsecuritypolicyrule_id}
+  - name: ngfwsecuritypolicyrules.post
+    method: POST
+    path: /sdwan/v2.3/api/ngfwsecuritypolicysets/{ngfwsecuritypolicyset_id}/ngfwsecuritypolicyrules
+  - name: ngfwsecuritypolicyrules.put
+    method: PUT
+    path: /sdwan/v2.3/api/ngfwsecuritypolicysets/{ngfwsecuritypolicyset_id}/ngfwsecuritypolicyrules/{ngfwsecuritypolicyrule_id}
+  - name: ngfwsecuritypolicyrules.delete
+    method: DELETE
+    path: /sdwan/v2.3/api/ngfwsecuritypolicysets/{ngfwsecuritypolicyset_id}/ngfwsecuritypolicyrules/{ngfwsecuritypolicyrule_id}
+  - name: ngfwsecuritypolicyrules_query
+    method: POST
+    path: /sdwan/v2.3/api/ngfwsecuritypolicyrules/query
+  - name: ngfwsecuritypolicysets
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysets
+  - name: ngfwsecuritypolicysets.one
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysets/{ngfwsecuritypolicyset_id}
+  - name: ngfwsecuritypolicysets.post
+    method: POST
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysets
+  - name: ngfwsecuritypolicysets.put
+    method: PUT
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysets/{ngfwsecuritypolicyset_id}
+  - name: ngfwsecuritypolicysets.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysets/{ngfwsecuritypolicyset_id}
+  - name: ngfwsecuritypolicysets_query
+    method: POST
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysets/query
+  - name: ngfwsecuritypolicysetstacks
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysetstacks
+  - name: ngfwsecuritypolicysetstacks.one
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysetstacks/{ngfwsecuritypolicysetstack_id}
+  - name: ngfwsecuritypolicysetstacks.post
+    method: POST
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysetstacks
+  - name: ngfwsecuritypolicysetstacks.put
+    method: PUT
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysetstacks/{ngfwsecuritypolicysetstack_id}
+  - name: ngfwsecuritypolicysetstacks.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysetstacks/{ngfwsecuritypolicysetstack_id}
+  - name: ngfwsecuritypolicysetstacks_query
+    method: POST
+    path: /sdwan/v2.0/api/ngfwsecuritypolicysetstacks/query
+  - name: ntp
+    path: /sdwan/v2.1/api/elements/{element_id}/ntp
+  - name: ntp.one
+    path: /sdwan/v2.1/api/elements/{element_id}/ntp/{ntp_id}
+  - name: ntp.put
+    method: PUT
+    path: /sdwan/v2.1/api/elements/{element_id}/ntp/{ntp_id}
+  - name: ntp_status
+    path: /sdwan/v2.0/api/elements/{element_id}/ntp/{ntp_id}/status
+  - name: ntp_templates_operations
+    method: PUT
+    path: /sdwan/v2.0/api/ntp/templates/{template_id}/operations
+  - name: openapi
+    path: /sdwan/v2.0/api/openapi
+  - name: openapi_json
+    path: /sdwan/v2.0/api/openapi.json
+  - name: operator_sessions
+    path: /sdwan/v2.0/api/operators/{operator_id}/sessions
+  - name: operator_sessions.one
+    path: /sdwan/v2.0/api/operators/{operator_id}/sessions/{session_id}
+  - name: operator_sessions.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/operators/{operator_id}/sessions/{session_id}
+  - name: ospfconfigs
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/ospfconfigs
+  - name: ospfconfigs.one
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/ospfconfigs/{ospfconfig_id}
+  - name: ospfconfigs.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/ospfconfigs
+  - name: ospfconfigs.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/ospfconfigs/{ospfconfig_id}
+  - name: ospfconfigs.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/ospfconfigs/{ospfconfig_id}
+  - name: ospfconfigs_ospfdiscoveredneighbors
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/ospfconfigs/{ospfconfig_id}/ospfdiscoveredneighbors
+  - name: ospfconfigs_ospfreachableprefixes
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/ospfconfigs/{ospfconfig_id}/ospfreachableprefixes
+  - name: ospfconfigs_query
+    method: POST
+    path: /sdwan/v2.1/api/ospfconfigs/query
+  - name: ospfdiscoveredneighbors_query
+    method: POST
+    path: /sdwan/v2.0/api/ospfdiscoveredneighbors/query
+  - name: ospfglobalconfigs
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/ospfglobalconfigs
+  - name: ospfglobalconfigs.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/ospfglobalconfigs/{ospfglobalconfig_id}
+  - name: ospfglobalconfigs.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/ospfglobalconfigs/{ospfglobalconfig_id}
+  - name: ospfreachableprefixes_query
+    method: POST
+    path: /sdwan/v2.0/api/ospfreachableprefixes/query
+  - name: otpaccess
+    method: POST
+    path: /sdwan/v2.0/api/elements/{element_id}/otpaccess
+  - name: otpaccessconfigs
+    path: /sdwan/v2.0/api/otpaccessconfigs
+  - name: otpaccessconfigs.put
+    method: PUT
+    path: /sdwan/v2.0/api/otpaccessconfigs/{otpaccessconfig_id}
+  - name: pa_advertisedprefixes
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/pa_advertisedprefixes
+  - name: pa_reachableprefixes
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/pa_reachableprefixes
+  - name: panetworks
+    path: /sdwan/v2.0/api/panetworks
+  - name: panetworks.one
+    path: /sdwan/v2.0/api/panetworks/{panetwork_id}
+  - name: pasdwan_integration_status
+    path: /sdwan/v2.0/api/pasdwan_integration_status
+  - name: password_change
+    method: POST
+    path: /sdwan/v2.0/api/accounts/password/change
+  - name: pathgroups
+    path: /sdwan/v2.1/api/pathgroups
+  - name: pathgroups.one
+    path: /sdwan/v2.1/api/pathgroups/{pathgroup_id}
+  - name: pathgroups.post
+    method: POST
+    path: /sdwan/v2.1/api/pathgroups
+  - name: pathgroups.put
+    method: PUT
+    path: /sdwan/v2.1/api/pathgroups/{pathgroup_id}
+  - name: pathgroups.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/pathgroups/{pathgroup_id}
+  - name: pathgroups_query
+    method: POST
+    path: /sdwan/v2.1/api/pathgroups/query
+  - name: pathprefixdistributionfilterassociation
+    path: /sdwan/v2.0/api/sites/{site_id}/pathprefixdistributionfilterassociation
+  - name: pathprefixdistributionfilterassociation.one
+    path: /sdwan/v2.0/api/sites/{site_id}/pathprefixdistributionfilterassociation/{pathprefixdistributionfilterassociation_id}
+  - name: pathprefixdistributionfilterassociation.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/pathprefixdistributionfilterassociation
+  - name: pathprefixdistributionfilterassociation.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/pathprefixdistributionfilterassociation/{pathprefixdistributionfilterassociation_id}
+  - name: pathprefixdistributionfilterassociation.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/pathprefixdistributionfilterassociation/{pathprefixdistributionfilterassociation_id}
+  - name: pathprefixdistributionfilterassociation_query
+    method: POST
+    path: /sdwan/v2.0/api/pathprefixdistributionfilterassociation/query
+  - name: pathprefixdistributionfilters
+    path: /sdwan/v2.0/api/sites/{site_id}/pathprefixdistributionfilters
+  - name: pathprefixdistributionfilters.one
+    path: /sdwan/v2.0/api/sites/{site_id}/pathprefixdistributionfilters/{pathprefixdistributionfilter_id}
+  - name: pathprefixdistributionfilters.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/pathprefixdistributionfilters
+  - name: pathprefixdistributionfilters.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/pathprefixdistributionfilters/{pathprefixdistributionfilter_id}
+  - name: pathprefixdistributionfilters.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/pathprefixdistributionfilters/{pathprefixdistributionfilter_id}
+  - name: pathprefixdistributionfilters_query
+    method: POST
+    path: /sdwan/v2.0/api/pathprefixdistributionfilters/query
+  - name: peersites_pathprefixes
+    path: /sdwan/v2.0/api/sites/{site_id}/peersites/{peersite_id}/pathprefixes
+  - name: perfmgmtpolicyrules_query
+    method: POST
+    path: /sdwan/v2.3/api/perfmgmtpolicyrules/query
+  - name: perfmgmtpolicysets
+    path: /sdwan/v2.0/api/perfmgmtpolicysets
+  - name: perfmgmtpolicysets.one
+    path: /sdwan/v2.0/api/perfmgmtpolicysets/{perfmgmtpolicyset_id}
+  - name: perfmgmtpolicysets.post
+    method: POST
+    path: /sdwan/v2.0/api/perfmgmtpolicysets
+  - name: perfmgmtpolicysets.put
+    method: PUT
+    path: /sdwan/v2.0/api/perfmgmtpolicysets/{perfmgmtpolicyset_id}
+  - name: perfmgmtpolicysets.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/perfmgmtpolicysets/{perfmgmtpolicyset_id}
+  - name: perfmgmtpolicysets_perfmgmtpolicyrules
+    path: /sdwan/v2.3/api/perfmgmtpolicysets/{perfmgmtpolicyset_id}/perfmgmtpolicyrules
+  - name: perfmgmtpolicysets_perfmgmtpolicyrules.one
+    path: /sdwan/v2.3/api/perfmgmtpolicysets/{perfmgmtpolicyset_id}/perfmgmtpolicyrules/{perfmgmtpolicyrule_id}
+  - name: perfmgmtpolicysets_perfmgmtpolicyrules.post
+    method: POST
+    path: /sdwan/v2.3/api/perfmgmtpolicysets/{perfmgmtpolicyset_id}/perfmgmtpolicyrules
+  - name: perfmgmtpolicysets_perfmgmtpolicyrules.put
+    method: PUT
+    path: /sdwan/v2.3/api/perfmgmtpolicysets/{perfmgmtpolicyset_id}/perfmgmtpolicyrules/{perfmgmtpolicyrule_id}
+  - name: perfmgmtpolicysets_perfmgmtpolicyrules.delete
+    method: DELETE
+    path: /sdwan/v2.3/api/perfmgmtpolicysets/{perfmgmtpolicyset_id}/perfmgmtpolicyrules/{perfmgmtpolicyrule_id}
+  - name: perfmgmtpolicysets_query
+    method: POST
+    path: /sdwan/v2.0/api/perfmgmtpolicysets/query
+  - name: perfmgmtpolicysets_status
+    path: /sdwan/v2.0/api/perfmgmtpolicysets/{perfmgmtpolicyset_id}/status
+  - name: perfmgmtpolicysetstacks
+    path: /sdwan/v2.0/api/perfmgmtpolicysetstacks
+  - name: perfmgmtpolicysetstacks.one
+    path: /sdwan/v2.0/api/perfmgmtpolicysetstacks/{perfmgmtpolicysetstack_id}
+  - name: perfmgmtpolicysetstacks.post
+    method: POST
+    path: /sdwan/v2.0/api/perfmgmtpolicysetstacks
+  - name: perfmgmtpolicysetstacks.put
+    method: PUT
+    path: /sdwan/v2.0/api/perfmgmtpolicysetstacks/{perfmgmtpolicysetstack_id}
+  - name: perfmgmtpolicysetstacks.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/perfmgmtpolicysetstacks/{perfmgmtpolicysetstack_id}
+  - name: perfmgmtpolicysetstacks_query
+    method: POST
+    path: /sdwan/v2.0/api/perfmgmtpolicysetstacks/query
+  - name: perfmgmtthresholdprofiles
+    path: /sdwan/v2.1/api/perfmgmtthresholdprofiles
+  - name: perfmgmtthresholdprofiles.one
+    path: /sdwan/v2.1/api/perfmgmtthresholdprofiles/{perfmgmtthresholdprofile_id}
+  - name: perfmgmtthresholdprofiles.post
+    method: POST
+    path: /sdwan/v2.1/api/perfmgmtthresholdprofiles
+  - name: perfmgmtthresholdprofiles.put
+    method: PUT
+    path: /sdwan/v2.1/api/perfmgmtthresholdprofiles/{perfmgmtthresholdprofile_id}
+  - name: perfmgmtthresholdprofiles.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/perfmgmtthresholdprofiles/{perfmgmtthresholdprofile_id}
+  - name: perfmgmtthresholdprofiles_query
+    method: POST
+    path: /sdwan/v2.1/api/perfmgmtthresholdprofiles/query
+  - name: permissions
+    path: /sdwan/v2.0/api/permissions
+  - name: permissions.one
+    path: /sdwan/v2.0/api/permissions/{permission_id}
+  - name: policyrules
+    path: /sdwan/v3.1/api/policysets/{policyset_id}/policyrules
+  - name: policyrules.one
+    path: /sdwan/v3.1/api/policysets/{policyset_id}/policyrules/{policyrule_id}
+  - name: policyrules.post
+    method: POST
+    path: /sdwan/v3.1/api/policysets/{policyset_id}/policyrules
+  - name: policyrules.put
+    method: PUT
+    path: /sdwan/v3.1/api/policysets/{policyset_id}/policyrules/{policyrule_id}
+  - name: policyrules.delete
+    method: DELETE
+    path: /sdwan/v3.1/api/policysets/{policyset_id}/policyrules/{policyrule_id}
+  - name: policyrules_query
+    method: POST
+    path: /sdwan/v3.1/api/policyrules/query
+  - name: policysets
+    path: /sdwan/v3.0/api/policysets
+  - name: policysets.one
+    path: /sdwan/v3.0/api/policysets/{policyset_id}
+  - name: policysets.post
+    method: POST
+    path: /sdwan/v3.0/api/policysets
+  - name: policysets.put
+    method: PUT
+    path: /sdwan/v3.0/api/policysets/{policyset_id}
+  - name: policysets.delete
+    method: DELETE
+    path: /sdwan/v3.0/api/policysets/{policyset_id}
+  - name: policysets_bulk_config_state_query
+    method: POST
+    path: /sdwan/v2.0/api/policysets/bulk_config_state/query
+  - name: policysets_query
+    method: POST
+    path: /sdwan/v3.0/api/policysets/query
+  - name: policysets_status
+    path: /sdwan/v3.0/api/policysets/{policyset_id}/status
+  - name: port_vlan_members
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/port_vlan_members
+  - name: ppksecret_ipsecprofiles
+    method: POST
+    path: /sdwan/v2.3/api/ipsecprofiles/ppksecret
+  - name: pquery_incidentresources
+    method: POST
+    path: /sdwan/v2.0/api/incidentresources/pquery
+  - name: pquery_incidentsettings
+    method: POST
+    path: /sdwan/v2.0/api/incidentsettings/pquery
+  - name: prefixdistributionspokelists
+    path: /sdwan/v2.0/api/sites/{site_id}/prefixdistributionspokelists
+  - name: prefixdistributionspokelists.one
+    path: /sdwan/v2.0/api/sites/{site_id}/prefixdistributionspokelists/{prefixdistributionspokelist_id}
+  - name: prefixdistributionspokelists.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/prefixdistributionspokelists
+  - name: prefixdistributionspokelists.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/prefixdistributionspokelists/{prefixdistributionspokelist_id}
+  - name: prefixdistributionspokelists.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/prefixdistributionspokelists/{prefixdistributionspokelist_id}
+  - name: prefixes_query
+    method: POST
+    path: /sdwan/v3.1/api/prefixes/query
+  - name: prefixfilters
+    path: /sdwan/v2.0/api/sites/{site_id}/prefixfilters
+  - name: prefixfilters.one
+    path: /sdwan/v2.0/api/sites/{site_id}/prefixfilters/{prefixfilter_id}
+  - name: prefixfilters.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/prefixfilters
+  - name: prefixfilters.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/prefixfilters/{prefixfilter_id}
+  - name: prefixfilters.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/prefixfilters/{prefixfilter_id}
+  - name: prefixfilters_query
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/prefixfilters/query
+  - name: prioritypolicyglobalprefixes
+    path: /sdwan/v2.1/api/prioritypolicyglobalprefixes
+  - name: prioritypolicyglobalprefixes.one
+    path: /sdwan/v2.1/api/prioritypolicyglobalprefixes/{prioritypolicyglobalprefix_id}
+  - name: prioritypolicyglobalprefixes.post
+    method: POST
+    path: /sdwan/v2.1/api/prioritypolicyglobalprefixes
+  - name: prioritypolicyglobalprefixes.put
+    method: PUT
+    path: /sdwan/v2.1/api/prioritypolicyglobalprefixes/{prioritypolicyglobalprefix_id}
+  - name: prioritypolicyglobalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/prioritypolicyglobalprefixes/{prioritypolicyglobalprefix_id}
+  - name: prioritypolicyglobalprefixes_query
+    method: POST
+    path: /sdwan/v2.1/api/prioritypolicyglobalprefixes/query
+  - name: prioritypolicylocalprefixes_query
+    method: POST
+    path: /sdwan/v2.1/api/prioritypolicylocalprefixes/query
+  - name: prioritypolicyrules
+    path: /sdwan/v2.2/api/prioritypolicysets/{prioritypolicyset_id}/prioritypolicyrules
+  - name: prioritypolicyrules.one
+    path: /sdwan/v2.2/api/prioritypolicysets/{prioritypolicyset_id}/prioritypolicyrules/{prioritypolicyrule_id}
+  - name: prioritypolicyrules.post
+    method: POST
+    path: /sdwan/v2.2/api/prioritypolicysets/{prioritypolicyset_id}/prioritypolicyrules
+  - name: prioritypolicyrules.put
+    method: PUT
+    path: /sdwan/v2.2/api/prioritypolicysets/{prioritypolicyset_id}/prioritypolicyrules/{prioritypolicyrule_id}
+  - name: prioritypolicyrules.delete
+    method: DELETE
+    path: /sdwan/v2.2/api/prioritypolicysets/{prioritypolicyset_id}/prioritypolicyrules/{prioritypolicyrule_id}
+  - name: prioritypolicyrules_query
+    method: POST
+    path: /sdwan/v2.2/api/prioritypolicyrules/query
+  - name: prioritypolicysets
+    path: /sdwan/v2.0/api/prioritypolicysets
+  - name: prioritypolicysets.one
+    path: /sdwan/v2.0/api/prioritypolicysets/{prioritypolicyset_id}
+  - name: prioritypolicysets.post
+    method: POST
+    path: /sdwan/v2.0/api/prioritypolicysets
+  - name: prioritypolicysets.put
+    method: PUT
+    path: /sdwan/v2.0/api/prioritypolicysets/{prioritypolicyset_id}
+  - name: prioritypolicysets.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/prioritypolicysets/{prioritypolicyset_id}
+  - name: prioritypolicysets_query
+    method: POST
+    path: /sdwan/v2.0/api/prioritypolicysets/query
+  - name: prioritypolicysets_status
+    path: /sdwan/v2.0/api/prioritypolicysets/{prioritypolicyset_id}/status
+  - name: prioritypolicysetstacks
+    path: /sdwan/v2.0/api/prioritypolicysetstacks
+  - name: prioritypolicysetstacks.one
+    path: /sdwan/v2.0/api/prioritypolicysetstacks/{prioritypolicysetstack_id}
+  - name: prioritypolicysetstacks.post
+    method: POST
+    path: /sdwan/v2.0/api/prioritypolicysetstacks
+  - name: prioritypolicysetstacks.put
+    method: PUT
+    path: /sdwan/v2.0/api/prioritypolicysetstacks/{prioritypolicysetstack_id}
+  - name: prioritypolicysetstacks.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/prioritypolicysetstacks/{prioritypolicysetstack_id}
+  - name: prioritypolicysetstacks_query
+    method: POST
+    path: /sdwan/v2.0/api/prioritypolicysetstacks/query
+  - name: prismaaccess_configs
+    path: /sdwan/v2.0/api/sites/{site_id}/prismaaccess_configs
+  - name: prismaaccess_configs.one
+    path: /sdwan/v2.0/api/sites/{site_id}/prismaaccess_configs/{prismaaccess_config_id}
+  - name: prismaaccess_configs.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/prismaaccess_configs
+  - name: prismaaccess_configs.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/prismaaccess_configs/{prismaaccess_config_id}
+  - name: prismaaccess_configs.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/prismaaccess_configs/{prismaaccess_config_id}
+  - name: prismaaccess_configs_query
+    method: POST
+    path: /sdwan/v2.0/api/prismaaccess_configs/query
+  - name: prismasase_connections
+    path: /sdwan/v2.1/api/sites/{site_id}/prismasase_connections
+  - name: prismasase_connections.one
+    path: /sdwan/v2.1/api/sites/{site_id}/prismasase_connections/{prismasase_connection_id}
+  - name: prismasase_connections.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/prismasase_connections
+  - name: prismasase_connections.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/prismasase_connections/{prismasase_connection_id}
+  - name: prismasase_connections.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/sites/{site_id}/prismasase_connections/{prismasase_connection_id}
+  - name: prismasase_connections_configs
+    path: /sdwan/v3.1/api/prismasase_connections/configs
+  - name: prismasase_connections_configs.post
+    method: POST
+    path: /sdwan/v3.1/api/prismasase_connections/configs
+  - name: prismasase_connections_configs.put
+    method: PUT
+    path: /sdwan/v3.1/api/prismasase_connections/configs
+  - name: prismasase_connections_configs.delete
+    method: DELETE
+    path: /sdwan/v3.1/api/prismasase_connections/configs
+  - name: prismasase_connections_query
+    method: POST
+    path: /sdwan/v2.0/api/prismasase_connections/query
+  - name: prismasase_connections_status
+    path: /sdwan/v2.0/api/sites/{site_id}/prismasase_connections/{prismasase_connection_id}/status
+  - name: prismasase_connections_status_query
+    method: POST
+    path: /sdwan/v2.0/api/prismasase_connections/status/query
+  - name: probeconfigs
+    path: /sdwan/v2.1/api/probeconfigs
+  - name: probeconfigs.one
+    path: /sdwan/v2.1/api/probeconfigs/{probeconfig_id}
+  - name: probeconfigs.post
+    method: POST
+    path: /sdwan/v2.1/api/probeconfigs
+  - name: probeconfigs.put
+    method: PUT
+    path: /sdwan/v2.1/api/probeconfigs/{probeconfig_id}
+  - name: probeconfigs.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/probeconfigs/{probeconfig_id}
+  - name: probeconfigs_query
+    method: POST
+    path: /sdwan/v2.1/api/probeconfigs/query
+  - name: probeprofiles
+    path: /sdwan/v2.0/api/probeprofiles
+  - name: probeprofiles.one
+    path: /sdwan/v2.0/api/probeprofiles/{probeprofile_id}
+  - name: probeprofiles.post
+    method: POST
+    path: /sdwan/v2.0/api/probeprofiles
+  - name: probeprofiles.put
+    method: PUT
+    path: /sdwan/v2.0/api/probeprofiles/{probeprofile_id}
+  - name: probeprofiles.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/probeprofiles/{probeprofile_id}
+  - name: probeprofiles_query
+    method: POST
+    path: /sdwan/v2.0/api/probeprofiles/query
+  - name: profile
+    path: /sdwan/v2.1/api/profile
+  - name: query_links_topology
+    method: POST
+    path: /sdwan/v2.0/api/topology/links/query
+  - name: query_nodes_topology
+    method: POST
+    path: /sdwan/v2.0/api/topology/nodes/query
+  - name: query_panetworks
+    method: POST
+    path: /sdwan/v2.0/api/panetworks/query
+  - name: radii
+    path: /sdwan/v2.0/api/elements/{element_id}/radii
+  - name: radii.one
+    path: /sdwan/v2.0/api/elements/{element_id}/radii/{radii_id}
+  - name: radii.post
+    method: POST
+    path: /sdwan/v2.0/api/elements/{element_id}/radii
+  - name: radii.put
+    method: PUT
+    path: /sdwan/v2.0/api/elements/{element_id}/radii/{radii_id}
+  - name: radii.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/elements/{element_id}/radii/{radii_id}
+  - name: radii_status
+    path: /sdwan/v2.0/api/elements/{element_id}/radii/{radii_id}/status
+  - name: recovery_tokens
+    path: /sdwan/v2.1/api/machines/{machine_id}/recovery_tokens
+  - name: recovery_tokens.post
+    method: POST
+    path: /sdwan/v2.1/api/machines/{machine_id}/recovery_tokens
+  - name: recovery_tokens.put
+    method: PUT
+    path: /sdwan/v2.1/api/machines/{machine_id}/recovery_tokens/{recovery_token_id}
+  - name: reports
+    path: /sdwan/v2.0/api/reports
+  - name: reports_query
+    method: POST
+    path: /sdwan/v2.0/api/reports/query
+  - name: reportsdir
+    path: /sdwan/v2.0/api/reportsdir
+  - name: reportsdir_query
+    method: POST
+    path: /sdwan/v2.0/api/reportsdir/query
+  - name: reportsurl
+    path: /sdwan/v2.0/api/reportsurl
+  - name: roles
+    path: /sdwan/v2.1/api/roles
+  - name: roles.one
+    path: /sdwan/v2.1/api/roles/{role_id}
+  - name: roles.post
+    method: POST
+    path: /sdwan/v2.1/api/roles
+  - name: roles.put
+    method: PUT
+    path: /sdwan/v2.1/api/roles/{role_id}
+  - name: roles.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/roles/{role_id}
+  - name: routing_aspathaccesslists
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_aspathaccesslists
+  - name: routing_aspathaccesslists.one
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_aspathaccesslists/{routing_aspathaccesslist_id}
+  - name: routing_aspathaccesslists.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_aspathaccesslists
+  - name: routing_aspathaccesslists.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_aspathaccesslists/{routing_aspathaccesslist_id}
+  - name: routing_aspathaccesslists.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_aspathaccesslists/{routing_aspathaccesslist_id}
+  - name: routing_aspathaccesslists_query
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_aspathaccesslists/query
+  - name: routing_ipcommunitylists
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/routing_ipcommunitylists
+  - name: routing_ipcommunitylists.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/routing_ipcommunitylists/{routing_ipcommunitylist_id}
+  - name: routing_ipcommunitylists.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/routing_ipcommunitylists
+  - name: routing_ipcommunitylists.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/routing_ipcommunitylists/{routing_ipcommunitylist_id}
+  - name: routing_ipcommunitylists.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/routing_ipcommunitylists/{routing_ipcommunitylist_id}
+  - name: routing_ipcommunitylists_query
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/routing_ipcommunitylists/query
+  - name: routing_prefixlists
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_prefixlists
+  - name: routing_prefixlists.one
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_prefixlists/{routing_prefixlist_id}
+  - name: routing_prefixlists.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_prefixlists
+  - name: routing_prefixlists.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_prefixlists/{routing_prefixlist_id}
+  - name: routing_prefixlists.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_prefixlists/{routing_prefixlist_id}
+  - name: routing_prefixlists_query
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/routing_prefixlists/query
+  - name: routing_routemaps
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/routing_routemaps
+  - name: routing_routemaps.one
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/routing_routemaps/{routing_routemap_id}
+  - name: routing_routemaps.post
+    method: POST
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/routing_routemaps
+  - name: routing_routemaps.put
+    method: PUT
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/routing_routemaps/{routing_routemap_id}
+  - name: routing_routemaps.delete
+    method: DELETE
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/routing_routemaps/{routing_routemap_id}
+  - name: routing_routemaps_query
+    method: POST
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/routing_routemaps/query
+  - name: rquery
+    method: POST
+    path: /sdwan/v3.2/api/machines/rquery
+  - name: rquery_licenses_purchase
+    method: POST
+    path: /sdwan/v2.0/api/licenses_purchase/rquery
+  - name: rquery_licenses_usage
+    method: POST
+    path: /sdwan/v2.0/api/licenses_usage/rquery
+  - name: rquery_s
+    method: POST
+    path: /sdwan/v2.0/api/sites/rquery
+  - name: sdwanapps
+    path: /sdwan/v2.2/api/sdwanapps
+  - name: sdwanapps.one
+    path: /sdwan/v2.2/api/sdwanapps/{sdwanapp_id}
+  - name: sdwanapps_appstatus
+    path: /sdwan/v2.0/api/sdwanapps/{sdwanapp_id}/appstatus/{appstatus_id}
+  - name: sdwanapps_appstatus_connectivity
+    path: /sdwan/v2.0/api/sdwanapps/{sdwanapp_id}/appstatus/connectivity
+  - name: sdwanapps_appstatus_icon
+    path: /sdwan/v2.0/api/sdwanapps/{sdwanapp_id}/appstatus/icon
+  - name: sdwanapps_appstatus_metadata
+    path: /sdwan/v2.0/api/sdwanapps/{sdwanapp_id}/appstatus/metadata
+  - name: sdwanapps_configs
+    path: /sdwan/v2.0/api/sdwanapps/{sdwanapp_id}/configs
+  - name: sdwanapps_configs.one
+    path: /sdwan/v2.0/api/sdwanapps/{sdwanapp_id}/configs/{config_id}
+  - name: sdwanapps_configs.post
+    method: POST
+    path: /sdwan/v2.0/api/sdwanapps/{sdwanapp_id}/configs
+  - name: sdwanapps_configs.put
+    method: PUT
+    path: /sdwan/v2.0/api/sdwanapps/{sdwanapp_id}/configs/{config_id}
+  - name: sdwanapps_configs.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sdwanapps/{sdwanapp_id}/configs/{config_id}
+  - name: sdwanapps_status
+    path: /sdwan/v2.0/api/sdwanapps/{sdwanapp_id}/status
+  - name: securitypolicyruleorder
+    method: POST
+    path: /sdwan/v2.0/api/securitypolicysets/{securitypolicyset_id}/firewallpolicyruleorder
+  - name: securitypolicyrules
+    path: /sdwan/v2.0/api/securitypolicysets/{securitypolicyset_id}/securitypolicyrules
+  - name: securitypolicyrules.one
+    path: /sdwan/v2.0/api/securitypolicysets/{securitypolicyset_id}/securitypolicyrules/{securitypolicyrule_id}
+  - name: securitypolicyrules.post
+    method: POST
+    path: /sdwan/v2.0/api/securitypolicysets/{securitypolicyset_id}/securitypolicyrules
+  - name: securitypolicyrules.put
+    method: PUT
+    path: /sdwan/v2.0/api/securitypolicysets/{securitypolicyset_id}/securitypolicyrules/{securitypolicyrule_id}
+  - name: securitypolicyrules.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/securitypolicysets/{securitypolicyset_id}/securitypolicyrules/{securitypolicyrule_id}
+  - name: securitypolicyrules_query
+    method: POST
+    path: /sdwan/v2.0/api/securitypolicyrules/query
+  - name: securitypolicysets
+    path: /sdwan/v2.0/api/securitypolicysets
+  - name: securitypolicysets.one
+    path: /sdwan/v2.0/api/securitypolicysets/{securitypolicyset_id}
+  - name: securitypolicysets.post
+    method: POST
+    path: /sdwan/v2.0/api/securitypolicysets
+  - name: securitypolicysets.put
+    method: PUT
+    path: /sdwan/v2.0/api/securitypolicysets/{securitypolicyset_id}
+  - name: securitypolicysets.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/securitypolicysets/{securitypolicyset_id}
+  - name: securitypolicysets_query
+    method: POST
+    path: /sdwan/v2.0/api/securitypolicysets/query
+  - name: securityprofilegroups
+    path: /sdwan/v2.0/api/securityprofilegroups
+  - name: securityprofilegroups.one
+    path: /sdwan/v2.0/api/securityprofilegroups/{securityprofilegroup_id}
+  - name: securityprofilegroups.post
+    method: POST
+    path: /sdwan/v2.0/api/securityprofilegroups
+  - name: securityprofilegroups.put
+    method: PUT
+    path: /sdwan/v2.0/api/securityprofilegroups/{securityprofilegroup_id}
+  - name: securityprofilegroups.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/securityprofilegroups/{securityprofilegroup_id}
+  - name: securityprofilegroups_query
+    method: POST
+    path: /sdwan/v2.0/api/securityprofilegroups/query
+  - name: securityzones
+    path: /sdwan/v2.2/api/securityzones
+  - name: securityzones.one
+    path: /sdwan/v2.2/api/securityzones/{securityzone_id}
+  - name: securityzones.post
+    method: POST
+    path: /sdwan/v2.2/api/securityzones
+  - name: securityzones.put
+    method: PUT
+    path: /sdwan/v2.2/api/securityzones/{securityzone_id}
+  - name: securityzones.delete
+    method: DELETE
+    path: /sdwan/v2.2/api/securityzones/{securityzone_id}
+  - name: securityzones_query
+    method: POST
+    path: /sdwan/v2.2/api/securityzones/query
+  - name: servicebindingmaps
+    path: /sdwan/v2.1/api/servicebindingmaps
+  - name: servicebindingmaps.one
+    path: /sdwan/v2.1/api/servicebindingmaps/{servicebindingmap_id}
+  - name: servicebindingmaps.post
+    method: POST
+    path: /sdwan/v2.1/api/servicebindingmaps
+  - name: servicebindingmaps.put
+    method: PUT
+    path: /sdwan/v2.1/api/servicebindingmaps/{servicebindingmap_id}
+  - name: servicebindingmaps.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/servicebindingmaps/{servicebindingmap_id}
+  - name: servicebindingmaps_query
+    method: POST
+    path: /sdwan/v2.1/api/servicebindingmaps/query
+  - name: serviceendpoints
+    path: /sdwan/v3.1/api/serviceendpoints
+  - name: serviceendpoints.one
+    path: /sdwan/v3.1/api/serviceendpoints/{serviceendpoint_id}
+  - name: serviceendpoints.post
+    method: POST
+    path: /sdwan/v3.1/api/serviceendpoints
+  - name: serviceendpoints.put
+    method: PUT
+    path: /sdwan/v3.1/api/serviceendpoints/{serviceendpoint_id}
+  - name: serviceendpoints.delete
+    method: DELETE
+    path: /sdwan/v3.1/api/serviceendpoints/{serviceendpoint_id}
+  - name: serviceendpoints_query
+    method: POST
+    path: /sdwan/v3.1/api/serviceendpoints/query
+  - name: servicelabels
+    path: /sdwan/v2.1/api/servicelabels
+  - name: servicelabels.one
+    path: /sdwan/v2.1/api/servicelabels/{servicelabel_id}
+  - name: servicelabels.post
+    method: POST
+    path: /sdwan/v2.1/api/servicelabels
+  - name: servicelabels.put
+    method: PUT
+    path: /sdwan/v2.1/api/servicelabels/{servicelabel_id}
+  - name: servicelabels.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/servicelabels/{servicelabel_id}
+  - name: servicelabels_query
+    method: POST
+    path: /sdwan/v2.1/api/servicelabels/query
+  - name: signup
+    method: POST
+    path: /sdwan/v2.0/api/signup
+  - name: site_admin_state
+    method: PUT
+    path: /sdwan/v3.0/api/sites/{site_id}/admin_state
+  - name: site_anynetlinks
+    path: /sdwan/v2.0/api/sites/{site_id}/anynetlinks/{anynetlink_id}
+  - name: site_bulk_config_state_query
+    method: POST
+    path: /sdwan/v2.0/api/sites/bulk_config_state/query
+  - name: site_correlationevents
+    path: /sdwan/v2.1/api/sites/{site_id}/correlationevents
+  - name: site_correlationevents_query
+    method: POST
+    path: /sdwan/v2.1/api/sites/correlationevents/query
+  - name: site_extensions
+    path: /sdwan/v2.0/api/sites/{site_id}/extensions
+  - name: site_extensions.one
+    path: /sdwan/v2.0/api/sites/{site_id}/extensions/{extension_id}
+  - name: site_extensions.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/extensions
+  - name: site_extensions.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/extensions/{extension_id}
+  - name: site_extensions.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/extensions/{extension_id}
+  - name: site_extensions_query
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/extensions/query
+  - name: site_hubserviceendpoints
+    path: /sdwan/v2.0/api/sites/{site_id}/hubserviceendpoints
+  - name: site_ipfixlocalprefixes
+    path: /sdwan/v2.0/api/sites/{site_id}/ipfixlocalprefixes
+  - name: site_ipfixlocalprefixes.one
+    path: /sdwan/v2.0/api/sites/{site_id}/ipfixlocalprefixes/{ipfixlocalprefix_id}
+  - name: site_ipfixlocalprefixes.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/ipfixlocalprefixes
+  - name: site_ipfixlocalprefixes.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/ipfixlocalprefixes/{ipfixlocalprefix_id}
+  - name: site_ipfixlocalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/ipfixlocalprefixes/{ipfixlocalprefix_id}
+  - name: site_lannetworks_query
+    method: POST
+    path: /sdwan/v3.3/api/sites/{site_id}/lannetworks/query
+  - name: site_natlocalprefixes
+    path: /sdwan/v2.0/api/sites/{site_id}/natlocalprefixes
+  - name: site_natlocalprefixes.one
+    path: /sdwan/v2.0/api/sites/{site_id}/natlocalprefixes/{natlocalprefix_id}
+  - name: site_natlocalprefixes.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/natlocalprefixes
+  - name: site_natlocalprefixes.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/natlocalprefixes/{natlocalprefix_id}
+  - name: site_natlocalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/natlocalprefixes/{natlocalprefix_id}
+  - name: site_networkpolicylocalprefixes
+    path: /sdwan/v2.1/api/sites/{site_id}/networkpolicylocalprefixes
+  - name: site_networkpolicylocalprefixes.one
+    path: /sdwan/v2.1/api/sites/{site_id}/networkpolicylocalprefixes/{networkpolicylocalprefix_id}
+  - name: site_networkpolicylocalprefixes.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/networkpolicylocalprefixes
+  - name: site_networkpolicylocalprefixes.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/networkpolicylocalprefixes/{networkpolicylocalprefix_id}
+  - name: site_networkpolicylocalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/sites/{site_id}/networkpolicylocalprefixes/{networkpolicylocalprefix_id}
+  - name: site_ngfwsecuritypolicylocalprefixes
+    path: /sdwan/v2.1/api/sites/{site_id}/ngfwsecuritypolicylocalprefixes
+  - name: site_ngfwsecuritypolicylocalprefixes.one
+    path: /sdwan/v2.1/api/sites/{site_id}/ngfwsecuritypolicylocalprefixes/{ngfwsecuritypolicylocalprefix_id}
+  - name: site_ngfwsecuritypolicylocalprefixes.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/ngfwsecuritypolicylocalprefixes
+  - name: site_ngfwsecuritypolicylocalprefixes.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/ngfwsecuritypolicylocalprefixes/{ngfwsecuritypolicylocalprefix_id}
+  - name: site_ngfwsecuritypolicylocalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/sites/{site_id}/ngfwsecuritypolicylocalprefixes/{ngfwsecuritypolicylocalprefix_id}
+  - name: site_operations
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/operations
+  - name: site_prioritypolicylocalprefixes
+    path: /sdwan/v2.1/api/sites/{site_id}/prioritypolicylocalprefixes
+  - name: site_prioritypolicylocalprefixes.one
+    path: /sdwan/v2.1/api/sites/{site_id}/prioritypolicylocalprefixes/{prioritypolicylocalprefix_id}
+  - name: site_prioritypolicylocalprefixes.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/prioritypolicylocalprefixes
+  - name: site_prioritypolicylocalprefixes.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/prioritypolicylocalprefixes/{prioritypolicylocalprefix_id}
+  - name: site_prioritypolicylocalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/sites/{site_id}/prioritypolicylocalprefixes/{prioritypolicylocalprefix_id}
+  - name: site_query
+    method: POST
+    path: /sdwan/v4.13/api/sites/query
+  - name: site_serviceconnections
+    path: /sdwan/v2.0/api/sites/{site_id}/serviceconnections
+  - name: site_sitesecurityzones_query
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/sitesecurityzones/query
+  - name: site_spokeclusters_query
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters/query
+  - name: site_status
+    path: /sdwan/v2.0/api/sites/{site_id}/status
+  - name: siteciphers
+    path: /sdwan/v2.1/api/sites/{site_id}/siteciphers
+  - name: siteciphers.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/siteciphers
+  - name: sites
+    path: /sdwan/v4.13/api/sites
+  - name: sites.one
+    path: /sdwan/v4.13/api/sites/{site_id}
+  - name: sites.post
+    method: POST
+    path: /sdwan/v4.13/api/sites
+  - name: sites.put
+    method: PUT
+    path: /sdwan/v4.13/api/sites/{site_id}
+  - name: sites.delete
+    method: DELETE
+    path: /sdwan/v4.13/api/sites/{site_id}
+  - name: sitesecurityzones
+    path: /sdwan/v2.1/api/sites/{site_id}/sitesecurityzones
+  - name: sitesecurityzones.one
+    path: /sdwan/v2.1/api/sites/{site_id}/sitesecurityzones/{sitesecurityzone_id}
+  - name: sitesecurityzones.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/sitesecurityzones
+  - name: sitesecurityzones.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/sitesecurityzones/{sitesecurityzone_id}
+  - name: sitesecurityzones.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/sites/{site_id}/sitesecurityzones/{sitesecurityzone_id}
+  - name: sitesecurityzones_query
+    method: POST
+    path: /sdwan/v2.1/api/sitesecurityzones/query
+  - name: sitesnapshots
+    path: /sdwan/v2.0/api/sitesnapshots/{sitesnapshot_id}
+  - name: sitesnapshots.post
+    method: POST
+    path: /sdwan/v2.0/api/sitesnapshots
+  - name: sitesnapshots_query
+    method: POST
+    path: /sdwan/v2.0/api/sitesnapshots/query
+  - name: skus
+    path: /sdwan/v2.1/api/skus
+  - name: skus.one
+    path: /sdwan/v2.1/api/skus/{sku_id}
+  - name: snapshots
+    path: /sdwan/v2.0/api/sites/{site_id}/snapshots/{snapshot_id}
+  - name: snapshots.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/snapshots
+  - name: snapshots_query
+    method: POST
+    path: /sdwan/v2.0/api/sites/snapshots/query
+  - name: snapshots_status
+    path: /sdwan/v2.0/api/sites/{site_id}/snapshots/{snapshot_id}/status
+  - name: snmpagents
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/snmpagents
+  - name: snmpagents.one
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/snmpagents/{snmpagent_id}
+  - name: snmpagents.post
+    method: POST
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/snmpagents
+  - name: snmpagents.put
+    method: PUT
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/snmpagents/{snmpagent_id}
+  - name: snmpagents.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/sites/{site_id}/elements/{element_id}/snmpagents/{snmpagent_id}
+  - name: snmpdiscoverystartnodes_query
+    method: POST
+    path: /sdwan/v2.0/api/snmpdiscoverystartnodes/query
+  - name: snmptraps
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/snmptraps
+  - name: snmptraps.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/snmptraps/{snmptrap_id}
+  - name: snmptraps.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/snmptraps
+  - name: snmptraps.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/snmptraps/{snmptrap_id}
+  - name: snmptraps.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/snmptraps/{snmptrap_id}
+  - name: software
+    path: /sdwan/v2.0/api/machines/{machine_id}/software
+  - name: software.one
+    path: /sdwan/v2.0/api/machines/{machine_id}/software/{software_id}
+  - name: software.put
+    method: PUT
+    path: /sdwan/v2.0/api/machines/{machine_id}/software/{software_id}
+  - name: software_current_status_query
+    method: POST
+    path: /sdwan/v2.1/api/software/current_status/query
+  - name: software_state
+    path: /sdwan/v2.0/api/elements/{element_id}/software/state
+  - name: software_state.put
+    method: PUT
+    path: /sdwan/v2.0/api/elements/{element_id}/software/state
+  - name: software_state_query
+    method: POST
+    path: /sdwan/v2.0/api/elements/software/state/query
+  - name: software_status
+    path: /sdwan/v2.1/api/elements/{element_id}/software/status
+  - name: software_status_query
+    method: POST
+    path: /sdwan/v2.1/api/software/status/query
+  - name: softwarehistory_query
+    method: POST
+    path: /sdwan/v2.0/api/softwarehistory/query
+  - name: spnnpnsitemigration_remotenetworks
+    path: /sdwan/v2.0/api/spnnpnsitemigration/remotenetworks
+  - name: spnnpnsitemigration_remotenetworks_query
+    method: POST
+    path: /sdwan/v2.0/api/spnnpnsitemigration/remotenetworks/query
+  - name: spokeclusters
+    path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters
+  - name: spokeclusters.one
+    path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters/{spokecluster_id}
+  - name: spokeclusters.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters
+  - name: spokeclusters.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters/{spokecluster_id}
+  - name: spokeclusters.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters/{spokecluster_id}
+  - name: spokeclusters_operations
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters/{spokecluster_id}/operations
+  - name: spokeclusters_query
+    method: POST
+    path: /sdwan/v2.0/api/spokeclusters/query
+  - name: spokeclusters_status
+    path: /sdwan/v2.0/api/sites/{site_id}/spokeclusters/{spokecluster_id}/status
+  - name: spokeclusters_status_query
+    method: POST
+    path: /sdwan/v2.0/api/spokeclusters/status/query
+  - name: spywareprofiles
+    path: /sdwan/v2.0/api/spywareprofiles
+  - name: spywareprofiles.one
+    path: /sdwan/v2.0/api/spywareprofiles/{spywareprofile_id}
+  - name: staticroutes
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/staticroutes
+  - name: staticroutes.one
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/staticroutes/{staticroute_id}
+  - name: staticroutes.post
+    method: POST
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/staticroutes
+  - name: staticroutes.put
+    method: PUT
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/staticroutes/{staticroute_id}
+  - name: staticroutes.delete
+    method: DELETE
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/staticroutes/{staticroute_id}
+  - name: staticroutes_status
+    path: /sdwan/v2.2/api/sites/{site_id}/elements/{element_id}/staticroutes/{staticroute_id}/status
+  - name: status_query
+    method: POST
+    path: /sdwan/v2.6/api/elements/status/query
+  - name: support_operations
+    method: POST
+    path: /sdwan/v2.0/api/elements/{element_id}/support_operations
+  - name: syslogserverprofiles
+    path: /sdwan/v2.1/api/syslogserverprofiles
+  - name: syslogserverprofiles.one
+    path: /sdwan/v2.1/api/syslogserverprofiles/{syslogserverprofile_id}
+  - name: syslogserverprofiles.post
+    method: POST
+    path: /sdwan/v2.1/api/syslogserverprofiles
+  - name: syslogserverprofiles.put
+    method: PUT
+    path: /sdwan/v2.1/api/syslogserverprofiles/{syslogserverprofile_id}
+  - name: syslogserverprofiles.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/syslogserverprofiles/{syslogserverprofile_id}
+  - name: syslogservers
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/syslogservers
+  - name: syslogservers.one
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/syslogservers/{syslogserver_id}
+  - name: syslogservers.post
+    method: POST
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/syslogservers
+  - name: syslogservers.put
+    method: PUT
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/syslogservers/{syslogserver_id}
+  - name: syslogservers.delete
+    method: DELETE
+    path: /sdwan/v2.3/api/sites/{site_id}/elements/{element_id}/syslogservers/{syslogserver_id}
+  - name: tacacs_plus_profiles
+    path: /sdwan/v2.0/api/tacacs_plus_profiles
+  - name: tacacs_plus_profiles.one
+    path: /sdwan/v2.0/api/tacacs_plus_profiles/{tacacs_plus_profile_id}
+  - name: tacacs_plus_profiles.post
+    method: POST
+    path: /sdwan/v2.0/api/tacacs_plus_profiles
+  - name: tacacs_plus_profiles.put
+    method: PUT
+    path: /sdwan/v2.0/api/tacacs_plus_profiles/{tacacs_plus_profile_id}
+  - name: tacacs_plus_profiles.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/tacacs_plus_profiles/{tacacs_plus_profile_id}
+  - name: tacacs_plus_servers
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/tacacs_plus_servers
+  - name: tacacs_plus_servers.one
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/tacacs_plus_servers/{tacacs_plus_server_id}
+  - name: tacacs_plus_servers.post
+    method: POST
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/tacacs_plus_servers
+  - name: tacacs_plus_servers.put
+    method: PUT
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/tacacs_plus_servers/{tacacs_plus_server_id}
+  - name: tacacs_plus_servers.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/tacacs_plus_servers/{tacacs_plus_server_id}
+  - name: templates_ntp
+    path: /sdwan/v2.0/api/templates/ntp
+  - name: templates_ntp.one
+    path: /sdwan/v2.0/api/templates/ntp/{ntp_id}
+  - name: templates_ntp.post
+    method: POST
+    path: /sdwan/v2.0/api/templates/ntp
+  - name: templates_ntp.put
+    method: PUT
+    path: /sdwan/v2.0/api/templates/ntp/{ntp_id}
+  - name: templates_ntp.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/templates/ntp/{ntp_id}
+  - name: tenant_anynetlinks
+    path: /sdwan/v4.0/api/anynetlinks/{anynetlink_id}
+  - name: tenant_anynetlinks.post
+    method: POST
+    path: /sdwan/v4.0/api/anynetlinks
+  - name: tenant_anynetlinks.put
+    method: PUT
+    path: /sdwan/v4.0/api/anynetlinks/{anynetlink_id}
+  - name: tenant_anynetlinks.delete
+    method: DELETE
+    path: /sdwan/v4.0/api/anynetlinks/{anynetlink_id}
+  - name: tenant_api_versions
+    path: /sdwan/v2.0/api/api_versions
+  - name: tenant_bgppeers_query
+    method: POST
+    path: /sdwan/v3.0/api/bgppeers/query
+  - name: tenant_clients
+    path: /sdwan/v2.1/api/clients
+  - name: tenant_element_operations
+    method: POST
+    path: /sdwan/v2.0/api/elements/{element_id}/operations
+  - name: tenant_elementpassageconfigs
+    path: /sdwan/v2.0/api/elementpassageconfigs
+  - name: tenant_extensions
+    path: /sdwan/v2.0/api/extensions
+  - name: tenant_extensions.one
+    path: /sdwan/v2.0/api/extensions/{extension_id}
+  - name: tenant_extensions_query
+    method: POST
+    path: /sdwan/v2.0/api/extensions/query
+  - name: tenant_forgot_password_login
+    method: POST
+    path: /sdwan/v2.0/api/login/password/forgot
+  - name: tenant_hubserviceendpoints
+    path: /sdwan/v2.0/api/hubserviceendpoints
+  - name: tenant_ipfixlocalprefixes
+    path: /sdwan/v2.0/api/ipfixlocalprefixes
+  - name: tenant_ipfixlocalprefixes.one
+    path: /sdwan/v2.0/api/ipfixlocalprefixes/{ipfixlocalprefix_id}
+  - name: tenant_ipfixlocalprefixes.post
+    method: POST
+    path: /sdwan/v2.0/api/ipfixlocalprefixes
+  - name: tenant_ipfixlocalprefixes.put
+    method: PUT
+    path: /sdwan/v2.0/api/ipfixlocalprefixes/{ipfixlocalprefix_id}
+  - name: tenant_ipfixlocalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/ipfixlocalprefixes/{ipfixlocalprefix_id}
+  - name: tenant_machine_operations
+    method: POST
+    path: /sdwan/v2.5/api/machines/{machine_id}/operations
+  - name: tenant_networkpolicylocalprefixes
+    path: /sdwan/v2.0/api/networkpolicylocalprefixes
+  - name: tenant_networkpolicylocalprefixes.one
+    path: /sdwan/v2.0/api/networkpolicylocalprefixes/{networkpolicylocalprefix_id}
+  - name: tenant_networkpolicylocalprefixes.post
+    method: POST
+    path: /sdwan/v2.0/api/networkpolicylocalprefixes
+  - name: tenant_networkpolicylocalprefixes.put
+    method: PUT
+    path: /sdwan/v2.0/api/networkpolicylocalprefixes/{networkpolicylocalprefix_id}
+  - name: tenant_networkpolicylocalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/networkpolicylocalprefixes/{networkpolicylocalprefix_id}
+  - name: tenant_operators
+    path: /sdwan/v2.2/api/operators
+  - name: tenant_operators.one
+    path: /sdwan/v2.2/api/operators/{operator_id}
+  - name: tenant_operators.put
+    method: PUT
+    path: /sdwan/v2.2/api/operators/{operator_id}
+  - name: tenant_operators.patch
+    method: PATCH
+    path: /sdwan/v2.2/api/operators/{operator_id}
+  - name: tenant_operators.delete
+    method: DELETE
+    path: /sdwan/v2.2/api/operators/{operator_id}
+  - name: tenant_passages
+    path: /sdwan/v2.0/api/passages
+  - name: tenant_permissions
+    path: /sdwan/v2.0/api/permissions
+  - name: tenant_permissions.one
+    path: /sdwan/v2.0/api/permissions/{permission_id}
+  - name: tenant_permissions.post
+    method: POST
+    path: /sdwan/v2.0/api/permissions
+  - name: tenant_permissions.put
+    method: PUT
+    path: /sdwan/v2.0/api/permissions/{permission_id}
+  - name: tenant_permissions.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/permissions/{permission_id}
+  - name: tenant_prefixfilters_query
+    method: POST
+    path: /sdwan/v2.0/api/prefixfilters/query
+  - name: tenant_prioritypolicylocalprefixes
+    path: /sdwan/v2.0/api/prioritypolicylocalprefixes
+  - name: tenant_prioritypolicylocalprefixes.one
+    path: /sdwan/v2.0/api/prioritypolicylocalprefixes/{prioritypolicylocalprefix_id}
+  - name: tenant_prioritypolicylocalprefixes.post
+    method: POST
+    path: /sdwan/v2.0/api/prioritypolicylocalprefixes
+  - name: tenant_prioritypolicylocalprefixes.put
+    method: PUT
+    path: /sdwan/v2.0/api/prioritypolicylocalprefixes/{prioritypolicylocalprefix_id}
+  - name: tenant_prioritypolicylocalprefixes.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/prioritypolicylocalprefixes/{prioritypolicylocalprefix_id}
+  - name: tenant_serviceconnections
+    path: /sdwan/v2.0/api/serviceconnections
+  - name: tenant_waninterfaces_query
+    method: POST
+    path: /sdwan/v2.10/api/waninterfaces/query
+  - name: tenantpassageconfigs
+    path: /sdwan/v2.0/api/tenantpassageconfigs
+  - name: tenantpassageconfigs.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/tenantpassageconfigs/{tenantpassageconfig_id}
+  - name: tenants
+    path: /sdwan/v2.13/api
+  - name: tenants.put
+    method: PUT
+    path: /sdwan/v2.13/api
+  - name: tenants.patch
+    method: PATCH
+    path: /sdwan/v2.13/api
+  - name: threatmetadata_query
+    method: POST
+    path: /sdwan/v2.0/api/threatmetadata/query
+  - name: toolkitsessions
+    path: /sdwan/v2.0/api/toolkitsessions
+  - name: toolkitsessions_query
+    method: POST
+    path: /sdwan/v2.0/api/toolkitsessions/query
+  - name: topology
+    method: POST
+    path: /sdwan/v3.6/api/topology
+  - name: upgrade_status_query
+    method: POST
+    path: /sdwan/v2.0/api/upgrade_status/query
+  - name: urlcategories_query
+    method: POST
+    path: /sdwan/v2.0/api/urlcategories/query
+  - name: urlcustomcategories
+    path: /sdwan/v2.0/api/urlcustomcategories
+  - name: urlcustomcategories.one
+    path: /sdwan/v2.0/api/urlcustomcategories/{urlcustomcategorie_id}
+  - name: urlfilteringconfigs
+    path: /sdwan/v2.0/api/urlfilteringconfigs
+  - name: urlfilteringprofiles
+    path: /sdwan/v2.0/api/urlfilteringprofiles
+  - name: urlfilteringprofiles.one
+    path: /sdwan/v2.0/api/urlfilteringprofiles/{urlfilteringprofile_id}
+  - name: useridagents
+    path: /sdwan/v2.0/api/useridagents
+  - name: useridagents.one
+    path: /sdwan/v2.0/api/useridagents/{useridagent_id}
+  - name: useridagents.post
+    method: POST
+    path: /sdwan/v2.0/api/useridagents
+  - name: useridagents.put
+    method: PUT
+    path: /sdwan/v2.0/api/useridagents/{useridagent_id}
+  - name: useridagents.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/useridagents/{useridagent_id}
+  - name: useridagents_query
+    method: POST
+    path: /sdwan/v2.0/api/useridagents/query
+  - name: users
+    path: /sdwan/v2.0/api/users
+  - name: users.one
+    path: /sdwan/v2.0/api/users/{user_id}
+  - name: users.post
+    method: POST
+    path: /sdwan/v2.0/api/users
+  - name: users.put
+    method: PUT
+    path: /sdwan/v2.0/api/users/{user_id}
+  - name: users.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/users/{user_id}
+  - name: vff_token_query
+    method: POST
+    path: /sdwan/v2.0/api/vfflicenses/tokens/query
+  - name: vfflicense_status
+    path: /sdwan/v2.1/api/vfflicenses/{vfflicense_id}/status
+  - name: vfflicense_tokens
+    path: /sdwan/v2.0/api/vfflicenses/{vfflicense_id}/tokens
+  - name: vfflicense_tokens.one
+    path: /sdwan/v2.0/api/vfflicenses/{vfflicense_id}/tokens/{token_id}
+  - name: vfflicense_tokens.post
+    method: POST
+    path: /sdwan/v2.0/api/vfflicenses/{vfflicense_id}/tokens
+  - name: vfflicense_tokens.put
+    method: PUT
+    path: /sdwan/v2.0/api/vfflicenses/{vfflicense_id}/tokens/{token_id}
+  - name: vfflicenses
+    path: /sdwan/v2.1/api/vfflicenses
+  - name: vfflicenses.one
+    path: /sdwan/v2.1/api/vfflicenses/{vfflicense_id}
+  - name: vfflicenses_operations
+    method: POST
+    path: /sdwan/v2.0/api/vfflicenses/{vfflicense_id}/operations
+  - name: vfflicenses_rquery
+    method: POST
+    path: /sdwan/v2.0/api/vfflicenses/rquery
+  - name: vfflicensesstatus_rquery
+    method: POST
+    path: /sdwan/v2.0/api/vfflicensesstatus/rquery
+  - name: vlan_port_members
+    path: /sdwan/v2.0/api/sites/{site_id}/elements/{element_id}/vlan_port_members
+  - name: vpnlinks_operations
+    method: POST
+    path: /sdwan/v2.0/api/vpnlinks/{vpnlink_id}/operations
+  - name: vpnlinks_query
+    method: POST
+    path: /sdwan/v2.0/api/vpnlinks/query
+  - name: vpnlinks_state
+    path: /sdwan/v2.0/api/vpnlinks/{vpnlink_id}/state
+  - name: vpnlinks_state.put
+    method: PUT
+    path: /sdwan/v2.0/api/vpnlinks/{vpnlink_id}/state
+  - name: vpnlinks_status
+    path: /sdwan/v2.2/api/vpnlinks/{vpnlink_id}/status
+  - name: vrfcontextprofiles
+    path: /sdwan/v2.0/api/vrfcontextprofiles
+  - name: vrfcontextprofiles.one
+    path: /sdwan/v2.0/api/vrfcontextprofiles/{vrfcontextprofile_id}
+  - name: vrfcontextprofiles.post
+    method: POST
+    path: /sdwan/v2.0/api/vrfcontextprofiles
+  - name: vrfcontextprofiles.put
+    method: PUT
+    path: /sdwan/v2.0/api/vrfcontextprofiles/{vrfcontextprofile_id}
+  - name: vrfcontextprofiles.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/vrfcontextprofiles/{vrfcontextprofile_id}
+  - name: vrfcontextprofiles_query
+    method: POST
+    path: /sdwan/v2.0/api/vrfcontextprofiles/query
+  - name: vrfcontexts
+    path: /sdwan/v2.0/api/vrfcontexts
+  - name: vrfcontexts.one
+    path: /sdwan/v2.0/api/vrfcontexts/{vrfcontext_id}
+  - name: vrfcontexts.post
+    method: POST
+    path: /sdwan/v2.0/api/vrfcontexts
+  - name: vrfcontexts.put
+    method: PUT
+    path: /sdwan/v2.0/api/vrfcontexts/{vrfcontext_id}
+  - name: vrfcontexts.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/vrfcontexts/{vrfcontext_id}
+  - name: vrfcontexts_query
+    method: POST
+    path: /sdwan/v2.0/api/vrfcontexts/query
+  - name: vulnerabilityprofiles
+    path: /sdwan/v2.0/api/vulnerabilityprofiles
+  - name: vulnerabilityprofiles.one
+    path: /sdwan/v2.0/api/vulnerabilityprofiles/{vulnerabilityprofile_id}
+  - name: waninterfacelabels
+    path: /sdwan/v2.6/api/waninterfacelabels
+  - name: waninterfacelabels.one
+    path: /sdwan/v2.6/api/waninterfacelabels/{waninterfacelabel_id}
+  - name: waninterfacelabels.put
+    method: PUT
+    path: /sdwan/v2.6/api/waninterfacelabels/{waninterfacelabel_id}
+  - name: waninterfacelabels_query
+    method: POST
+    path: /sdwan/v2.6/api/waninterfacelabels/query
+  - name: waninterfaces
+    path: /sdwan/v2.10/api/sites/{site_id}/waninterfaces
+  - name: waninterfaces.one
+    path: /sdwan/v2.10/api/sites/{site_id}/waninterfaces/{waninterface_id}
+  - name: waninterfaces.post
+    method: POST
+    path: /sdwan/v2.10/api/sites/{site_id}/waninterfaces
+  - name: waninterfaces.put
+    method: PUT
+    path: /sdwan/v2.10/api/sites/{site_id}/waninterfaces/{waninterface_id}
+  - name: waninterfaces.delete
+    method: DELETE
+    path: /sdwan/v2.10/api/sites/{site_id}/waninterfaces/{waninterface_id}
+  - name: waninterfaces_correlationevents_query
+    method: POST
+    path: /sdwan/v2.1/api/waninterfaces/correlationevents/query
+  - name: waninterfaces_query
+    method: POST
+    path: /sdwan/v2.5/api/sites/{site_id}/waninterfaces/query
+  - name: waninterfaces_status
+    path: /sdwan/v2.1/api/sites/{site_id}/waninterfaces/{waninterface_id}/status
+  - name: wannetworks
+    path: /sdwan/v2.1/api/wannetworks
+  - name: wannetworks.one
+    path: /sdwan/v2.1/api/wannetworks/{wannetwork_id}
+  - name: wannetworks.post
+    method: POST
+    path: /sdwan/v2.1/api/wannetworks
+  - name: wannetworks.put
+    method: PUT
+    path: /sdwan/v2.1/api/wannetworks/{wannetwork_id}
+  - name: wannetworks.delete
+    method: DELETE
+    path: /sdwan/v2.1/api/wannetworks/{wannetwork_id}
+  - name: wannetworks_query
+    method: POST
+    path: /sdwan/v2.1/api/wannetworks/query
+  - name: wanoverlaychannels
+    path: /sdwan/v2.0/api/wanoverlaychannels
+  - name: wanoverlaychannels.one
+    path: /sdwan/v2.0/api/wanoverlaychannels/{wanoverlaychannel_id}
+  - name: wanoverlays
+    path: /sdwan/v2.0/api/wanoverlays
+  - name: wanoverlays.one
+    path: /sdwan/v2.0/api/wanoverlays/{wanoverlay_id}
+  - name: wanoverlays.post
+    method: POST
+    path: /sdwan/v2.0/api/wanoverlays
+  - name: wanoverlays.put
+    method: PUT
+    path: /sdwan/v2.0/api/wanoverlays/{wanoverlay_id}
+  - name: wanoverlays.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/wanoverlays/{wanoverlay_id}
+  - name: wanpaths
+    path: /sdwan/v3.0/api/sites/{site_id}/wanpaths
+  - name: wantinterfaces_correlationevents
+    path: /sdwan/v2.1/api/sites/{site_id}/waninterfaces/{waninterface_id}/correlationevents
+  - name: ws_extensions
+    path: /sdwan/v2.0/api/ws/extensions
+  - name: ws_extensions.one
+    path: /sdwan/v2.0/api/ws/extensions/{extension_id}
+  - name: ws_extensions.post
+    method: POST
+    path: /sdwan/v2.0/api/ws/extensions
+  - name: ws_extensions.put
+    method: PUT
+    path: /sdwan/v2.0/api/ws/extensions/{extension_id}
+  - name: ws_extensions.delete
+    method: DELETE
+    path: /sdwan/v2.0/api/ws/extensions/{extension_id}
+  - name: ws_extensions_query
+    method: POST
+    path: /sdwan/v2.0/api/ws/extensions/query

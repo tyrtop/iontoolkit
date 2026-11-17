@@ -83,8 +83,8 @@ func TestAWaitSaysWhatAndHowLong(t *testing.T) {
 		at   time.Duration
 		want string
 	}{
-		{Wait{What: "S5037-RTR-01: debug bw-test", Since: start}, 65 * time.Second,
-			"S5037-RTR-01: debug bw-test · 1m5s"},
+		{Wait{What: "S7030-RTR-01: debug bw-test", Since: start}, 65 * time.Second,
+			"S7030-RTR-01: debug bw-test · 1m5s"},
 		{Wait{What: "dump vpn summary on 2 element(s)", Since: start}, 2 * time.Second,
 			"dump vpn summary on 2 element(s) · 2s"},
 	} {

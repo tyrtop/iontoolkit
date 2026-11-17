@@ -19,11 +19,11 @@ func fleet() []Record {
 		{ID: "e2", Name: "s0100-rtr-02", SiteID: "s100", Model: "ion3200", Software: "6.5.1", HWID: "HW-BBB"},
 		{ID: "e3", Name: "s0200-rtr-01", SiteID: "s200", Model: "ion1200", Software: "6.4.3", HWID: "HW-CCC", Connected: true},
 	} {
-		out = append(out, Of(el, "111", "Tractor Supply", sites))
+		out = append(out, Of(el, "111", "Trident Supply", sites))
 	}
 	out = append(out, Of(
 		api.Element{ID: "e4", Name: "ord-gw-01", SiteID: "s9", Model: "ion1200", Software: "6.5.1", HWID: "HW-DDD", Connected: true},
-		"222", "Niagara Bottling", sites))
+		"222", "Norwood Bottling", sites))
 	return out
 }
 
@@ -66,23 +66,23 @@ func TestEveryTermHasToMatchSomeField(t *testing.T) {
 	}{
 		{
 			name:  "site, model and tenant together",
-			query: "100 1200 tract",
+			query: "100 1200 trid",
 			want:  []string{"s0100-rtr-01"},
 		},
 		{"nothing typed matches everything", "", []string{"ord-gw-01", "s0100-rtr-01", "s0100-rtr-02", "s0200-rtr-01"}},
 		{"one term still works", "1200", []string{"ord-gw-01", "s0100-rtr-01", "s0200-rtr-01"}},
-		{"tenant name alone", "niagara", []string{"ord-gw-01"}},
-		{"model and tenant", "1200 niagara", []string{"ord-gw-01"}},
+		{"tenant name alone", "norwood", []string{"ord-gw-01"}},
+		{"model and tenant", "1200 norwood", []string{"ord-gw-01"}},
 		{"site name words", "store 0200", []string{"s0200-rtr-01"}},
 		{"software version", "6.4.3", []string{"s0200-rtr-01"}},
 		{"hardware id", "hw-ccc", []string{"s0200-rtr-01"}},
 		{"connection state", "offline", []string{"s0100-rtr-02"}},
 		{"state and model", "connected ion3200", nil},
 		{"element id", "e4", []string{"ord-gw-01"}},
-		{"terms in any order", "tract 1200 100", []string{"s0100-rtr-01"}},
+		{"terms in any order", "trid 1200 100", []string{"s0100-rtr-01"}},
 		{"a term matching nothing excludes everything", "1200 nosuchtenant", nil},
-		{"case is ignored", "TRACT ION1200", []string{"s0100-rtr-01", "s0200-rtr-01"}},
-		{"extra spaces are ignored", "  1200   niagara  ", []string{"ord-gw-01"}},
+		{"case is ignored", "TRID ION1200", []string{"s0100-rtr-01", "s0200-rtr-01"}},
+		{"extra spaces are ignored", "  1200   norwood  ", []string{"ord-gw-01"}},
 		{"a term matching nothing wins over one that matches", "s0100 ion9999", nil},
 	}
 	for _, tt := range tests {
@@ -97,16 +97,16 @@ func TestEveryTermHasToMatchSomeField(t *testing.T) {
 func TestOnlyNamesThatContainTheTermMatch(t *testing.T) {
 	var records []Record
 	for _, el := range []api.Element{
-		{ID: "e1", Name: "s1405-rtr-02", Model: "ion 2000"},
-		{ID: "e2", Name: "s0502-rtr-01", Model: "ion 1200"},
+		{ID: "e1", Name: "s1000-rtr-02", Model: "ion 2000"},
+		{ID: "e2", Name: "s0410-rtr-01", Model: "ion 1200"},
 		{ID: "e3", Name: "s502-rtr-01", Model: "ion 1200"},
 	} {
-		records = append(records, Of(el, "111", "Tractor Supply", nil))
+		records = append(records, Of(el, "111", "Trident Supply", nil))
 	}
 
 	for query, want := range map[string][]string{
 		"s502":  {"s502-rtr-01"},
-		"s0502": {"s0502-rtr-01"},
+		"s0410": {"s0410-rtr-01"},
 	} {
 		if got := matched(t, records, query); !same(got, want) {
 			t.Errorf("query %q matched %q, want %q", query, got, want)
@@ -133,16 +133,16 @@ func TestTwoCharacterTermsStayLiteral(t *testing.T) {
 
 func TestOpaqueIdentifiersNeedTheWholeValue(t *testing.T) {
 	r := Of(api.Element{
-		ID: "1695401228372008796", Name: "s1405-rtr-01",
-		SiteID: "1695401228372008796", Model: "ion 2000", HWID: "0123456789",
-	}, "1234567890", "Tractor Supply", nil)
+		ID: "1000000000000000001", Name: "s1000-rtr-01",
+		SiteID: "1000000000000000001", Model: "ion 2000", HWID: "0123456789",
+	}, "1234567890", "Trident Supply", nil)
 
-	for _, partial := range []string{"16954", "372008", "228372", "34567", "123456789"} {
+	for _, partial := range []string{"10000", "000000", "000001", "34567", "123456789"} {
 		if Parse(partial).Match(r) {
 			t.Errorf("query %q matched a partial identifier", partial)
 		}
 	}
-	for _, whole := range []string{"1695401228372008796", "1234567890", "0123456789"} {
+	for _, whole := range []string{"1000000000000000001", "1234567890", "0123456789"} {
 		if !Parse(whole).Match(r) {
 			t.Errorf("query %q did not match the identifier it names in full", whole)
 		}
@@ -150,25 +150,25 @@ func TestOpaqueIdentifiersNeedTheWholeValue(t *testing.T) {
 }
 
 func TestAnUnresolvedSiteIsTreatedAsOpaque(t *testing.T) {
-	el := api.Element{ID: "e1", Name: "s1405-rtr-01", SiteID: "1695401228372008796", Model: "ion 2000"}
+	el := api.Element{ID: "e1", Name: "s1000-rtr-01", SiteID: "1000000000000000001", Model: "ion 2000"}
 
-	unresolved := Of(el, "111", "Tractor Supply", SiteMap{})
+	unresolved := Of(el, "111", "Trident Supply", SiteMap{})
 	if unresolved.SiteKnown {
 		t.Error("an empty site map resolved a site")
 	}
-	if Parse("12283").Match(unresolved) {
+	if Parse("00000").Match(unresolved) {
 		t.Error("a term matched inside an unresolved site id")
 	}
 
-	resolved := Of(el, "111", "Tractor Supply", SiteMap{"111/1695401228372008796": "Store 1405"})
-	if !Parse("store 1405").Match(resolved) {
+	resolved := Of(el, "111", "Trident Supply", SiteMap{"111/1000000000000000001": "Store 1000"})
+	if !Parse("store 1000").Match(resolved) {
 		t.Error("a resolved site name is not searchable")
 	}
 }
 
 func TestASiteResolvedInAnotherTenantDoesNotCountHere(t *testing.T) {
 	sites := SiteMap{"111/s100": "Store 0100"}
-	r := Of(api.Element{ID: "e1", Name: "ord-gw-01", SiteID: "s100"}, "222", "Niagara Bottling", sites)
+	r := Of(api.Element{ID: "e1", Name: "ord-gw-01", SiteID: "s100"}, "222", "Norwood Bottling", sites)
 	if r.SiteKnown {
 		t.Fatalf("SiteKnown = true, want the other tenant's name ignored")
 	}
@@ -178,28 +178,28 @@ func TestASiteResolvedInAnotherTenantDoesNotCountHere(t *testing.T) {
 }
 
 func TestAnEmptySiteNameIsNotAResolvedOne(t *testing.T) {
-	r := Of(api.Element{ID: "e1", Name: "s1405-rtr-01", SiteID: "1695401228372008796"},
-		"111", "Tractor Supply", SiteMap{"111/1695401228372008796": ""})
+	r := Of(api.Element{ID: "e1", Name: "s1000-rtr-01", SiteID: "1000000000000000001"},
+		"111", "Trident Supply", SiteMap{"111/1000000000000000001": ""})
 	if r.SiteKnown {
 		t.Fatal("an empty name counted as resolved")
 	}
-	if Parse("12283").Match(r) {
+	if Parse("00000").Match(r) {
 		t.Error("a term matched inside a site id whose name was empty")
 	}
 }
 
 func TestTheStoreQueryThatHadToWork(t *testing.T) {
-	sites := SiteMap{"111/s50": "Store 5024"}
+	sites := SiteMap{"111/s70": "Store 7010"}
 	var records []Record
 	for _, el := range []api.Element{
-		{ID: "1695401228372008796", Name: "s5024-rtr-01", SiteID: "s50", Model: "ion 1200", Connected: true},
-		{ID: "1695401228372008797", Name: "s1405-rtr-01", SiteID: "x", Model: "ion 2000", Connected: true},
-		{ID: "1695401228372008798", Name: "s0502-rtr-01", SiteID: "x", Model: "ion 3200", Connected: true},
+		{ID: "1000000000000000001", Name: "s7010-rtr-01", SiteID: "s70", Model: "ion 1200", Connected: true},
+		{ID: "1000000000000000002", Name: "s1000-rtr-01", SiteID: "x", Model: "ion 2000", Connected: true},
+		{ID: "1000000000000000003", Name: "s0410-rtr-01", SiteID: "x", Model: "ion 3200", Connected: true},
 	} {
-		records = append(records, Of(el, "111", "Tractor Supply", sites))
+		records = append(records, Of(el, "111", "Trident Supply", sites))
 	}
-	if got := matched(t, records, "s50 ion 1200"); !same(got, []string{"s5024-rtr-01"}) {
-		t.Errorf("matched %q, want only s5024-rtr-01", got)
+	if got := matched(t, records, "s70 ion 1200"); !same(got, []string{"s7010-rtr-01"}) {
+		t.Errorf("matched %q, want only s7010-rtr-01", got)
 	}
 }
 
@@ -215,7 +215,7 @@ func TestSiteLabelNeverLeavesTheColumnBlank(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := Of(tt.el, "111", "Tractor Supply", SiteMap{"111/s100": "Store 0100"})
+			r := Of(tt.el, "111", "Trident Supply", SiteMap{"111/s100": "Store 0100"})
 			if got := r.SiteLabel(); got != tt.want {
 				t.Errorf("SiteLabel() = %q, want %q", got, tt.want)
 			}
@@ -224,7 +224,7 @@ func TestSiteLabelNeverLeavesTheColumnBlank(t *testing.T) {
 }
 
 func TestAnEmptyFieldIsNotAWildcard(t *testing.T) {
-	r := Of(api.Element{ID: "e1", Name: "s0100-rtr-01"}, "111", "Tractor Supply", nil)
+	r := Of(api.Element{ID: "e1", Name: "s0100-rtr-01"}, "111", "Trident Supply", nil)
 	if Parse("ion1200").Match(r) {
 		t.Error("an element with no model matched a model term")
 	}

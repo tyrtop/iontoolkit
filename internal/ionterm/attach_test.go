@@ -72,7 +72,7 @@ func openFake(t *testing.T, frames ...string) (*Session, *fakeConn) {
 	conn := newFakeConn(fs)
 	m := NewManager()
 	t.Cleanup(m.CloseAll)
-	s, err := m.Open(context.Background(), &fakeDialer{conn: conn}, "123", "S5032-RTR-01", 80, 24, Credentials{})
+	s, err := m.Open(context.Background(), &fakeDialer{conn: conn}, "123", "S7020-RTR-01", 80, 24, Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,11 +80,11 @@ func openFake(t *testing.T, frames ...string) (*Session, *fakeConn) {
 }
 
 func TestAttachShowsWhatTheDeviceSaidBeforeThenWhatItSaysNow(t *testing.T) {
-	s, conn := openFake(t, "uptime\r\n 12 days\r\nS5032-RTR-01# ")
-	eventually(t, "the prompt on the emulator", func() bool { return strings.Contains(s.Render(), "S5032-RTR-01#") })
+	s, conn := openFake(t, "uptime\r\n 12 days\r\nS7020-RTR-01# ")
+	eventually(t, "the prompt on the emulator", func() bool { return strings.Contains(s.Render(), "S7020-RTR-01#") })
 
 	in, out, done := attachTo(t, s, AttachOptions{Catch: func(k uv.Key) bool { return k.String() == "ctrl+]" }})
-	eventually(t, "the history on the terminal", func() bool { return strings.Contains(out.String(), "S5032-RTR-01#") })
+	eventually(t, "the history on the terminal", func() bool { return strings.Contains(out.String(), "S7020-RTR-01#") })
 
 	got := out.String()
 	if !strings.HasPrefix(got, "\x1b[H\x1b[2J\x1b[3J") {
@@ -110,7 +110,7 @@ func TestAttachShowsWhatTheDeviceSaidBeforeThenWhatItSaysNow(t *testing.T) {
 }
 
 func TestAttachSendsKeysAsTypedAndHandsBackTheOnesIontkKeeps(t *testing.T) {
-	s, conn := openFake(t, "S5032-RTR-01# ")
+	s, conn := openFake(t, "S7020-RTR-01# ")
 	eventually(t, "the prompt on the emulator", func() bool { return strings.Contains(s.Render(), "#") })
 
 	var atEnter []string
@@ -136,7 +136,7 @@ func TestAttachSendsKeysAsTypedAndHandsBackTheOnesIontkKeeps(t *testing.T) {
 }
 
 func TestAttachLetsGoWhenTheDeviceHangsUp(t *testing.T) {
-	s, conn := openFake(t, "S5032-RTR-01# ")
+	s, conn := openFake(t, "S7020-RTR-01# ")
 	eventually(t, "the prompt on the emulator", func() bool { return strings.Contains(s.Render(), "#") })
 
 	_, out, done := attachTo(t, s, AttachOptions{})
@@ -149,7 +149,7 @@ func TestAttachLetsGoWhenTheDeviceHangsUp(t *testing.T) {
 }
 
 func TestADetachedTerminalDoesNotHoldUpTheSession(t *testing.T) {
-	s, conn := openFake(t, "S5032-RTR-01# ")
+	s, conn := openFake(t, "S7020-RTR-01# ")
 	eventually(t, "the prompt on the emulator", func() bool { return strings.Contains(s.Render(), "#") })
 
 	in, out, done := attachTo(t, s, AttachOptions{Catch: func(k uv.Key) bool { return k.String() == "ctrl+]" }})

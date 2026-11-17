@@ -61,7 +61,7 @@ func TestBrowserTenantIsSavedWithoutAClientSecret(t *testing.T) {
 	m = mm.(tuiModel)
 
 	m.form[0].input.SetValue("Acme Co")
-	m.form[1].input.SetValue("1984021017")
+	m.form[1].input.SetValue("1900000017")
 
 	mm, _ = m.submitForm()
 	m = mm.(tuiModel)
@@ -79,7 +79,7 @@ func TestBrowserTenantIsSavedWithoutAClientSecret(t *testing.T) {
 	if saved.ClientID != "" {
 		t.Errorf("ClientID = %q, want empty for a browser tenant", saved.ClientID)
 	}
-	if v, err := m.store().Secrets.Get(config.ClientSecretKey("1984021017")); err == nil && v != "" {
+	if v, err := m.store().Secrets.Get(config.ClientSecretKey("1900000017")); err == nil && v != "" {
 		t.Errorf("a client secret was stored for a browser tenant: %q", v)
 	}
 }
@@ -223,14 +223,14 @@ func TestDismissingTheConfirmation(t *testing.T) {
 }
 
 func TestSignedInConfirmationReportsWhatWasVerified(t *testing.T) {
-	m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1984021017", Auth: config.AuthBrowser})
+	m := signInModel(t, config.Tenant{Name: "Acme Co", TSGID: "1900000017", Auth: config.AuthBrowser})
 	m.phase = phaseSignedIn
 	m.spinner = ui.NewSpinner("")
 	m.width, m.height = 100, 30
 	m.runtime().SetIdentity(saseauth.Identity{
 		Name:           "Ben Hall",
 		Email:          "ben@example.test",
-		TSG:            "1984021017",
+		TSG:            "1900000017",
 		SessionExpires: time.Now().Add(8 * time.Hour),
 	})
 	m.runtime().SignedIn(m.rt.Identity(), api.Profile{Region: "hood", Roles: []string{"tenant_super"}}, 899*time.Second)
@@ -240,7 +240,7 @@ func TestSignedInConfirmationReportsWhatWasVerified(t *testing.T) {
 	for _, want := range []string{
 		"signed in to Acme Co",
 		"Ben Hall <ben@example.test>",
-		"1984021017",
+		"1900000017",
 		"hood",
 		"tenant_super",
 		"no browser needed for 7h59m",

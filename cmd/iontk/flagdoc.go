@@ -46,8 +46,8 @@ var flagGroups = []struct {
 	{"Targets", "Which elements `iontk batch run` and `iontk write` act on; give one of them, and only one. `--search` runs the TUI's filter over the working set of tenants, cut down by `--tenant` or `--tsg`.", []string{
 		"element", "elements-path", "search", "refresh", "no-validate", "yes", "no-login",
 	}},
-	{"Commands", "What `iontk batch run` runs on each element, and whether it may run commands that are not read-only.", []string{
-		"cmd", "allow-writes",
+	{"Commands", "What `iontk batch run` runs on each element. A command that is not read-only is only listed unless `--doit` is given.", []string{
+		"cmd",
 	}},
 	{"Credentials", "`--tenant` gets a saved tenant's credentials from the keyring; with no `--tenant`, the environment comes out ahead of the last tenant used. See [Environment](#environment).", []string{
 		"tenant", "tsg",

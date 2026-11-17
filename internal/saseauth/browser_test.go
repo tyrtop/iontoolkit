@@ -90,7 +90,7 @@ func TestLoginCapturesCodeFromRedirect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	tok, err := login(ctx, "1984021017", opt, true)
+	tok, err := login(ctx, "1900000017", opt, true)
 	if err != nil {
 		t.Fatalf("login() error = %v", err)
 	}
@@ -190,7 +190,7 @@ func TestSignInSurvivesRestart(t *testing.T) {
 	var saved string
 	profile := t.TempDir()
 
-	first := NewSource("1984021017", "", Options{
+	first := NewSource("1900000017", "", Options{
 		Chrome:    chrome,
 		NoSandbox: true,
 		DataDir:   profile,
@@ -219,7 +219,7 @@ func TestSignInSurvivesRestart(t *testing.T) {
 	}))
 	defer noBrowser.Close()
 
-	second := NewSource("1984021017", saved, Options{
+	second := NewSource("1900000017", saved, Options{
 		DataDir: profile,
 		Host:    noBrowser.URL,
 		Client:  noBrowser.Client(),
@@ -290,7 +290,7 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 		t.Fatalf("Discover() found %d tenants, want 4", len(d.Tenants))
 	}
 
-	for _, tsg := range []string{"1984021017", "1538107912"} {
+	for _, tsg := range []string{"1900000017", "1500000012"} {
 		src := NewSource(tsg, "", opt, nil)
 		tok, _, err := src.Token(ctx)
 		if err != nil {
@@ -317,10 +317,10 @@ func TestDiscoverThenSwitchTenantsSilently(t *testing.T) {
 	if !strings.Contains(scopes[0], "tsg_id:none") {
 		t.Errorf("discovery scope = %q, want it tenant-less", scopes[0])
 	}
-	if !strings.Contains(scopes[1], "tsg_id:1984021017") {
+	if !strings.Contains(scopes[1], "tsg_id:1900000017") {
 		t.Errorf("second scope = %q, want the chosen tenant", scopes[1])
 	}
-	if !strings.Contains(scopes[2], "tsg_id:1538107912") {
+	if !strings.Contains(scopes[2], "tsg_id:1500000012") {
 		t.Errorf("third scope = %q, want the other tenant", scopes[2])
 	}
 }
@@ -346,7 +346,7 @@ func TestARefusedSilentLegIsNotLaunchedAgain(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	if _, err := LoginSilent(ctx, "1984021017", opt); err == nil {
+	if _, err := LoginSilent(ctx, "1900000017", opt); err == nil {
 		t.Fatal("LoginSilent() succeeded with a browser that cannot start")
 	}
 	first := launches()
@@ -354,7 +354,7 @@ func TestARefusedSilentLegIsNotLaunchedAgain(t *testing.T) {
 		t.Fatalf("the browser was never launched, so this test proves nothing")
 	}
 
-	_, err := LoginSilent(ctx, "1984021017", opt)
+	_, err := LoginSilent(ctx, "1900000017", opt)
 	if !errors.Is(err, ErrNoSession) {
 		t.Errorf("second LoginSilent() error = %v, want it to wrap ErrNoSession", err)
 	}
@@ -363,7 +363,7 @@ func TestARefusedSilentLegIsNotLaunchedAgain(t *testing.T) {
 			"prompt=none does not start answering differently on its own", got, first)
 	}
 
-	if _, err := LoginSilent(ctx, "1538107912", opt); err == nil {
+	if _, err := LoginSilent(ctx, "1500000012", opt); err == nil {
 		t.Fatal("LoginSilent() succeeded for the other tenant")
 	}
 	if got := launches(); got <= first {

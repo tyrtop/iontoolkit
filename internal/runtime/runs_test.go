@@ -26,10 +26,10 @@ func savedRuns(t *testing.T, rt *Runtime, args map[string]string) (string, []str
 func TestRunsSaveKeepsTheRunsInTheOrderTheyWereGiven(t *testing.T) {
 	rt, st := withConfig(t)
 	rt.BeginRuns(2)
-	rt.EndRun(1, Run{Workflow: "ion-bw-test", Tenant: "Acme Co", Inputs: map[string]string{"router": "S5037-RTR-02"},
+	rt.EndRun(1, Run{Workflow: "ion-bw-test", Tenant: "Acme Co", Inputs: map[string]string{"router": "S7030-RTR-02"},
 		Data: map[string]any{"mbps": 192.69}})
-	rt.EndRun(0, Run{Workflow: "ion-bw-test", Tenant: "Acme Co", Inputs: map[string]string{"router": "S5037-RTR-01"},
-		Error: "no router called S5037-RTR-01 in this tenant"})
+	rt.EndRun(0, Run{Workflow: "ion-bw-test", Tenant: "Acme Co", Inputs: map[string]string{"router": "S7030-RTR-01"},
+		Error: "no router called S7030-RTR-01 in this tenant"})
 
 	text, said := savedRuns(t, rt, nil)
 	var runs []Run
@@ -37,7 +37,7 @@ func TestRunsSaveKeepsTheRunsInTheOrderTheyWereGiven(t *testing.T) {
 		t.Fatalf("the export does not read back as JSON: %v\n%s", err, text)
 	}
 	data, _ := runs[len(runs)-1].Data.(map[string]any)
-	if len(runs) != 2 || runs[0].Inputs["router"] != "S5037-RTR-01" || runs[0].Error == "" || data["mbps"] != 192.69 {
+	if len(runs) != 2 || runs[0].Inputs["router"] != "S7030-RTR-01" || runs[0].Error == "" || data["mbps"] != 192.69 {
 		t.Errorf("runs read back as %+v, want RTR-01's failure first and RTR-02's numbers second", runs)
 	}
 	if len(said) != 1 || !strings.Contains(said[0], "saved 2 runs to "+st.ExportsDir()) || !strings.HasSuffix(said[0], ".json") {
@@ -47,7 +47,7 @@ func TestRunsSaveKeepsTheRunsInTheOrderTheyWereGiven(t *testing.T) {
 	lines, _ := savedRuns(t, rt, map[string]string{"format": "jsonl", "to": filepath.Join(t.TempDir(), "runs.jsonl")})
 	rows := strings.Split(strings.TrimSpace(lines), "\n")
 	var first Run
-	if len(rows) != 2 || json.Unmarshal([]byte(rows[0]), &first) != nil || first.Inputs["router"] != "S5037-RTR-01" {
+	if len(rows) != 2 || json.Unmarshal([]byte(rows[0]), &first) != nil || first.Inputs["router"] != "S7030-RTR-01" {
 		t.Errorf("jsonl came out as %q, want one run per line, RTR-01 first", lines)
 	}
 }
@@ -79,13 +79,13 @@ func TestRunsSaveSaysWhyItCannotSave(t *testing.T) {
 
 func TestASessionScreenComesBackWithoutItsPadding(t *testing.T) {
 	pad := strings.Repeat(" ", 160)
-	screen := "028201-004589-4901 login: cis-superuser" + pad + "\n" +
-		"\x1b[31mS5037-RTR-01#\x1b[m debug bw-test src-interface 3" + pad + "\n" +
+	screen := "000001-000001-0001 login: ion-superuser" + pad + "\n" +
+		"\x1b[31mS7030-RTR-01#\x1b[m debug bw-test src-interface 3" + pad + "\n" +
 		pad + "\n" +
 		" Final Uplink capacity estimate: 191.15" + pad + "\n" +
 		pad + "\n" + pad
-	want := "028201-004589-4901 login: cis-superuser\n" +
-		"\x1b[31mS5037-RTR-01#\x1b[m debug bw-test src-interface 3\n" +
+	want := "000001-000001-0001 login: ion-superuser\n" +
+		"\x1b[31mS7030-RTR-01#\x1b[m debug bw-test src-interface 3\n" +
 		"\n" +
 		" Final Uplink capacity estimate: 191.15"
 	if got := screenText(screen); got != want {

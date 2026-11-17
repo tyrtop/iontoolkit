@@ -489,7 +489,7 @@ func ReadRuns(path string) ([]map[string]string, error) {
 	if strings.EqualFold(filepath.Ext(path), ".csv") {
 		return csvRuns(path, b)
 	}
-	// yaml.v3 decodes 0272 as the number 272
+	// yaml.v3 decodes 0270 as the number 270
 	var doc yaml.Node
 	if err := yaml.Unmarshal(b, &doc); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)

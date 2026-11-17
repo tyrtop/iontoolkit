@@ -47,16 +47,16 @@ func lineOf(lines []string, want string) int {
 
 func TestTheBannerStaysAboveTheElementsThatFinished(t *testing.T) {
 	m := batchAfter(t, 3, 80, 24, []sase.Event{
-		done(0, "S0224-RTR-01", ""),
-		done(1, "S0272-RTR-01", ""),
+		done(0, "S0220-RTR-01", ""),
+		done(1, "S0270-RTR-01", ""),
 	})
 
 	lines := frameLines(m)
 	top := strings.Split(ui.Plain(ui.Banner(80, 24)), "\n")[0]
 	banner := lineOf(lines, top)
 	bar := lineOf(lines, "2/3")
-	first := lineOf(lines, "S0224-RTR-01")
-	second := lineOf(lines, "S0272-RTR-01")
+	first := lineOf(lines, "S0220-RTR-01")
+	second := lineOf(lines, "S0270-RTR-01")
 
 	if banner < 0 || bar < 0 || first < 0 || second < 0 {
 		t.Fatalf("frame is missing a row: banner=%d bar=%d first=%d second=%d\n%s",
@@ -70,7 +70,7 @@ func TestTheBannerStaysAboveTheElementsThatFinished(t *testing.T) {
 	}
 	if first > second {
 		t.Errorf("rows arrive out of order: %q on %d, %q on %d",
-			"S0224-RTR-01", first, "S0272-RTR-01", second)
+			"S0220-RTR-01", first, "S0270-RTR-01", second)
 	}
 	if !m.View().AltScreen {
 		t.Error("the frame must hold the altscreen, or the banner scrolls away")
@@ -100,7 +100,7 @@ func TestTheScrollKeepsTheNewestWhenItOverflows(t *testing.T) {
 	m := batchAfter(t, total, 80, 24, evs)
 
 	lines := frameLines(m)
-	if lineOf(lines, "S0199-RTR-01") < 0 {
+	if lineOf(lines, "S0190-RTR-01") < 0 {
 		t.Errorf("the element that just finished is not on the frame:\n%s", m.View().Content)
 	}
 	if at := lineOf(lines, "S0000-RTR-01"); at >= 0 {
@@ -110,11 +110,11 @@ func TestTheScrollKeepsTheNewestWhenItOverflows(t *testing.T) {
 
 func TestAFailedElementIsOnTheScrollAndInTheSummary(t *testing.T) {
 	m := batchAfter(t, 2, 80, 24, []sase.Event{
-		done(0, "S0224-RTR-01", "element 1: dial failed"),
-		done(1, "S0272-RTR-01", ""),
+		done(0, "S0220-RTR-01", "element 1: dial failed"),
+		done(1, "S0270-RTR-01", ""),
 	})
 
-	if at := lineOf(frameLines(m), "S0224-RTR-01"); at < 0 {
+	if at := lineOf(frameLines(m), "S0220-RTR-01"); at < 0 {
 		t.Errorf("the element that failed is not on the frame:\n%s", m.View().Content)
 	}
 	summary := ui.Plain(strings.Join(m.summaryLines(), "\n"))

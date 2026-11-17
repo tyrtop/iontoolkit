@@ -205,11 +205,15 @@ func (s *Set) SDWAN(name string) (Endpoint, error) {
 }
 
 func (s *Set) Get(name string) (Endpoint, error) {
-	e, ok := s.byName[name]
-	if !ok {
-		return Endpoint{}, fmt.Errorf("%s has no endpoint %s", s.Name, name)
+	if e, ok := s.byName[name]; ok {
+		return e, nil
 	}
-	return e, nil
+	if m := Master(); m != s {
+		if e, ok := m.byName[name]; ok {
+			return e, nil
+		}
+	}
+	return Endpoint{}, fmt.Errorf("%s has no endpoint %s", s.Name, name)
 }
 
 func (s *Set) Host() string {

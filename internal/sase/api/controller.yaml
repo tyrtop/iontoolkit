@@ -4,5 +4,3 @@ endpoints:
     method: POST
     host: https://auth.apps.paloaltonetworks.com
     path: /oauth2/access_token
-  - name: profile
-    path: /sdwan/v2.1/api/profile

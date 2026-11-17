@@ -353,7 +353,7 @@ func batchCommands() []Command {
 			return err
 		},
 	}, {
-		Name: "batch.run", Slow: true,
+		Name: "batch.run", Slow: true, Writes: true,
 		Help: "run device CLI commands on elements: cmd=\"dump device status, show ip\" elements=ID,ID (default: the selection)",
 		Args: []Arg{
 			{Name: "cmd", Required: true, Help: "commands, comma separated"},
@@ -361,21 +361,38 @@ func batchCommands() []Command {
 		},
 		Run: func(rt *Runtime, c *Call) error {
 			cmds := SplitCommands(c.Arg("cmd"))
-			if err := rt.CheckCommands(cmds); err != nil {
-				return err
-			}
 			rows := rt.ElementsArg(c, "elements")
 			if len(rows) == 0 {
 				return fmt.Errorf("batch.run: no elements")
+			}
+			if rt.CheckCommands(cmds) != nil && !c.DoIt {
+				for _, line := range PlanBatch(cmds, rows) {
+					c.Say("%s", line)
+				}
+				return nil
 			}
 			return rt.runBatch(c, cmds, rows)
 		},
 	}}
 }
 
+func PlanBatch(cmds []string, rows []Element) []string {
+	out := make([]string, 0, len(rows)+1)
+	for _, r := range rows {
+		out = append(out, fmt.Sprintf("plan %s on %s", strings.Join(cmds, ", "), r.Label()))
+	}
+	return append(out, fmt.Sprintf("dry run: %d element(s), none sent — add --doit to send", len(rows)))
+}
+
 func (rt *Runtime) StartBatch(ctx context.Context, cmds []string, rows []Element) (<-chan sase.Event, error) {
-	if err := rt.CheckCommands(cmds); err != nil {
-		return nil, err
+	return rt.StartBatchWith(ctx, cmds, rows, false)
+}
+
+func (rt *Runtime) StartBatchWith(ctx context.Context, cmds []string, rows []Element, doit bool) (<-chan sase.Event, error) {
+	if !doit {
+		if err := rt.CheckCommands(cmds); err != nil {
+			return nil, err
+		}
 	}
 	ctx, stop := context.WithCancel(ctx)
 	clients := map[string]*api.Client{}
@@ -460,14 +477,18 @@ func (rt *Runtime) RunBatch(ctx context.Context, opts sase.Options, targets []sa
 func (rt *Runtime) runBatch(c *Call, cmds []string, rows []Element) error {
 	done := rt.beginWait(Wait{What: fmt.Sprintf("%s on %d element(s)", strings.Join(cmds, ", "), len(rows)), Since: time.Now()})
 	defer done()
-	events, err := rt.StartBatch(c.Ctx, cmds, rows)
+	events, err := rt.StartBatchWith(c.Ctx, cmds, rows, c.DoIt)
 	if err != nil {
 		return err
 	}
-	return rt.sayBatch(c, events)
+	return rt.sayBatch(c, rows, events)
 }
 
-func (rt *Runtime) sayBatch(c *Call, events <-chan sase.Event) error {
+func (rt *Runtime) sayBatch(c *Call, rows []Element, events <-chan sase.Event) error {
+	b := Batch{IDs: make([]string, len(rows)), Results: make([]sase.Result, len(rows)), Elapsed: make([]time.Duration, len(rows))}
+	for i, r := range rows {
+		b.IDs[i] = r.ID
+	}
 	for ev := range events {
 		if !ev.Done {
 			continue
@@ -476,11 +497,15 @@ func (rt *Runtime) sayBatch(c *Call, events <-chan sase.Event) error {
 			c.Say("== %s · %s", ev.Element, out.Command)
 			c.Say("%s", strings.TrimRight(out.Output, "\n"))
 		}
+		if ev.Index < len(b.Results) {
+			b.Results[ev.Index], b.Elapsed[ev.Index] = ev.Result, ev.Elapsed
+		}
+		b.Finished++
 		if ev.Result.Error != "" {
+			b.Failed++
 			c.Say("%s: %s", ev.Element, ev.Result.Error)
 		}
 	}
-	b := rt.Batch()
 	c.Result = b
 	c.Say("%d of %d elements done, %d failed", b.Finished, b.Total(), b.Failed)
 	if b.Failed > 0 && b.Failed == b.Total() {

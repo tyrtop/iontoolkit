@@ -21,12 +21,12 @@ func filterModel(t *testing.T) tuiModel {
 		"111/s200": "Store 0200",
 		"222/s9":   "ORD Plant",
 	})
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{
 		{ID: "e1", Name: "s0100-rtr-01", SiteID: "s100", Model: "ion1200", Software: "6.5.1", HWID: "HW-AAA", Connected: true},
 		{ID: "e2", Name: "s0100-rtr-02", SiteID: "s100", Model: "ion3200", Software: "6.5.1", HWID: "HW-BBB"},
 		{ID: "e3", Name: "s0200-rtr-01", SiteID: "s200", Model: "ion1200", Software: "6.4.3", HWID: "HW-CCC", Connected: true},
 	})
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{
 		{ID: "e4", Name: "ord-gw-01", SiteID: "s9", Model: "ion1200", Software: "6.5.1", HWID: "HW-DDD", Connected: true},
 	})
 	return m
@@ -48,23 +48,23 @@ func TestFilterCombinesTermsAcrossFields(t *testing.T) {
 	}{
 		{
 			name:  "site, model and tenant together",
-			query: "100 1200 tract",
+			query: "100 1200 trid",
 			want:  []string{"s0100-rtr-01"},
 		},
 		{"nothing typed matches everything", "", []string{"ord-gw-01", "s0100-rtr-01", "s0100-rtr-02", "s0200-rtr-01"}},
 		{"one term still works", "1200", []string{"ord-gw-01", "s0100-rtr-01", "s0200-rtr-01"}},
-		{"tenant name alone", "niagara", []string{"ord-gw-01"}},
-		{"model and tenant", "1200 niagara", []string{"ord-gw-01"}},
+		{"tenant name alone", "norwood", []string{"ord-gw-01"}},
+		{"model and tenant", "1200 norwood", []string{"ord-gw-01"}},
 		{"site name words", "store 0200", []string{"s0200-rtr-01"}},
 		{"software version", "6.4.3", []string{"s0200-rtr-01"}},
 		{"hardware id", "hw-ccc", []string{"s0200-rtr-01"}},
 		{"connection state", "offline", []string{"s0100-rtr-02"}},
 		{"state and model", "connected ion3200", nil},
 		{"element id", "e4", []string{"ord-gw-01"}},
-		{"terms in any order", "tract 1200 100", []string{"s0100-rtr-01"}},
+		{"terms in any order", "trid 1200 100", []string{"s0100-rtr-01"}},
 		{"a term matching nothing excludes everything", "1200 nosuchtenant", nil},
-		{"case is ignored", "TRACT ION1200", []string{"s0100-rtr-01", "s0200-rtr-01"}},
-		{"extra spaces are ignored", "  1200   niagara  ", []string{"ord-gw-01"}},
+		{"case is ignored", "TRID ION1200", []string{"s0100-rtr-01", "s0200-rtr-01"}},
+		{"extra spaces are ignored", "  1200   norwood  ", []string{"ord-gw-01"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -110,7 +110,7 @@ func TestCountLabelShowsTheNarrowing(t *testing.T) {
 		t.Errorf("countLabel() = %q, want a plain total with no filter running", got)
 	}
 
-	m.filter.SetValue("1200 tract")
+	m.filter.SetValue("1200 trid")
 	m.applyFilter()
 	if got := m.countLabel(); !strings.Contains(got, "2 of 4 elements") {
 		t.Errorf("countLabel() = %q, want the match count against the total", got)
@@ -122,7 +122,7 @@ func TestFilterKeepsTheCursorInRange(t *testing.T) {
 	m.applyFilter()
 	m.moveCursorTo(3)
 
-	m.filter.SetValue("niagara")
+	m.filter.SetValue("norwood")
 	m.applyFilter()
 	if len(m.matched()) != 1 {
 		t.Fatalf("matched %d, want 1", len(m.matched()))
@@ -134,11 +134,11 @@ func TestFilterKeepsTheCursorInRange(t *testing.T) {
 
 func TestFilterWithNoTenantColumnStillSearchesTenant(t *testing.T) {
 	m := multiModel(t)
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "e1", Name: "s0100-rtr-01"}})
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{{ID: "e1", Name: "s0100-rtr-01"}})
 	if tenantCountOf(m) > 1 {
 		t.Fatal("one tenant should not show the column")
 	}
-	m.filter.SetValue("tractor")
+	m.filter.SetValue("trident")
 	m.applyFilter()
 	if len(m.matched()) != 1 {
 		t.Errorf("matched %d, want the tenant name to still apply", len(m.matched()))
@@ -171,11 +171,11 @@ var _ = config.AuthBrowser
 func rankModel(t *testing.T) tuiModel {
 	t.Helper()
 	m := multiModel(t)
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
-		{ID: "e1", Name: "s5024-rtr-01", Model: "ion1200", Connected: true},
-		{ID: "e2", Name: "s0500-rtr-01", Model: "ion1200", Connected: true},
-		{ID: "e3", Name: "s0502-rtr-01", Model: "ion1200", Connected: true},
-		{ID: "e4", Name: "s5024-rtr-02", Model: "ion1200", Connected: true},
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{
+		{ID: "e1", Name: "s7010-rtr-01", Model: "ion1200", Connected: true},
+		{ID: "e2", Name: "s0400-rtr-01", Model: "ion1200", Connected: true},
+		{ID: "e3", Name: "s0410-rtr-01", Model: "ion1200", Connected: true},
+		{ID: "e4", Name: "s7010-rtr-02", Model: "ion1200", Connected: true},
 	})
 	return m
 }
@@ -202,14 +202,14 @@ func TestGeneralSectionRowsAreAllReachable(t *testing.T) {
 
 func TestResultsStayInNameOrder(t *testing.T) {
 	m := multiModel(t)
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
-		{ID: "e1", Name: "s5024-rtr-02", Model: "ion 1200"},
-		{ID: "e2", Name: "s5024-rtr-01", Model: "ion 1200"},
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{
+		{ID: "e1", Name: "s7010-rtr-02", Model: "ion 1200"},
+		{ID: "e2", Name: "s7010-rtr-01", Model: "ion 1200"},
 	})
-	m.filter.SetValue("s5024")
+	m.filter.SetValue("s7010")
 	m.applyFilter()
 	got := matchedNames(m)
-	if len(got) != 2 || got[0] != "s5024-rtr-01" {
+	if len(got) != 2 || got[0] != "s7010-rtr-01" {
 		t.Errorf("matched %v, want them in name order", got)
 	}
 }
@@ -223,9 +223,9 @@ func searchEnterModel(t *testing.T) tuiModel {
 	if err := m.store().Secrets.Set(config.IONPassKey("111", "ops"), "pw"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
-		{ID: "e1", Name: "s5024-rtr-01", Model: "ion 1200", Connected: true},
-		{ID: "e2", Name: "s5024-rtr-02", Model: "ion 1200", Connected: true},
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{
+		{ID: "e1", Name: "s7010-rtr-01", Model: "ion 1200", Connected: true},
+		{ID: "e2", Name: "s7010-rtr-02", Model: "ion 1200", Connected: true},
 		{ID: "e3", Name: "s0100-rtr-01", Model: "ion 1200", Connected: true},
 	})
 	setTestClient(&m, liveClient())
@@ -255,7 +255,7 @@ func TestOneMatchInShellModeGoesStraightIn(t *testing.T) {
 	if got.phase != phaseSession {
 		t.Fatalf("phase = %v, want the session opened", got.phase)
 	}
-	if dialingName(got) != "s5024-rtr-02" {
+	if dialingName(got) != "s7010-rtr-02" {
 		t.Errorf("connecting = %q, want the single match", dialingName(got))
 	}
 	if cmd == nil {
@@ -293,7 +293,7 @@ func TestSeveralMatchesJustApplyTheFilter(t *testing.T) {
 			m := searchEnterModel(t)
 			m.setMode(mode)
 			m.filterOn = true
-			m.filter.SetValue("s5024")
+			m.filter.SetValue("s7010")
 			m.applyFilter()
 			if len(m.matched()) != 2 {
 				t.Fatalf("query matched %d, want 2 so the choice is ambiguous", len(m.matched()))
@@ -311,7 +311,7 @@ func TestSeveralMatchesJustApplyTheFilter(t *testing.T) {
 			if got.selectedCount() != 0 {
 				t.Errorf("selected = %v, want nothing chosen for an ambiguous query", got.runtime().Selection())
 			}
-			if got.filter.Value() != "s5024" {
+			if got.filter.Value() != "s7010" {
 				t.Errorf("filter = %q, want the query kept", got.filter.Value())
 			}
 		})
@@ -372,7 +372,7 @@ func TestASingleMatchBeatsAnEarlierSelection(t *testing.T) {
 
 	mm, _ := m.onPickKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), "enter")
 	got := mm.(tuiModel)
-	if dialingName(got) != "s5024-rtr-02" {
+	if dialingName(got) != "s7010-rtr-02" {
 		t.Errorf("connecting = %q, want the searched-for ION, not the earlier selection", dialingName(got))
 	}
 }
@@ -401,7 +401,7 @@ func TestFilterHintSaysWhatEnterWillDo(t *testing.T) {
 		query string
 		want  string
 	}{
-		{"ambiguous", modeShell, "s5024", "enter apply"},
+		{"ambiguous", modeShell, "s7010", "enter apply"},
 		{"single match in shell", modeShell, "rtr-02", "enter open"},
 		{"single match in batch", modeBatch, "rtr-02", "enter select"},
 	}
@@ -506,7 +506,7 @@ func TestSelectedOnlyStillHonoursTheQuery(t *testing.T) {
 	m.runtime().Select("111/e1")
 	m.runtime().Select("111/e3")
 	m.runtime().SetShowSelected(true)
-	m.filter.SetValue("s5024")
+	m.filter.SetValue("s7010")
 	m.applyFilter()
 
 	if len(m.matched()) != 1 {
@@ -538,22 +538,22 @@ func TestJAndKMoveTheList(t *testing.T) {
 
 func TestScopeIsComputedOnceNotPerRender(t *testing.T) {
 	m := multiModel(t)
-	if got := m.scopeLabel(); got != "Tractor Supply" {
+	if got := m.scopeLabel(); got != "Trident Supply" {
 		t.Errorf("scopeLabel() = %q with nothing loaded, want the current tenant", got)
 	}
 
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{{ID: "a"}})
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{{ID: "a"}})
 	if tenantCountOf(m) != 1 {
 		t.Errorf("tenantCount = %d, want 1", tenantCountOf(m))
 	}
-	if got := m.scopeLabel(); got != "Tractor Supply" {
+	if got := m.scopeLabel(); got != "Trident Supply" {
 		t.Errorf("scopeLabel() = %q, want the single tenant", got)
 	}
 	if tenantCountOf(m) > 1 {
 		t.Error("the tenant column showed for one tenant")
 	}
 
-	mergeForTest(&m, "222", "Niagara Bottling", []api.Element{{ID: "c"}})
+	mergeForTest(&m, "222", "Norwood Bottling", []api.Element{{ID: "c"}})
 	if tenantCountOf(m) != 2 {
 		t.Errorf("tenantCount = %d, want 2", tenantCountOf(m))
 	}
@@ -564,7 +564,7 @@ func TestScopeIsComputedOnceNotPerRender(t *testing.T) {
 		t.Error("the tenant column did not show for two tenants")
 	}
 
-	mergeForTest(&m, "222", "Niagara Bottling", nil)
+	mergeForTest(&m, "222", "Norwood Bottling", nil)
 	if tenantCountOf(m) != 1 {
 		t.Errorf("tenantCount = %d, want 1 after the second tenant emptied", tenantCountOf(m))
 	}
@@ -919,9 +919,9 @@ func TestAltHAndAltLSwitchTabs(t *testing.T) {
 
 func TestTheSerialIsOnTheRowAndSearchable(t *testing.T) {
 	m := multiModel(t)
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
-		{ID: "e1", Name: "s5024-rtr-01", Model: "ion1200", Serial: "ION1200ABC123", Connected: true},
-		{ID: "e2", Name: "s0500-rtr-01", Model: "ion1200", Serial: "ION1200XYZ789"},
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{
+		{ID: "e1", Name: "s7010-rtr-01", Model: "ion1200", Serial: "ION1200ABC123", Connected: true},
+		{ID: "e2", Name: "s0400-rtr-01", Model: "ion1200", Serial: "ION1200XYZ789"},
 	})
 	m.phase = phasePicking
 	m.width, m.height = 160, 30
@@ -942,23 +942,23 @@ func TestTheSerialIsOnTheRowAndSearchable(t *testing.T) {
 	if len(m.matched()) != 1 {
 		t.Fatalf("%d matches for a serial, want the one element", len(m.matched()))
 	}
-	if got := m.rows()[m.matched()[0]].Name; got != "s0500-rtr-01" {
+	if got := m.rows()[m.matched()[0]].Name; got != "s0400-rtr-01" {
 		t.Errorf("matched %s, want the element with that serial", got)
 	}
 }
 
 func TestConnectedRowsAreGreenAndOfflineKeepsRed(t *testing.T) {
 	m := multiModel(t)
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
-		{ID: "e2", Name: "s0500-rtr-01", Model: "ion1200"},
-		{ID: "e1", Name: "s5024-rtr-01", Model: "ion1200", Connected: true},
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{
+		{ID: "e2", Name: "s0400-rtr-01", Model: "ion1200"},
+		{ID: "e1", Name: "s7010-rtr-01", Model: "ion1200", Connected: true},
 	})
 	m.phase = phasePicking
 	m.width, m.height = 140, 30
 	m.rebuildRows()
 
 	out := m.viewPicking()
-	if !strings.Contains(out, ui.StyleOK.Render("  s5024-rtr-01")) {
+	if !strings.Contains(out, ui.StyleOK.Render("  s7010-rtr-01")) {
 		t.Errorf("a connected element is not green across the line:\n%q", out)
 	}
 	if !strings.Contains(out, ui.StyleOK.Render("connected")) {
@@ -973,7 +973,7 @@ func TestConnectedRowsAreGreenAndOfflineKeepsRed(t *testing.T) {
 	if !strings.Contains(out, ui.StyleErr.Render("offline")) {
 		t.Errorf("offline is not red once the cursor is elsewhere:\n%q", out)
 	}
-	if strings.Contains(out, ui.StyleOK.Render("s5024-rtr-01")) {
+	if strings.Contains(out, ui.StyleOK.Render("s7010-rtr-01")) {
 		t.Error("the row under the cursor is still green, which breaks the highlight")
 	}
 	if strings.Contains(out, ui.StyleErr.Render("connected")) {
@@ -1027,12 +1027,12 @@ func TestColumnsAreSizedToTheirContent(t *testing.T) {
 
 func TestRenderTheElementListWithSerials(t *testing.T) {
 	m := multiModel(t)
-	mergeForTest(&m, "111", "Tractor Supply", []api.Element{
-		{ID: "e1", Name: "s5024-rtr-01", Model: "ion 1200", Serial: "ION1200ABC123", Connected: true,
+	mergeForTest(&m, "111", "Trident Supply", []api.Element{
+		{ID: "e1", Name: "s7010-rtr-01", Model: "ion 1200", Serial: "ION1200ABC123", Connected: true,
 			SpokeHA: &api.SpokeHA{ClusterID: "c1"}, SiteID: "s1"},
-		{ID: "e2", Name: "s5024-rtr-02", Model: "ion 1200", Serial: "ION1200DEF456", Connected: true,
+		{ID: "e2", Name: "s7010-rtr-02", Model: "ion 1200", Serial: "ION1200DEF456", Connected: true,
 			SpokeHA: &api.SpokeHA{ClusterID: "c1"}, SiteID: "s1"},
-		{ID: "e3", Name: "s0500-rtr-01", Model: "ion 3200", Serial: "ION3200XYZ789"},
+		{ID: "e3", Name: "s0400-rtr-01", Model: "ion 3200", Serial: "ION3200XYZ789"},
 	})
 	m.phase = phasePicking
 	m.width, m.height = 170, 24
