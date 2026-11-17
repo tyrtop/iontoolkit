@@ -93,7 +93,7 @@ You can search from your terminal.
     iontk fleet search "ion 1200 offline"
     iontk fleet search "store 0003" --format json
 
-![search](https://media.tyrtop.com/iontk/cli-search-v2.gif)
+![search](https://media.tyrtop.com/iontk/cli-search-v3.gif)
 
 ### Shells
 
@@ -124,7 +124,7 @@ Run batch commands from your terminal:
 
     iontk batch run --search "acme store 0003" -c "dump spoke-ha status"
 
-![cli batch](https://media.tyrtop.com/iontk/cli-batch-v1.gif)
+![cli batch](https://media.tyrtop.com/iontk/cli-batch-v2.gif)
 
 You get JSON back by default. Change it with `--format`. Use `json`, `jsonl`, `text`,
 `table` or `csv`.
@@ -133,7 +133,7 @@ You can pipe commands together.
 
     iontk fleet search "dc east" --format ids --no-progress | iontk batch run -f - -c "dump software status" --format text --no-progress
 
-![pipe](https://media.tyrtop.com/iontk/cli-pipe-v2.gif)
+![pipe](https://media.tyrtop.com/iontk/cli-pipe-v3.gif)
 
 ## Automation
 
@@ -207,7 +207,7 @@ Run it.
 
     iontk workflow examples/workflows/site-report --site "Store 0003" --tenant "Acme Co"
 
-![workflow](https://media.tyrtop.com/iontk/cli-workflow-v2.gif)
+![workflow](https://media.tyrtop.com/iontk/cli-workflow-v3.gif)
 
 You can run a workflow once per CSV row.
 
@@ -233,7 +233,7 @@ That one prints what it would run and stops.
 
 That one prints the old and new values and stops. 
 
-![safety](https://media.tyrtop.com/iontk/cli-safety-v3.gif)
+![safety](https://media.tyrtop.com/iontk/cli-safety-v4.gif)
 
 ## Customization
 
